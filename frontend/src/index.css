@@ -1,0 +1,453 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #ffffff;
+  color: #202124;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+body.dark-theme {
+  background-color: #141414;
+  color: #D6D6DD;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+  background-color: #ffffff;
+  transition: background-color 0.2s ease;
+}
+
+#root.dark-theme,
+.dark-theme #root {
+  background-color: #141414;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Custom Scrollbar Styling - Modern, Light, Minimal */
+/* Scrollbars appear only when scrolling or hovering near edge */
+:root {
+  --scrollbar-color-thumb: #dadce0;
+  --scrollbar-color-track: transparent;
+  --scrollbar-width: thin;
+  --scrollbar-width-px: 6px;
+  --edge-detection-distance: 20px;
+}
+
+/* Dark mode scrollbar */
+.dark-theme {
+  --scrollbar-color-thumb: #3e3e42;
+}
+
+/* Global scrollbar styling for all elements */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-color-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-color-thumb);
+  border-radius: 3px;
+  border: 0;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-color-thumb);
+  opacity: 0.8;
+}
+
+.dark-theme *::-webkit-scrollbar-thumb {
+  background-color: #3e3e42;
+}
+
+.dark-theme *::-webkit-scrollbar-thumb:hover {
+  background-color: #4e4e52;
+}
+
+/* ProseMirror Editor Styling */
+.ProseMirror {
+  outline: none;
+  color: #202124;
+  caret-color: #202124;
+}
+
+.dark-theme .ProseMirror {
+  color: #F3F3F3;
+  caret-color: #F3F3F3;
+}
+
+/* Selection styling - using browser default */
+/* Custom selection styles removed to use browser's native selection color */
+
+/* Highlight mark styling - ensure it has appropriate contrast */
+.ProseMirror mark[data-color] {
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* Placeholder styling */
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: #9aa0a6;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.dark-theme .ProseMirror p.is-editor-empty:first-child::before {
+  color: #858585;
+}
+
+/* Link styling */
+.ProseMirror .editor-link {
+  color: #1a73e8;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.dark-theme .ProseMirror .editor-link {
+  color: #4fc3f7;
+}
+
+/* Paragraph spacing - preserve line breaks when pasting */
+.ProseMirror p {
+  margin-top: 0;
+  margin-bottom: 0.75em;
+  line-height: 1.7;
+}
+
+.ProseMirror p:last-child {
+  margin-bottom: 0;
+}
+
+/* Headings spacing */
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3,
+.ProseMirror h4,
+.ProseMirror h5,
+.ProseMirror h6 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.ProseMirror h1:first-child,
+.ProseMirror h2:first-child,
+.ProseMirror h3:first-child,
+.ProseMirror h4:first-child,
+.ProseMirror h5:first-child,
+.ProseMirror h6:first-child {
+  margin-top: 0;
+}
+
+/* List styling - Professional indentation with smooth transitions */
+.ProseMirror ul,
+.ProseMirror ol {
+  padding-left: 1.75em;
+  margin: 0.5em 0;
+  margin-left: 0;
+  transition: all 0.15s ease;
+}
+
+.ProseMirror ul {
+  list-style-type: disc;
+}
+
+.ProseMirror ol {
+  list-style-type: decimal;
+}
+
+.ProseMirror li {
+  margin: 0.25em 0;
+  padding-left: 0.25em;
+  position: relative;
+  transition: all 0.15s ease;
+}
+
+/* Nested lists - Professional multi-level styling */
+.ProseMirror ul ul,
+.ProseMirror ol ol,
+.ProseMirror ul ol,
+.ProseMirror ol ul {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+  padding-left: 1.75em;
+  transition: all 0.15s ease;
+}
+
+/* Different bullet styles for nested lists */
+.ProseMirror ul ul {
+  list-style-type: circle;
+}
+
+.ProseMirror ul ul ul {
+  list-style-type: square;
+}
+
+.ProseMirror ul ul ul ul {
+  list-style-type: disc;
+}
+
+/* Ensure list items align properly */
+.ProseMirror li p {
+  margin: 0;
+  display: inline;
+}
+
+.ProseMirror li > p:first-child {
+  display: inline;
+}
+
+/* Better spacing for list items with multiple paragraphs */
+.ProseMirror li > p + p {
+  display: block;
+  margin-top: 0.5em;
+}
+
+/* Smooth transitions when converting between list and paragraph */
+.ProseMirror p {
+  transition: margin 0.15s ease, padding 0.15s ease;
+}
+
+/* Custom class for better list appearance */
+.ProseMirror .editor-bullet-list,
+.ProseMirror .editor-ordered-list {
+  position: relative;
+}
+
+/* Reserve space for scrollbar to prevent content shifting */
+.scrollable-container {
+  scrollbar-gutter: stable;
+}
+
+/* File explorer uses overlay scrollbar - no gutter */
+.scrollable-container.no-gutter {
+  scrollbar-gutter: auto;
+}
+
+/* File explorer scrollbar styling - overlay style */
+.scrollable-container.no-gutter::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollable-container.no-gutter::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollable-container.no-gutter::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 3px;
+}
+
+.scrollable-container.no-gutter:hover::-webkit-scrollbar-thumb,
+.scrollable-container.no-gutter:active::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-color-thumb);
+}
+
+.dark-theme .scrollable-container.no-gutter:hover::-webkit-scrollbar-thumb,
+.dark-theme .scrollable-container.no-gutter:active::-webkit-scrollbar-thumb {
+  background-color: #3e3e42;
+}
+
+/* Modern browsers with standardized scrollbar-* properties (Chrome 121+, Firefox 64+) */
+@supports (scrollbar-width: auto) {
+  /* Always reserve space for scrollbar */
+  .scrollable-container {
+    scrollbar-width: var(--scrollbar-width);
+    /* Make thumb transparent by default - space is still reserved */
+    scrollbar-color: transparent transparent;
+  }
+  
+  /* Show scrollbar thumb when hovering near edge or scrolling */
+  .scrollable-container.show-scrollbar {
+    scrollbar-color: var(--scrollbar-color-thumb) var(--scrollbar-color-track);
+  }
+  
+  /* Show scrollbar when element is scrolling */
+  .scrollable-container.scrolling {
+    scrollbar-color: var(--scrollbar-color-thumb) var(--scrollbar-color-track);
+  }
+}
+
+/* Legacy browsers with ::-webkit-scrollbar-* support (older Chrome, Safari, Edge) */
+@supports selector(::-webkit-scrollbar) {
+  .scrollable-container::-webkit-scrollbar {
+    width: var(--scrollbar-width-px);
+    height: var(--scrollbar-width-px);
+    background: transparent;
+  }
+
+  .scrollable-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollable-container::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 4px;
+    border: 0;
+    background-clip: padding-box;
+    min-height: 30px;
+    transition: background-color 0.4s ease, opacity 0.4s ease;
+    opacity: 0;
+  }
+
+  .scrollable-container::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Remove scrollbar arrows/buttons completely */
+  .scrollable-container::-webkit-scrollbar-button {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
+  .scrollable-container::-webkit-scrollbar-button:start:decrement,
+  .scrollable-container::-webkit-scrollbar-button:end:increment {
+    display: none !important;
+  }
+  
+  /* Scrollbar track is always present (to reserve space), thumb only shows when needed */
+  .scrollable-container.show-scrollbar::-webkit-scrollbar-thumb,
+  .scrollable-container.scrolling::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-color-thumb);
+    opacity: 1;
+  }
+  
+  .scrollable-container.show-scrollbar::-webkit-scrollbar-thumb:hover,
+  .scrollable-container.scrolling::-webkit-scrollbar-thumb:hover {
+    background-color: #bdc1c6;
+    opacity: 1;
+  }
+  
+  .scrollable-container.show-scrollbar::-webkit-scrollbar-thumb:active,
+  .scrollable-container.scrolling::-webkit-scrollbar-thumb:active {
+    background-color: #80868b;
+    opacity: 1;
+  }
+  
+  /* Dark mode scrollbar hover */
+  .dark-theme .scrollable-container.show-scrollbar::-webkit-scrollbar-thumb:hover,
+  .dark-theme .scrollable-container.scrolling::-webkit-scrollbar-thumb:hover {
+    background-color: #4e4e52;
+  }
+  
+  .dark-theme .scrollable-container.show-scrollbar::-webkit-scrollbar-thumb:active,
+  .dark-theme .scrollable-container.scrolling::-webkit-scrollbar-thumb:active {
+    background-color: #5e5e62;
+  }
+}
+
+/* Hide scrollbar on toolbar container */
+.toolbar-container {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+.toolbar-container::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 1,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}
+
+/* Image styling */
+.ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 8px 0;
+  cursor: pointer;
+}
+
+.ProseMirror .resizable-image-wrapper {
+  display: inline-block;
+  position: relative;
+  margin: 8px 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.ProseMirror .resizable-image-wrapper.selected {
+  outline: none;
+}
+
+.ProseMirror .resizable-image-wrapper img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Ensure cursor can be placed after images */
+.ProseMirror p:has(img) {
+  min-height: 1em;
+  line-height: 1.7;
+}
+
+/* Dark mode resize handles */
+.dark-theme .resize-handle {
+  background-color: #4fc3f7 !important;
+  border-color: #141414 !important;
+}
+
+.dark-theme .resizable-image-wrapper.selected > div[style*="border"] {
+  border-color: #4fc3f7 !important;
+}
+
+/* Math formula styling */
+.ProseMirror .math-node {
+  position: relative;
+}
+
+.ProseMirror .math-node.math-display {
+  display: block;
+  margin: 16px 0;
+  text-align: center;
+}
+
+.ProseMirror .math-node.math-inline {
+  display: inline-block;
+  vertical-align: baseline;
+}
+
+.ProseMirror .math-node.selected {
+  border-color: #1a73e8 !important;
+}
+
+.dark-theme .ProseMirror .math-node.selected {
+  border-color: #4fc3f7 !important;
+}
+
+.ProseMirror .math-node.error {
+  border-color: #cc0000 !important;
+}
+

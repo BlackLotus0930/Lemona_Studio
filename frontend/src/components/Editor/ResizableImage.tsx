@@ -1,0 +1,325 @@
+import Image from '@tiptap/extension-image'
+import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react'
+import React, { useEffect, useRef, useState } from 'react'
+
+interface ResizableImageProps {
+  node: {
+    attrs: {
+      src: string
+      width?: number
+      height?: number
+    }
+  }
+  updateAttributes: (attrs: { width?: number; height?: number }) => void
+  selected: boolean
+  editor: any
+}
+
+const ResizableImageComponent = (props: any) => {
+  const { node, updateAttributes, selected, editor, getPos } = props
+  const imgRef = useRef<HTMLImageElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [isResizing, setIsResizing] = useState(false)
+  const [resizeHandle, setResizeHandle] = useState<string | null>(null)
+  const [startPos, setStartPos] = useState({ x: 0, y: 0 })
+  const [startSize, setStartSize] = useState({ width: 0, height: 0 })
+  const [aspectRatio, setAspectRatio] = useState(1)
+  const [imageLoaded, setImageLoaded] = useState(false)
+
+  useEffect(() => {
+    if (imgRef.current && imgRef.current.complete) {
+      const img = imgRef.current
+      const naturalWidth = img.naturalWidth
+      const naturalHeight = img.naturalHeight
+      if (naturalWidth > 0 && naturalHeight > 0) {
+        setAspectRatio(naturalWidth / naturalHeight)
+        setImageLoaded(true)
+      }
+    }
+  }, [node.attrs.src])
+
+  const handleImageLoad = () => {
+    if (imgRef.current) {
+      const img = imgRef.current
+      const naturalWidth = img.naturalWidth
+      const naturalHeight = img.naturalHeight
+      if (naturalWidth > 0 && naturalHeight > 0) {
+        setAspectRatio(naturalWidth / naturalHeight)
+        setImageLoaded(true)
+        // Set initial dimensions if not set
+        if (!node.attrs.width && !node.attrs.height) {
+          updateAttributes({
+            width: Math.min(naturalWidth, 600),
+            height: Math.min(naturalHeight, (naturalHeight / naturalWidth) * 600),
+          })
+        }
+      }
+    }
+  }
+
+  const currentWidth = node.attrs.width || (imgRef.current?.naturalWidth || 400)
+  const currentHeight = node.attrs.height || (imgRef.current?.naturalHeight || 300)
+
+  const handleMouseDown = (e: React.MouseEvent, handle: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsResizing(true)
+    setResizeHandle(handle)
+    setStartPos({ x: e.clientX, y: e.clientY })
+    setStartSize({ width: currentWidth, height: currentHeight })
+  }
+
+  useEffect(() => {
+    if (!isResizing) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!resizeHandle) return
+
+      const deltaX = e.clientX - startPos.x
+      const deltaY = e.clientY - startPos.y
+
+      let newWidth = startSize.width
+      let newHeight = startSize.height
+
+      switch (resizeHandle) {
+        case 'se': // Southeast (bottom-right)
+          newWidth = Math.max(50, startSize.width + deltaX)
+          newHeight = Math.max(50, startSize.height + deltaY)
+          // Maintain aspect ratio
+          const ratio = newWidth / newHeight
+          if (Math.abs(ratio - aspectRatio) > 0.1) {
+            newHeight = newWidth / aspectRatio
+          }
+          break
+        case 'sw': // Southwest (bottom-left)
+          newWidth = Math.max(50, startSize.width - deltaX)
+          newHeight = Math.max(50, startSize.height + deltaY)
+          const ratioSW = newWidth / newHeight
+          if (Math.abs(ratioSW - aspectRatio) > 0.1) {
+            newHeight = newWidth / aspectRatio
+          }
+          break
+        case 'ne': // Northeast (top-right)
+          newWidth = Math.max(50, startSize.width + deltaX)
+          newHeight = Math.max(50, startSize.height - deltaY)
+          const ratioNE = newWidth / newHeight
+          if (Math.abs(ratioNE - aspectRatio) > 0.1) {
+            newHeight = newWidth / aspectRatio
+          }
+          break
+        case 'nw': // Northwest (top-left)
+          newWidth = Math.max(50, startSize.width - deltaX)
+          newHeight = Math.max(50, startSize.height - deltaY)
+          const ratioNW = newWidth / newHeight
+          if (Math.abs(ratioNW - aspectRatio) > 0.1) {
+            newHeight = newWidth / aspectRatio
+          }
+          break
+      }
+
+      updateAttributes({
+        width: Math.round(newWidth),
+        height: Math.round(newHeight),
+      })
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      setResizeHandle(null)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isResizing, resizeHandle, startPos, startSize, aspectRatio, updateAttributes])
+
+  const handleImageClick = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    if (typeof getPos !== 'function') return
+    
+    const imgElement = e.currentTarget as HTMLImageElement
+    const rect = imgElement.getBoundingClientRect()
+    const clickX = e.clientX
+    
+    // Determine if click was on the right or left half of the image
+    const imageCenterX = rect.left + rect.width / 2
+    const clickedOnRightSide = clickX > imageCenterX
+    
+    const imagePos = getPos()
+    
+    if (imagePos >= 0) {
+      if (clickedOnRightSide) {
+        // Place cursor after the image
+        const afterImagePos = imagePos + node.nodeSize
+        editor.commands.setTextSelection(afterImagePos).focus()
+      } else {
+        // Select the image node when clicked on left side
+        const { NodeSelection } = editor.view.state.selection.constructor as any
+        const tr = editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, imagePos))
+        editor.view.dispatch(tr)
+      }
+    }
+  }
+
+  return (
+    <NodeViewWrapper
+      ref={containerRef}
+      className={`resizable-image-wrapper ${selected ? 'selected' : ''}`}
+      style={{
+        display: 'inline-block',
+        position: 'relative',
+        margin: '8px 0',
+        maxWidth: '100%',
+      }}
+    >
+      <img
+        ref={imgRef}
+        src={node.attrs.src}
+        alt=""
+        onLoad={handleImageLoad}
+        style={{
+          width: currentWidth ? `${currentWidth}px` : 'auto',
+          height: currentHeight ? `${currentHeight}px` : 'auto',
+          maxWidth: '100%',
+          display: 'block',
+          cursor: selected ? 'move' : 'pointer',
+          userSelect: 'none',
+        }}
+        onClick={handleImageClick}
+        draggable={false}
+      />
+      {selected && (
+        <>
+          {/* Resize handles */}
+          <div
+            className="resize-handle resize-handle-se"
+            onMouseDown={(e) => handleMouseDown(e, 'se')}
+            style={{
+              position: 'absolute',
+              bottom: '-4px',
+              right: '-4px',
+              width: '12px',
+              height: '12px',
+              backgroundColor: '#1a73e8',
+              border: '2px solid white',
+              borderRadius: '50%',
+              cursor: 'se-resize',
+              zIndex: 10,
+            }}
+          />
+          <div
+            className="resize-handle resize-handle-sw"
+            onMouseDown={(e) => handleMouseDown(e, 'sw')}
+            style={{
+              position: 'absolute',
+              bottom: '-4px',
+              left: '-4px',
+              width: '12px',
+              height: '12px',
+              backgroundColor: '#1a73e8',
+              border: '2px solid white',
+              borderRadius: '50%',
+              cursor: 'sw-resize',
+              zIndex: 10,
+            }}
+          />
+          <div
+            className="resize-handle resize-handle-ne"
+            onMouseDown={(e) => handleMouseDown(e, 'ne')}
+            style={{
+              position: 'absolute',
+              top: '-4px',
+              right: '-4px',
+              width: '12px',
+              height: '12px',
+              backgroundColor: '#1a73e8',
+              border: '2px solid white',
+              borderRadius: '50%',
+              cursor: 'ne-resize',
+              zIndex: 10,
+            }}
+          />
+          <div
+            className="resize-handle resize-handle-nw"
+            onMouseDown={(e) => handleMouseDown(e, 'nw')}
+            style={{
+              position: 'absolute',
+              top: '-4px',
+              left: '-4px',
+              width: '12px',
+              height: '12px',
+              backgroundColor: '#1a73e8',
+              border: '2px solid white',
+              borderRadius: '50%',
+              cursor: 'nw-resize',
+              zIndex: 10,
+            }}
+          />
+          {/* Selection border */}
+          <div
+            style={{
+              position: 'absolute',
+              top: '-2px',
+              left: '-2px',
+              right: '-2px',
+              bottom: '-2px',
+              border: '2px solid #1a73e8',
+              borderRadius: '4px',
+              pointerEvents: 'none',
+              zIndex: 9,
+            }}
+          />
+        </>
+      )}
+    </NodeViewWrapper>
+  )
+}
+
+export const ResizableImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      width: {
+        default: null,
+        parseHTML: (element) => {
+          const width = element.getAttribute('width')
+          return width ? parseInt(width, 10) : null
+        },
+        renderHTML: (attributes) => {
+          if (!attributes.width) {
+            return {}
+          }
+          return {
+            width: attributes.width,
+          }
+        },
+      },
+      height: {
+        default: null,
+        parseHTML: (element) => {
+          const height = element.getAttribute('height')
+          return height ? parseInt(height, 10) : null
+        },
+        renderHTML: (attributes) => {
+          if (!attributes.height) {
+            return {}
+          }
+          return {
+            height: attributes.height,
+          }
+        },
+      },
+    }
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(ResizableImageComponent)
+  },
+})
+
