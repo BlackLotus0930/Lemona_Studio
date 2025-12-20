@@ -25,11 +25,26 @@ export function setupIPC() {
     }
   })
 
-  ipcMain.handle('document:create', async (_, title: string) => {
+  ipcMain.handle('document:create', async (_, title: string, folder?: 'library' | 'project') => {
     try {
-      return await documentService.create(title)
+      console.log('[IPC document:create] Received title:', title, 'folder:', folder)
+      const result = await documentService.create(title, folder)
+      console.log('[IPC document:create] Returning document:', JSON.stringify(result, null, 2))
+      return result
     } catch (error) {
       console.error('IPC document:create error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('document:uploadFile', async (_, filePath: string, fileName: string, folder: 'library' | 'project') => {
+    try {
+      console.log('[IPC document:uploadFile] Received filePath:', filePath, 'fileName:', fileName, 'folder:', folder)
+      const result = await documentService.uploadFile(filePath, fileName, folder)
+      console.log('[IPC document:uploadFile] Returning document:', JSON.stringify(result, null, 2))
+      return result
+    } catch (error) {
+      console.error('IPC document:uploadFile error:', error)
       throw error
     }
   })
@@ -57,6 +72,15 @@ export function setupIPC() {
       return await documentService.delete(id)
     } catch (error) {
       console.error('IPC document:delete error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('document:cleanupOrphaned', async () => {
+    try {
+      return await documentService.cleanupOrphanedFiles()
+    } catch (error) {
+      console.error('IPC document:cleanupOrphaned error:', error)
       throw error
     }
   })
@@ -111,6 +135,7 @@ export function setupIPC() {
   })
 
   // AI operations
+  // Chat always uses Gemini (not Ollama)
   ipcMain.handle('ai:chat', async (_, message: string, documentContent?: string, documentId?: string) => {
     try {
       // Get projectId from document if documentId is provided
@@ -127,6 +152,7 @@ export function setupIPC() {
   })
 
   // Stream chat - uses webContents.send to stream chunks
+  // Chat always uses Gemini (not Ollama)
   ipcMain.handle('ai:streamChat', async (event, message: string, documentContent?: string, documentId?: string, chatHistory?: any[], useWebSearch?: boolean, modelName?: string) => {
     const webContents = event.sender
     const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -148,7 +174,6 @@ export function setupIPC() {
           let chunkCount = 0
           for await (const chunk of geminiService.streamChat(message, documentContent, projectId, chatHistory, useWebSearch, modelName)) {
             chunkCount++
-            console.log(`[Stream] Received chunk ${chunkCount}: ${chunk.substring(0, 50)}...`)
             webContents.send('ai:streamChunk', streamId, chunk)
           }
           console.log(`[Stream] Stream complete, total chunks: ${chunkCount}`)
@@ -166,6 +191,7 @@ export function setupIPC() {
     }
   })
 
+  // Batch questions always uses Gemini (not Ollama)
   ipcMain.handle('ai:batchQuestions', async (_, questions: string[], documentContent?: string, documentId?: string) => {
     try {
       // Get projectId from document if documentId is provided
@@ -181,6 +207,7 @@ export function setupIPC() {
     }
   })
 
+  // Autocomplete uses Gemini 2.5 Flash Lite (fast and free)
   ipcMain.handle('ai:autocomplete', async (_, text: string, cursorPosition: number, documentContent?: string, documentId?: string) => {
     try {
       // Get projectId from document if documentId is provided
@@ -189,10 +216,85 @@ export function setupIPC() {
         const document = await documentService.getById(documentId)
         projectId = document?.projectId
       }
-      return await geminiService.autocomplete(text, cursorPosition, documentContent, projectId)
+      return await geminiService.autocomplete(text, cursorPosition, documentContent, projectId, 'gemini-2.5-flash-lite')
     } catch (error) {
       console.error('IPC ai:autocomplete error:', error)
       throw error
+    }
+  })
+
+  // New AI features: Title generation and rephrase
+  // Title generation uses Gemini
+  ipcMain.handle('ai:generateTitle', async (_, documentContent: string) => {
+    try {
+      // Use Gemini via chat
+      const msg = await geminiService.chat(
+        `Generate a short, concise title (max 5 words) for this document: "${documentContent.slice(0, 500)}"`,
+        documentContent
+      )
+      return msg.content.trim().slice(0, 100)
+    } catch (error) {
+      console.error('IPC ai:generateTitle error:', error)
+      throw error
+    }
+  })
+
+  // Rephrase text uses Gemini 2.5 Flash Lite (fast and free)
+  ipcMain.handle('ai:rephraseText', async (_, text: string, instruction: string) => {
+    try {
+      console.log('[IPC] Rephrase text request:', { textLength: text.length, instruction })
+      
+      // Use Gemini Flash Lite for fast rephrasing
+      // Explicitly instruct to only return the rephrased text with no follow-up questions or suggestions
+      const prompt = `Rephrase this text according to the instruction. 
+
+CRITICAL: Return ONLY the rephrased text. Do NOT include any follow-up questions, suggestions, "Next step" messages, or any other text. Just the rephrased text.
+
+Original text: "${text}"
+
+Instruction: ${instruction}
+
+Rephrased text:`
+      
+      const msg = await geminiService.chat(prompt, undefined, undefined, undefined, 'gemini-2.5-flash-lite')
+      let result = msg.content.trim()
+      
+      // Remove any "Next step" or similar follow-up text that might still appear
+      const nextStepPatterns = [
+        /Next step:.*$/i,
+        /Would you like.*$/i,
+        /Do you want.*$/i,
+        /Can I help.*$/i,
+        /Is there anything.*$/i,
+        /Let me know.*$/i,
+        /Feel free.*$/i,
+        /\n\nNext step.*$/i,
+        /\n\nWould you.*$/i,
+      ]
+      
+      for (const pattern of nextStepPatterns) {
+        result = result.replace(pattern, '').trim()
+      }
+      
+      console.log('[IPC] Rephrase result length:', result.length)
+      return result
+    } catch (error) {
+      console.error('[IPC] ai:rephraseText error:', error)
+      throw error
+    }
+  })
+
+  // Check AI service status
+  ipcMain.handle('ai:getStatus', async () => {
+    try {
+      return {
+        gemini: !!process.env.GEMINI_API_KEY
+      }
+    } catch (error) {
+      console.error('IPC ai:getStatus error:', error)
+      return {
+        gemini: !!process.env.GEMINI_API_KEY
+      }
     }
   })
 
@@ -310,6 +412,25 @@ export function setupIPC() {
       return await projectService.getProjectDocuments(projectId)
     } catch (error) {
       console.error('IPC project:getDocuments error:', error)
+      throw error
+    }
+  })
+
+  // File operations
+  ipcMain.handle('file:saveTemp', async (_, buffer: number[], fileName: string) => {
+    try {
+      const fs = await import('fs/promises')
+      const path = await import('path')
+      const os = await import('os')
+      
+      const tempDir = os.tmpdir()
+      const tempPath = path.join(tempDir, `lemona_${Date.now()}_${fileName}`)
+      
+      await fs.writeFile(tempPath, Buffer.from(buffer))
+      
+      return tempPath
+    } catch (error) {
+      console.error('IPC file:saveTemp error:', error)
       throw error
     }
   })

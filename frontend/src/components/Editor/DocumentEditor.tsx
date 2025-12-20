@@ -1,9 +1,10 @@
 import { Editor } from '@tiptap/react'
 import { EditorContent } from '@tiptap/react'
 import { useNavigate } from 'react-router-dom'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Document } from '@shared/types'
 import Autocomplete from '../Autocomplete/Autocomplete'
+import TextRephrasePopup from './TextRephrasePopup'
 import { documentApi } from '../../services/api'
 import { useTheme } from '../../contexts/ThemeContext'
 import './EditorStyles.css'
@@ -26,8 +27,16 @@ export default function DocumentEditor({ document, editor }: DocumentEditorProps
   const isTextSelectionActiveRef = useRef(false)
   const scrollSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   
+  // Text selection popup state
+  const [selectedText, setSelectedText] = useState<string>('')
+  const [selectedRange, setSelectedRange] = useState<{ from: number; to: number } | null>(null)
+  const [showRephrasePopup, setShowRephrasePopup] = useState(false)
+  const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 })
+  const [showSearch, setShowSearch] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  
   const bgColor = theme === 'dark' ? '#181818' : '#ffffff'
-  const textColor = theme === 'dark' ? '#F3F3F3' : '#202124'
+  const textColor = theme === 'dark' ? '#FFFFFF' : '#202124'
 
   // Save scroll position to localStorage
   const saveScrollPosition = (documentId: string, scrollTop: number) => {
@@ -58,6 +67,84 @@ export default function DocumentEditor({ document, editor }: DocumentEditorProps
       alert('Failed to create document. Please try again.')
     }
   }
+
+  // Track text selection for rephrase popup
+  useEffect(() => {
+    if (!editor) return
+
+    const updatePopupPosition = () => {
+      if (!selectedRange || !scrollContainerRef.current) return
+      
+      const { to } = selectedRange
+      const endCoords = editor.view.coordsAtPos(to)
+      
+      if (endCoords) {
+        setPopupPosition({
+          x: endCoords.right + 8, // 8px after the end of selection
+          y: endCoords.top - 4, // Slightly above the selection line
+        })
+      }
+    }
+
+    const handleSelectionUpdate = () => {
+      const { from, to } = editor.state.selection
+      const isEmpty = from === to
+      
+      if (isEmpty) {
+        setSelectedText('')
+        setSelectedRange(null)
+        setShowRephrasePopup(false)
+        return
+      }
+
+      const selected = editor.state.doc.textBetween(from, to)
+      if (selected.trim().length > 0) {
+        setSelectedText(selected)
+        setSelectedRange({ from, to })
+        updatePopupPosition()
+        setShowRephrasePopup(true)
+      } else {
+        setSelectedText('')
+        setSelectedRange(null)
+        setShowRephrasePopup(false)
+      }
+    }
+
+    editor.on('selectionUpdate', handleSelectionUpdate)
+    editor.on('transaction', handleSelectionUpdate)
+
+    // Also check selection on mouseup to catch double-click selections
+    const handleMouseUp = () => {
+      // Small delay to ensure ProseMirror has processed the selection
+      setTimeout(() => {
+        if (editor) {
+          handleSelectionUpdate()
+        }
+      }, 10)
+    }
+
+    // Update popup position on scroll
+    const handleScroll = () => {
+      if (showRephrasePopup && selectedRange) {
+        updatePopupPosition()
+      }
+    }
+
+    const scrollContainer = scrollContainerRef.current
+    if (scrollContainer) {
+      scrollContainer.addEventListener('scroll', handleScroll, { passive: true })
+      scrollContainer.addEventListener('mouseup', handleMouseUp, { passive: true })
+    }
+
+    return () => {
+      editor.off('selectionUpdate', handleSelectionUpdate)
+      editor.off('transaction', handleSelectionUpdate)
+      if (scrollContainer) {
+        scrollContainer.removeEventListener('scroll', handleScroll)
+        scrollContainer.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [editor, showRephrasePopup, selectedRange])
 
   // Restore scroll position when document changes
   useEffect(() => {
@@ -720,12 +807,125 @@ export default function DocumentEditor({ document, editor }: DocumentEditorProps
         <div className={theme === 'dark' ? 'dark-theme' : ''} style={{ 
           maxWidth: '816px',
           margin: '0 auto',
-          minHeight: '100%'
+          minHeight: '100%',
+          position: 'relative'
         }}>
           <EditorContent editor={editor} />
           <Autocomplete editor={editor} documentContent={document?.content} documentId={document?.id} />
+          
+          {/* Search Bar */}
+          {showSearch && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '20px',
+                right: '20px',
+                backgroundColor: bgColor,
+                border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
+                borderRadius: '6px',
+                padding: '8px 12px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                zIndex: 1000,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                minWidth: '300px',
+              }}
+            >
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search..."
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  outline: 'none',
+                  backgroundColor: 'transparent',
+                  color: textColor,
+                  fontSize: '14px',
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setShowSearch(false)
+                    editor?.chain().focus().run()
+                  }
+                }}
+              />
+              <button
+                onClick={() => setShowSearch(false)}
+                style={{
+                  padding: '4px 8px',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: textColor,
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
         </div>
+        
       </div>
+      
+      {/* Text Rephrase Popup */}
+      {showRephrasePopup && selectedText && selectedRange && (
+        <TextRephrasePopup
+          selectedText={selectedText}
+          position={popupPosition}
+          onReplace={(newText) => {
+            if (editor && selectedRange) {
+              try {
+                // Use the stored selection range
+                editor.chain()
+                  .focus()
+                  .setTextSelection(selectedRange)
+                  .deleteSelection()
+                  .insertContent(newText)
+                  .run()
+              } catch (error) {
+                console.error('Error replacing text:', error)
+                // Fallback: try to find the text and replace it
+                try {
+                  const { from, to } = editor.state.selection
+                  if (from !== to) {
+                    editor.chain()
+                      .focus()
+                      .setTextSelection({ from, to })
+                      .deleteSelection()
+                      .insertContent(newText)
+                      .run()
+                  } else {
+                    // Last resort: insert at cursor
+                    editor.chain()
+                      .focus()
+                      .insertContent(newText)
+                      .run()
+                  }
+                } catch (fallbackError) {
+                  console.error('Fallback replace also failed:', fallbackError)
+                }
+              }
+            }
+            setShowRephrasePopup(false)
+            setSelectedText('')
+            setSelectedRange(null)
+          }}
+          onAddToChat={(text) => {
+            // Dispatch custom event to add text to chat
+            const event = new CustomEvent('addToChat', { detail: text })
+            window.dispatchEvent(event)
+            setShowRephrasePopup(false)
+            setSelectedText('')
+            setSelectedRange(null)
+          }}
+          onClose={() => {
+            setShowRephrasePopup(false)
+          }}
+        />
+      )}
     </div>
   )
 }

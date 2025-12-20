@@ -16,21 +16,29 @@ async function invokeOrFetch(channel: string, ...args: any[]): Promise<any> {
 
 export const documentApi = {
   get: (id: string) => invokeOrFetch('document:getById', id),
-  create: (title: string) => invokeOrFetch('document:create', title),
+  create: (title: string, folder?: 'library' | 'project') => invokeOrFetch('document:create', title, folder),
   update: (id: string, content: string) => invokeOrFetch('document:update', id, content),
   updateTitle: (id: string, title: string) => invokeOrFetch('document:updateTitle', id, title),
   delete: (id: string) => invokeOrFetch('document:delete', id),
   list: () => invokeOrFetch('document:getAll'),
+  uploadFile: (filePath: string, fileName: string, folder: 'library' | 'project') => 
+    invokeOrFetch('document:uploadFile', filePath, fileName, folder),
 }
 
 export const aiApi = {
-  chat: (message: string, documentContent?: string, documentId?: string) =>
-    invokeOrFetch('ai:chat', message, documentContent, documentId),
-  batchQuestions: (questions: string[], documentContent?: string, documentId?: string) =>
-    invokeOrFetch('ai:batchQuestions', questions, documentContent, documentId),
-  autocomplete: (text: string, cursorPosition: number, documentContent?: string, documentId?: string) =>
-    invokeOrFetch('ai:autocomplete', text, cursorPosition, documentContent, documentId),
-  streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string): Promise<Response> => {
+  chat: (message: string, documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') =>
+    invokeOrFetch('ai:chat', message, documentContent, documentId, provider),
+  batchQuestions: (questions: string[], documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') =>
+    invokeOrFetch('ai:batchQuestions', questions, documentContent, documentId, provider),
+  autocomplete: (text: string, cursorPosition: number, documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') =>
+    invokeOrFetch('ai:autocomplete', text, cursorPosition, documentContent, documentId, provider),
+  generateTitle: (documentContent: string, provider?: 'gemini' | 'ollama' | 'auto') =>
+    invokeOrFetch('ai:generateTitle', documentContent, provider),
+  rephraseText: (text: string, instruction: string, provider?: 'gemini' | 'ollama' | 'auto') =>
+    invokeOrFetch('ai:rephraseText', text, instruction, provider),
+  getStatus: () =>
+    invokeOrFetch('ai:getStatus'),
+  streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string, provider?: 'gemini' | 'ollama' | 'auto'): Promise<Response> => {
     if (!isElectron) {
       throw new Error('Streaming not available in web mode')
     }
@@ -40,7 +48,7 @@ export const aiApi = {
       async start(controller) {
         try {
           // Start stream and get streamId
-          const { streamId } = await window.electron!.invoke('ai:streamChat', message, documentContent, documentId, chatHistory, useWebSearch, modelName)
+          const { streamId } = await window.electron!.invoke('ai:streamChat', message, documentContent, documentId, chatHistory, useWebSearch, modelName, provider)
           console.log('[Desktop API] Stream started with ID:', streamId)
           
           // Note: preload script strips the event, so callbacks receive args directly

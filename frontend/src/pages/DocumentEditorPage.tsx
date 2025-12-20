@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import { Document } from '@shared/types'
@@ -16,8 +16,17 @@ export default function DocumentEditorPage() {
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
 
+  // Track previous ID to detect navigation
+  const prevIdRef = useRef<string | undefined>(undefined)
+  
   useEffect(() => {
     if (id) {
+      // If ID changed (navigating to different document), clear state and show loading
+      if (prevIdRef.current !== id) {
+        setIsLoading(true)
+        setCurrentDocument(null) // Clear old document to prevent stale state
+        prevIdRef.current = id
+      }
       loadDocument(id)
     } else {
       // If no ID, redirect to document list
@@ -29,9 +38,28 @@ export default function DocumentEditorPage() {
     try {
       // IPC returns data directly, not wrapped in { data: ... }
       const document = await documentApi.get(docId)
+      
+      // Check if document exists and is valid
+      if (!document || !document.id) {
+        console.error('Document not found or invalid:', docId)
+        setCurrentDocument(null)
+        navigate('/documents')
+        return
+      }
+      
       setCurrentDocument(document)
+      
+      // Save last opened document ID per project
+      if (document?.projectId) {
+        try {
+          localStorage.setItem(`lastDocument_${document.projectId}`, docId)
+        } catch (error) {
+          console.error('Failed to save last document:', error)
+        }
+      }
     } catch (error) {
       console.error('Failed to load document:', error)
+      setCurrentDocument(null)
       navigate('/documents')
     } finally {
       setIsLoading(false)

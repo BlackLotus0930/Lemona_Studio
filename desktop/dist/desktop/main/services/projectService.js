@@ -121,17 +121,19 @@ export const projectService = {
         // Update document's projectId
         const document = await documentService.getById(documentId);
         if (document) {
+            console.log('[projectService.addDocument] Document before update:', JSON.stringify(document, null, 2));
+            // Preserve all existing fields (including folder)
             document.projectId = projectId;
             if (order !== undefined) {
                 document.order = order;
             }
-            // Save updated document (we'll need to add an update method that preserves all fields)
-            await documentService.update(document.id, document.content);
-            // Also update projectId and order - we need a method for this
-            // For now, we'll update the document file directly
+            document.updatedAt = new Date().toISOString();
+            // Save updated document directly without calling update() to preserve all fields
             const docPath = path.join(app.getPath('userData'), 'documents', `${documentId}.json`);
             try {
+                console.log('[projectService.addDocument] Saving document with folder:', document.folder);
                 await fs.writeFile(docPath, JSON.stringify(document, null, 2));
+                console.log('[projectService.addDocument] Document saved:', JSON.stringify(document, null, 2));
             }
             catch (error) {
                 console.error('Error updating document projectId:', error);

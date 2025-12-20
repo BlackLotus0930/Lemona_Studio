@@ -5,6 +5,7 @@ import { config } from 'dotenv';
 import { existsSync } from 'fs';
 import { setupIPC } from './ipc.js';
 import { migrateDocuments } from './services/migration.js';
+import { documentService } from './services/documentService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -101,6 +102,27 @@ function createWindow() {
     // 生产环境：加载打包后的文件
     mainWindow.loadFile(path.join(__dirname, '../../frontend/dist/index.html'));
   }
+
+  // Enable zoom commands (Ctrl/Cmd + Plus, Minus, 0)
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.control || input.meta) {
+      if (input.key === '+' || input.key === '=') {
+        // Zoom in
+        const currentZoom = mainWindow!.webContents.getZoomLevel();
+        mainWindow!.webContents.setZoomLevel(currentZoom + 0.5);
+        event.preventDefault();
+      } else if (input.key === '-' || input.key === '_') {
+        // Zoom out
+        const currentZoom = mainWindow!.webContents.getZoomLevel();
+        mainWindow!.webContents.setZoomLevel(currentZoom - 0.5);
+        event.preventDefault();
+      } else if (input.key === '0') {
+        // Reset zoom
+        mainWindow!.webContents.setZoomLevel(0);
+        event.preventDefault();
+      }
+    }
+  });
 }
 
 // Set app icon (macOS)
@@ -119,6 +141,16 @@ if (existsSync(logoPath)) {
 app.whenReady().then(async () => {
   // Migrate documents first
   await migrateDocuments();
+  
+  // Clean up orphaned/corrupted documents
+  console.log('🧹 Cleaning up orphaned documents...');
+  const cleanupResult = await documentService.cleanupOrphanedFiles();
+  if (cleanupResult.removed > 0) {
+    console.log(`✅ Removed ${cleanupResult.removed} orphaned/corrupted document(s)`);
+  }
+  if (cleanupResult.errors.length > 0) {
+    console.warn(`⚠️  Cleanup errors:`, cleanupResult.errors);
+  }
   
   // Then create window
   createWindow();

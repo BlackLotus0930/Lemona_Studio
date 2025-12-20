@@ -14,13 +14,31 @@ interface ChatInterfaceProps {
   isStreaming: boolean
   setIsStreaming: (streaming: boolean) => void
   onFirstMessage?: (message: string) => void
+  initialInput?: string
+  onInputSet?: () => void
 }
 
-export default function ChatInterface({ documentId, chatId, documentContent, setIsStreaming, onFirstMessage }: ChatInterfaceProps) {
+export default function ChatInterface({ documentId, chatId, documentContent, isStreaming, setIsStreaming, onFirstMessage, initialInput, onInputSet }: ChatInterfaceProps) {
   const { theme } = useTheme()
   const [messages, setMessages] = useState<AIChatMessage[]>([])
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(initialInput || '')
   const [isLoading, setIsLoading] = useState(false)
+  
+  // Handle initial input from external source (e.g., "Add to Chat" from editor)
+  useEffect(() => {
+    if (initialInput && initialInput !== input) {
+      setInput(initialInput)
+      if (textareaRef.current) {
+        textareaRef.current.value = initialInput
+        textareaRef.current.style.height = 'auto'
+        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+        textareaRef.current.focus()
+      }
+      if (onInputSet) {
+        onInputSet()
+      }
+    }
+  }, [initialInput, input, onInputSet])
   const [isInputFocused, setIsInputFocused] = useState(false)
   const [useWebSearch, setUseWebSearch] = useState(false)
   const [selectedModel, setSelectedModel] = useState<'gemini-2.5-flash' | 'gemini-2.5-pro'>('gemini-2.5-flash')
@@ -35,6 +53,8 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
   const inputContainerRef = useRef<HTMLDivElement>(null)
   const previousMessageCountRef = useRef<number>(0)
   const hasRestoredScrollRef = useRef<boolean>(false)
+  const lastStreamingContentLengthRef = useRef<number>(0)
+  const streamingScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [inputContainerWidth, setInputContainerWidth] = useState<number | null>(null)
   
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
@@ -64,10 +84,6 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#9aa0a6'
   const userMessageBg = theme === 'dark' ? '#1C1C1C' : '#f8f8f8'
-  const sendButtonBg = theme === 'dark' ? '#2d2d2d' : '#707070'
-  const sendButtonBgActive = theme === 'dark' ? '#353535' : '#707070'
-  const sendButtonHoverBg = theme === 'dark' ? '#454545' : '#202020'
-  const sendButtonGlow = theme === 'dark' ? '0 0 4px rgba(141, 141, 141, 0.2)' : '0 0 4px rgba(128, 134, 139, 0.15)'
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -118,6 +134,54 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
 
     previousMessageCountRef.current = currentMessageCount
   }, [messages])
+
+  // Auto-scroll during streaming (ChatGPT-like experience)
+  useEffect(() => {
+    if (!hasRestoredScrollRef.current || !scrollContainerRef.current || !isStreaming) {
+      // Reset tracking when not streaming
+      if (!isStreaming) {
+        lastStreamingContentLengthRef.current = 0
+      }
+      return
+    }
+
+    const container = scrollContainerRef.current
+    const lastMessage = messages[messages.length - 1]
+    
+    // Only auto-scroll if the last message is from assistant and we're streaming
+    if (lastMessage && lastMessage.role === 'assistant') {
+      const currentContentLength = lastMessage.content.length
+      
+      // Only scroll if content actually changed
+      if (currentContentLength !== lastStreamingContentLengthRef.current) {
+        lastStreamingContentLengthRef.current = currentContentLength
+        
+        // Check if user is near the bottom (within 200px for streaming)
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200
+        
+        if (isNearBottom) {
+          // Clear any pending scroll
+          if (streamingScrollTimeoutRef.current) {
+            clearTimeout(streamingScrollTimeoutRef.current)
+          }
+          
+          // Debounce scroll slightly for smoother performance during rapid updates
+          streamingScrollTimeoutRef.current = setTimeout(() => {
+            if (messagesEndRef.current && scrollContainerRef.current) {
+              // Use instant scroll for streaming (smoother than smooth during rapid updates)
+              messagesEndRef.current.scrollIntoView({ behavior: 'auto' })
+            }
+          }, 50) // Small debounce for performance
+        }
+      }
+    }
+    
+    return () => {
+      if (streamingScrollTimeoutRef.current) {
+        clearTimeout(streamingScrollTimeoutRef.current)
+      }
+    }
+  }, [messages, isStreaming])
 
   // Measure input container width to match user message width
   useEffect(() => {
@@ -381,6 +445,11 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
       currentAssistantMessageIdRef.current = assistantMessage.id
       setMessages(prev => [...prev, assistantMessage])
 
+      // Scroll to bottom when assistant message starts
+      setTimeout(() => {
+        scrollToBottom()
+      }, 100)
+
       // Save assistant message immediately (empty content, will be updated during streaming)
       await saveMessage(assistantMessage, true)
 
@@ -496,9 +565,9 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
                   color: textColor,
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
-                  fontSize: '14px',
-                  lineHeight: '1.7',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                  fontSize: '13px',
+                  lineHeight: '1.6',
+                  fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                   userSelect: 'text',
                   WebkitUserSelect: 'text',
                   MozUserSelect: 'text',
@@ -514,9 +583,9 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
                 style={{
                   width: '100%',
                   color: textColor,
-                  fontSize: '14px',
-                  lineHeight: '1.7',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                  fontSize: '13px',
+                  lineHeight: '1.6',
+                  fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                   userSelect: 'text',
                   WebkitUserSelect: 'text',
                   MozUserSelect: 'text',
@@ -535,7 +604,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
                     h5: ({node, ...props}) => <h5 style={{ fontSize: '15px', fontWeight: 600, marginTop: '12px', marginBottom: '6px', color: textColor, lineHeight: '1.3' }} {...props} />,
                     h6: ({node, ...props}) => <h6 style={{ fontSize: '14px', fontWeight: 600, marginTop: '10px', marginBottom: '6px', color: textColor, lineHeight: '1.3' }} {...props} />,
                     // Paragraphs
-                    p: ({node, ...props}) => <p style={{ marginBottom: '12px', marginTop: 0, lineHeight: '1.7', color: textColor }} {...props} />,
+                    p: ({node, ...props}) => <p style={{ marginBottom: '12px', marginTop: 0, lineHeight: '1.6', color: textColor }} {...props} />,
                     // Code blocks
                     code: ({node, inline, className, children, ...props}: any) => {
                       if (inline) {
@@ -585,7 +654,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
                     // Lists
                     ul: ({node, ...props}) => <ul style={{ marginBottom: '12px', paddingLeft: '24px', marginTop: '8px', listStyleType: 'disc', color: textColor }} {...props} />,
                     ol: ({node, ...props}) => <ol style={{ marginBottom: '12px', paddingLeft: '24px', marginTop: '8px', color: textColor }} {...props} />,
-                    li: ({node, ...props}) => <li style={{ marginBottom: '6px', lineHeight: '1.7', color: textColor }} {...props} />,
+                    li: ({node, ...props}) => <li style={{ marginBottom: '6px', lineHeight: '1.6', color: textColor }} {...props} />,
                     // Links
                     a: ({node, ...props}: any) => <a style={{ color: '#1a73e8', textDecoration: 'none' }} target="_blank" rel="noopener noreferrer" {...props} />,
                     // Blockquotes
@@ -639,7 +708,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
             padding: '16px',
             color: secondaryTextColor,
             fontStyle: 'italic',
-            fontSize: '14px'
+            fontSize: '13px'
           }}>
             Thinking...
           </div>
@@ -687,14 +756,14 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
                   padding: '4px 6px',
                   border: 'none',
                   backgroundColor: 'transparent',
-                  fontSize: '14px',
+                  fontSize: '13px',
                   outline: 'none',
                   color: textColor,
                   resize: 'none',
                   overflowY: 'hidden',
                   overflowX: 'hidden',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                  lineHeight: '1.7',
+                  fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                  lineHeight: '1.6',
                   minHeight: '24px',
                   maxHeight: '200px'
                 }}
@@ -833,25 +902,31 @@ export default function ChatInterface({ documentId, chatId, documentContent, set
                 disabled={isLoading || !input.trim()}
                 style={{
                   padding: '4px',
-                  backgroundColor: isLoading || !input.trim() ? 'transparent' : (theme === 'dark' && input.trim() ? sendButtonBgActive : sendButtonBg),
-                  color: isLoading || !input.trim() ? secondaryTextColor : 'white',
+                  backgroundColor: isLoading || !input.trim() ? 'transparent' : (theme === 'dark' ? '#3a3a3a' : '#e0e0e0'),
+                  color: isLoading || !input.trim() ? secondaryTextColor : (theme === 'dark' ? '#d6d6d6' : '#424242'),
                   border: 'none',
-                  borderRadius: '12px',
+                  borderRadius: '8px',
                   cursor: isLoading || !input.trim() ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   transition: 'all 0.15s',
-                  boxShadow: isLoading || !input.trim() ? 'none' : sendButtonGlow
+                  opacity: isLoading ? 0.5 : 1,
+                  width: '28px',
+                  height: '28px'
                 }}
                 onMouseEnter={(e) => {
                   if (!isLoading && input.trim()) {
-                    e.currentTarget.style.backgroundColor = sendButtonHoverBg
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#454545' : '#d0d0d0'
+                  } else if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1d1d1d' : '#f5f5f5'
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!isLoading && input.trim()) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? sendButtonBgActive : sendButtonBg
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#3a3a3a' : '#e0e0e0'
+                  } else if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = 'transparent'
                   }
                 }}
                 title="Send"

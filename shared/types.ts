@@ -20,6 +20,7 @@ export interface Document {
   projectId?: string; // Optional: ID of the project this document belongs to
   dependencies?: string[]; // Optional: Array of document IDs this document depends on
   order?: number; // Optional: Order within project (for sorting)
+  folder?: 'library' | 'project'; // Optional: Folder this document belongs to ('library' or 'project')
 }
 
 export interface Section {

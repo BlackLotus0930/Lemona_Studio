@@ -11,11 +11,13 @@ import Link from '@tiptap/extension-link'
 import { ResizableImage } from '../Editor/ResizableImage'
 import Highlight from '@tiptap/extension-highlight'
 import { MathExtension } from '../Editor/MathExtension'
+import { PDFViewerExtension } from '../Editor/PDFViewer'
 import { useEffect, useRef, useState } from 'react'
 import DocumentEditor from '../Editor/DocumentEditor'
 import Toolbar from '../Editor/Toolbar'
 import AIPanel from '../AIPanel/AIPanel'
 import FileExplorer from '../FileExplorer/FileExplorer'
+import FullScreenPDFViewer from '../PDFViewer/FullScreenPDFViewer'
 import { Document } from '@shared/types'
 import { documentApi, exportApi, projectApi } from '../../services/api'
 import { FontSize } from '../Editor/FontSize'
@@ -92,6 +94,12 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
   const aiPanelRef = useRef<ImperativePanelHandle>(null)
   const fileExplorerPanelRef = useRef<ImperativePanelHandle>(null)
   const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isUserResizingRef = useRef<boolean>(false) // Track if user is actively resizing
+  const [fileExplorerSize, setFileExplorerSize] = useState<number>(14) // Track File Explorer size as state
+  const [selectedFolder, setSelectedFolder] = useState<'library' | 'project' | null>(null) // Track selected folder
+  const lastContentRef = useRef<string>('') // Track last set content to avoid unnecessary updates
+  const currentDocIdRef = useRef<string | null>(null) // Track current document ID
+  const currentDocTitleRef = useRef<string | null>(null) // Track current document title for placeholder
   
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
   const borderColor = theme === 'dark' ? '#232323' : '#dadce0'
@@ -186,23 +194,42 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
   }
 
   const handleDocumentDelete = async (docId: string) => {
-    if (!confirm('Are you sure you want to delete this document?')) {
-      return
-    }
     try {
-      await documentApi.delete(docId)
+      // Get the document before deleting to check if it belongs to a project
+      const docToDelete = document?.id === docId ? document : documents.find(doc => doc.id === docId)
+      const projectId = docToDelete?.projectId
+      
+      const deleteResult = await documentApi.delete(docId)
+      console.log('[Layout] Delete result for', docId, ':', deleteResult)
+      
+      // Remove document from project if it belongs to one
+      if (projectId) {
+        try {
+          await projectApi.removeDocument(projectId, docId)
+        } catch (error) {
+          console.error('Failed to remove document from project:', error)
+          // Continue even if this fails - document is already deleted
+        }
+      }
       
       // If current document was deleted, find next file to navigate to
       if (document?.id === docId) {
         // Find the index of the deleted document
         const deletedIndex = documents.findIndex(doc => doc.id === docId)
         const updatedDocuments = documents.filter(doc => doc.id !== docId)
+        
+        // Clear the current document reference first
+        // This prevents stale state issues during navigation
+        onDocumentChange(null)
+        lastContentRef.current = ''
+        currentDocIdRef.current = null
+        
         setDocuments(updatedDocuments)
         
         if (updatedDocuments.length > 0) {
-          // Navigate to the next file (or previous if it was the last one)
-          const nextIndex = deletedIndex < updatedDocuments.length ? deletedIndex : updatedDocuments.length - 1
-          navigate(`/document/${updatedDocuments[nextIndex].id}`)
+          // Navigate to the previous file (or first file if deleting the first one)
+          const previousIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
+          navigate(`/document/${updatedDocuments[previousIndex].id}`)
         } else {
           // No more documents in project, go to home
           setDocuments([])
@@ -240,15 +267,23 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
         sectionNumber++
       }
       const newTitle = `Section ${sectionNumber}`
-      const newDoc = await documentApi.create(newTitle)
+      
+      // Use selected folder if available, otherwise default to 'project'
+      const folder = selectedFolder || 'project'
+      console.log('[Layout] Creating document with folder:', folder, 'selectedFolder state:', selectedFolder)
+      const newDoc = await documentApi.create(newTitle, folder)
+      console.log('[Layout] Created document:', newDoc.id, 'folder:', newDoc.folder)
       
       // If current document has projectId, add new doc to same project
       if (document?.projectId) {
         await projectApi.addDocument(document.projectId, newDoc.id, documents.length)
+        // Reload documents to ensure folder is correctly set and document appears in right folder
+        await loadDocuments()
+      } else {
+        // Update documents state immediately so FileExplorer shows it
+        setDocuments(prev => [...prev, newDoc])
       }
       
-      // Update documents state immediately so FileExplorer shows it
-      setDocuments(prev => [...prev, newDoc])
       navigate(`/document/${newDoc.id}`)
     } catch (error) {
       console.error('Failed to create document:', error)
@@ -358,7 +393,15 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
         types: ['heading', 'paragraph'],
       }),
       Placeholder.configure({
-        placeholder: 'Start writing...',
+        placeholder: () => {
+          // Check if the current document is README.md using ref to get latest value
+          const docTitle = currentDocTitleRef.current
+          const isReadme = docTitle?.toLowerCase() === 'readme.md' || 
+                          docTitle?.toLowerCase() === 'readme'
+          return isReadme 
+            ? 'This README helps the AI learn about the project...'
+            : 'Start writing...'
+        },
       }),
       Underline,
       Color,
@@ -382,8 +425,9 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
         allowBase64: true,
       }),
       MathExtension,
+      PDFViewerExtension,
     ],
-    content: document?.content ? JSON.parse(document.content) : '',
+    content: '', // Initialize with empty content, set it asynchronously after mount
     editorProps: {
       transformPastedText(text) {
         // Preserve line breaks when pasting - convert double line breaks to paragraph breaks
@@ -545,11 +589,108 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
 
   // Update editor content when document changes
   useEffect(() => {
-    if (editor && document) {
-      const content = JSON.parse(document.content)
-      editor.commands.setContent(content)
+    if (!editor) return
+    
+    // If document is null, just reset the ref and don't touch the editor
+    // The navigation will handle loading the new document
+    if (!document) {
+      lastContentRef.current = ''
+      currentDocIdRef.current = null
+      currentDocTitleRef.current = null
+      return
     }
-  }, [document?.id, editor])
+    
+    // Skip if content hasn't changed AND document ID is the same
+    const documentChanged = currentDocIdRef.current !== document.id
+    if (!documentChanged && lastContentRef.current === document.content) {
+      return
+    }
+    
+    // Update current doc ID and title refs
+    currentDocIdRef.current = document.id
+    currentDocTitleRef.current = document.title
+    
+    // Capture current document in closure to avoid stale reference
+    const docContent = document.content
+    
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let focusTimeoutId: ReturnType<typeof setTimeout> | null = null
+    let isCancelled = false
+    
+    // Use queueMicrotask + setTimeout to ensure we're completely outside React's render
+    queueMicrotask(() => {
+      if (isCancelled) return
+      
+      // Additional delay to ensure DOM is ready and React has finished
+      timeoutId = setTimeout(() => {
+        if (isCancelled) return
+        
+         try {
+          const content = JSON.parse(docContent)
+          // Check if editor is still mounted and ready
+          if (editor && !editor.isDestroyed && editor.view) {
+            // Set content
+            editor.commands.setContent(content)
+            lastContentRef.current = docContent
+            
+            // Focus the editor after content is fully rendered
+            // Use multiple focus attempts with increasing delays to ensure focus is regained
+            const focusEditor = (attempt: number = 0) => {
+              if (isCancelled || attempt > 5) return
+              
+              if (editor && !editor.isDestroyed && editor.view) {
+                const editorElement = editor.view.dom as HTMLElement
+                
+                if (editorElement) {
+                  // Try to focus the editor
+                  editorElement.focus()
+                  
+                  // Ensure it's editable
+                  if (!editorElement.isContentEditable) {
+                    editorElement.contentEditable = 'true'
+                  }
+                  
+                  // Use TipTap commands as well
+                  try {
+                    editor.commands.focus('end')
+                  } catch (e) {
+                    // Ignore focus errors
+                  }
+                  
+                  // Check if focus was successful
+                  setTimeout(() => {
+                    if (isCancelled) return
+                    
+                    const isFocused = window.document.activeElement === editorElement || 
+                                     editorElement.contains(window.document.activeElement)
+                    
+                    if (!isFocused && attempt < 5) {
+                      // Focus didn't work, try again with longer delay
+                      focusTimeoutId = setTimeout(() => focusEditor(attempt + 1), 100 * (attempt + 1))
+                    }
+                  }, 50)
+                }
+              }
+            }
+            
+            // Start focus attempts after render
+            requestAnimationFrame(() => {
+              if (isCancelled) return
+              setTimeout(() => focusEditor(0), 50)
+            })
+          }
+        } catch (error) {
+          console.error('Failed to parse document content:', error)
+        }
+      }, 100) // Increased delay to ensure full render cycle completion
+    })
+    
+    return () => {
+      isCancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
+      if (focusTimeoutId) clearTimeout(focusTimeoutId)
+    }
+  }, [document?.id, document?.content, editor])
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -569,35 +710,67 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
     })
   }, [isAIPanelOpen])
 
-  // Restore panel sizes when panel is opened
+  // Restore panel sizes when AI panel state changes
   useEffect(() => {
-    if (isAIPanelOpen && aiPanelRef.current) {
-      // Small delay to ensure panels are mounted
-      // FileExplorer takes 14%, so remaining space is 86%
-      // AI panel width is percentage of remaining space (86%)
-      const remainingSpace = 86
-      const aiPanelSize = (aiPanelWidth / 100) * remainingSpace
-      const editorSize = remainingSpace - aiPanelSize
-      setTimeout(() => {
-        aiPanelRef.current?.resize(aiPanelSize)
-        editorPanelRef.current?.resize(editorSize)
-      }, 0)
-    }
-  }, [isAIPanelOpen])
+    // Don't interfere if user is actively resizing
+    if (isUserResizingRef.current) return
+    
+    const timer = setTimeout(() => {
+      if (isAIPanelOpen && aiPanelRef.current && editorPanelRef.current && fileExplorerPanelRef.current) {
+        // AI panel is opening
+        // Ensure File Explorer keeps its size
+        const currentFileExplorerSize = fileExplorerPanelRef.current.getSize()
+        if (Math.abs(currentFileExplorerSize - fileExplorerSize) > 0.1) {
+          fileExplorerPanelRef.current.resize(fileExplorerSize)
+        }
+        
+        // Calculate remaining space after file explorer
+        const remainingSpace = 100 - fileExplorerSize
+        const aiSize = (aiPanelWidth / 100) * remainingSpace
+        const editorSize = remainingSpace - aiSize
+        
+        aiPanelRef.current.resize(aiSize)
+        editorPanelRef.current.resize(editorSize)
+      } else if (!isAIPanelOpen && editorPanelRef.current && fileExplorerPanelRef.current) {
+        // AI panel is closing - restore File Explorer and Editor sizes
+        const currentFileExplorerSize = fileExplorerPanelRef.current.getSize()
+        if (Math.abs(currentFileExplorerSize - fileExplorerSize) > 0.1) {
+          fileExplorerPanelRef.current.resize(fileExplorerSize)
+        }
+        editorPanelRef.current.resize(100 - fileExplorerSize)
+      }
+    }, 50) // Increased delay to ensure DOM is ready
+    
+    return () => clearTimeout(timer)
+  }, [isAIPanelOpen, aiPanelWidth, fileExplorerSize])
 
   const handleAIPanelClose = () => {
+    // Save current File Explorer size before closing AI panel
+    if (fileExplorerPanelRef.current) {
+      const currentSize = fileExplorerPanelRef.current.getSize()
+      setFileExplorerSize(currentSize)
+    }
     setIsAIPanelOpen(false)
   }
 
   const handleAIPanelOpen = () => {
+    // Save current File Explorer size before opening AI panel
+    if (fileExplorerPanelRef.current) {
+      const currentSize = fileExplorerPanelRef.current.getSize()
+      setFileExplorerSize(currentSize)
+    }
     setIsAIPanelOpen(true)
   }
 
   const handleAIPanelResize = (size: number) => {
-    if (isAIPanelOpen) {
-      // size is percentage of remaining space (after FileExplorer's 14%)
-      // Convert back to percentage of total for storage
-      const remainingSpace = 86
+    if (isAIPanelOpen && fileExplorerPanelRef.current) {
+      // Mark that user is actively resizing
+      isUserResizingRef.current = true
+      
+      // size is percentage of remaining space (after FileExplorer)
+      // Convert back to percentage of remaining space for storage
+      const currentFileExplorerSize = fileExplorerPanelRef.current.getSize()
+      const remainingSpace = 100 - currentFileExplorerSize
       const totalPercentage = (size / remainingSpace) * 100
       setAiPanelWidth(totalPercentage)
       
@@ -610,7 +783,9 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
           isOpen: isAIPanelOpen,
           width: totalPercentage
         })
-      }, 300)
+        // User finished resizing
+        isUserResizingRef.current = false
+      }, 500) // Increased timeout to ensure user is done resizing
     }
   }
 
@@ -669,30 +844,34 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
       {/* Top Bar - Logo + Menu */}
       <TopBar />
       
-      {/* Toolbar - Independent, full width */}
-      <div style={{ 
-        width: '100%',
-        backgroundColor: bgColor,
-        padding: '8px 16px',
-        zIndex: 10003,
-        position: 'relative',
-        overflow: 'visible'
-      }}>
-        <Toolbar 
-          editor={editor} 
-          onExport={handleExport} 
-          documentTitle={document?.title}
-          documentId={document?.id}
-          onTitleUpdate={handleTitleUpdate}
-        />
-      </div>
-      
-      {/* Separator line */}
-      <div style={{
-        width: '100%',
-        height: '1px',
-        backgroundColor: borderColor
-      }} />
+      {/* Toolbar - Independent, full width - Hide for PDF files */}
+      {!(document && document.title.toLowerCase().endsWith('.pdf')) && (
+        <>
+          <div style={{ 
+            width: '100%',
+            backgroundColor: bgColor,
+            padding: '8px 16px',
+            zIndex: 10003,
+            position: 'relative',
+            overflow: 'visible'
+          }}>
+            <Toolbar 
+              editor={editor} 
+              onExport={handleExport} 
+              documentTitle={document?.title}
+              documentId={document?.id}
+              onTitleUpdate={handleTitleUpdate}
+            />
+          </div>
+          
+          {/* Separator line */}
+          <div style={{
+            width: '100%',
+            height: '1px',
+            backgroundColor: borderColor
+          }} />
+        </>
+      )}
       
       {/* Content Area - Horizontal split with FileExplorer sidebar */}
       <PanelGroup 
@@ -702,10 +881,14 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
         {/* File Explorer Sidebar */}
         <Panel 
           ref={fileExplorerPanelRef}
-          defaultSize={14} 
+          defaultSize={fileExplorerSize} 
           minSize={0}
           maxSize={30}
           collapsible={true}
+          onResize={(size) => {
+            // Track File Explorer size changes
+            setFileExplorerSize(size)
+          }}
         >
           <div style={{
             width: '100%',
@@ -722,7 +905,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
               color: secondaryTextColor,
               textTransform: 'uppercase',
               letterSpacing: '0.5px',
-              fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between'
@@ -778,6 +961,17 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
                   onDocumentRename={handleDocumentRename}
                   onDocumentDelete={handleDocumentDelete}
                   onReorderDocuments={handleReorderDocuments}
+                  projectName={projectName}
+                  onSelectedFolderChange={setSelectedFolder}
+                  onFileUploaded={async (newDoc) => {
+                    // Reload documents to show the new file
+                    await loadDocuments()
+                    // If current document has projectId, add new doc to same project
+                    if (document?.projectId) {
+                      await projectApi.addDocument(document.projectId, newDoc.id, documents.length)
+                      await loadDocuments()
+                    }
+                  }}
                 />
               )}
             </div>
@@ -795,15 +989,24 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
         {/* Editor Panel */}
         <Panel 
           ref={editorPanelRef}
-          defaultSize={isAIPanelOpen ? (86 - (aiPanelWidth / 100) * 86) : 86} 
+          defaultSize={isAIPanelOpen 
+            ? ((100 - fileExplorerSize) - ((aiPanelWidth / 100) * (100 - fileExplorerSize))) 
+            : (100 - fileExplorerSize)
+          } 
           minSize={40}
         >
-          <DocumentEditor 
-            document={document}
-            editor={editor}
-            onDocumentChange={onDocumentChange}
-            showToolbarOnly={false}
-          />
+          {document && document.title.toLowerCase().endsWith('.pdf') ? (
+            // PDF file - show full screen PDF viewer
+            <FullScreenPDFViewer document={document} />
+          ) : (
+            // Regular document - show document editor
+            <DocumentEditor 
+              document={document}
+              editor={editor}
+              onDocumentChange={onDocumentChange}
+              showToolbarOnly={false}
+            />
+          )}
         </Panel>
         {isAIPanelOpen && (
           <>
@@ -815,7 +1018,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
             }} />
             <Panel 
               ref={aiPanelRef} 
-              defaultSize={(aiPanelWidth / 100) * 86} 
+              defaultSize={(aiPanelWidth / 100) * (100 - fileExplorerSize)} 
               minSize={15}
               onResize={handleAIPanelResize}
             >
@@ -860,4 +1063,3 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
     </div>
   )
 }
-

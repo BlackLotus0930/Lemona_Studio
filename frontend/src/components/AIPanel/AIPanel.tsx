@@ -32,9 +32,20 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
   const [isStreaming, setIsStreaming] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [hoveredChatId, setHoveredChatId] = useState<string | null>(null)
+  const [chatInputText, setChatInputText] = useState<string>('')
   const headerScrollRef = useRef<HTMLDivElement>(null)
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  
+  // Listen for "Add to Chat" events from editor
+  useEffect(() => {
+    const handleAddToChat = (event: CustomEvent<string>) => {
+      setChatInputText(event.detail)
+    }
+    
+    window.addEventListener('addToChat' as any, handleAddToChat as EventListener)
+    return () => window.removeEventListener('addToChat' as any, handleAddToChat as EventListener)
+  }, [])
   
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
   const brighterBg = theme === 'dark' ? '#141414' : '#ffffff'
@@ -577,6 +588,8 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
           isStreaming={isStreaming}
           setIsStreaming={setIsStreaming}
           onFirstMessage={(message) => handleChatNameUpdate(activeChatId, message)}
+          initialInput={chatInputText}
+          onInputSet={() => setChatInputText('')}
         />
       </div>
     </div>

@@ -17,6 +17,7 @@
   "license": "ISC",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "axios": "^1.13.2",
     "dotenv": "^17.2.3",
     "electron": "^28.0.0"
   },

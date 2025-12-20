@@ -107,6 +107,7 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
   const [fontSize, setFontSize] = useState(14)
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [showFontMenu, setShowFontMenu] = useState(false)
+  const [showFontSizeMenu, setShowFontSizeMenu] = useState(false)
   const [showColorMenu, setShowColorMenu] = useState(false)
   const [showHighlightMenu, setShowHighlightMenu] = useState(false)
   const [showAlignMenu, setShowAlignMenu] = useState(false)
@@ -121,11 +122,13 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
   const spacingMenuRef = useRef<HTMLDivElement>(null)
   const shareMenuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const fontSizeMenuRef = useRef<HTMLDivElement>(null)
 
   // Function to close all menus except the one specified
   const closeAllMenusExcept = (except: string | null) => {
     if (except !== 'style') setShowStyleMenu(false)
     if (except !== 'font') setShowFontMenu(false)
+    if (except !== 'fontSize') setShowFontSizeMenu(false)
     if (except !== 'color') setShowColorMenu(false)
     if (except !== 'highlight') setShowHighlightMenu(false)
     if (except !== 'align') setShowAlignMenu(false)
@@ -139,6 +142,43 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
 
     const handleUpdate = () => {
       forceUpdate({})
+      // Update fontSize state from editor selection
+      // getAttributes('textStyle') gets the fontSize mark at the current cursor/selection position
+      const attrs = editor.getAttributes('textStyle')
+      if (attrs.fontSize) {
+        const size = parseInt(attrs.fontSize)
+        if (!isNaN(size) && size > 0) {
+          setFontSize(size)
+          return
+        }
+      }
+      
+      // If no fontSize mark found, check if there's text selected and try to get fontSize from the selection range
+      const { from, to } = editor.state.selection
+      if (from !== to) {
+        // Text is selected - check marks in the selection range
+        let foundSize: number | null = null
+        editor.state.doc.nodesBetween(from, to, (node) => {
+          if (node.marks) {
+            node.marks.forEach(mark => {
+              if (mark.type.name === 'textStyle' && mark.attrs.fontSize) {
+                const size = parseInt(mark.attrs.fontSize)
+                if (!isNaN(size) && size > 0) {
+                  foundSize = size
+                }
+              }
+            })
+          }
+        })
+        
+        if (foundSize !== null) {
+          setFontSize(foundSize)
+          return
+        }
+      }
+      
+      // Default font size if no fontSize attribute found
+      setFontSize(14)
     }
 
     editor.on('selectionUpdate', handleUpdate)
@@ -217,7 +257,7 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
     padding: '6px 8px 6px 12px',
     minWidth: 'auto',
     fontSize: '13px',
-    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif"
+    fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif"
   }
 
   const styleDropdownStyle: React.CSSProperties = {
@@ -234,17 +274,18 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
     justifyContent: 'space-between'
   }
 
+  const handleFontSizeSelect = (size: number) => {
+    const newSize = Math.max(8, Math.min(400, size))
+    setFontSize(newSize)
+    // Apply font size to selected text
+    editor.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
+    setShowFontSizeMenu(false)
+  }
+
   const handleFontSizeChange = (delta: number) => {
     const newSize = Math.max(8, Math.min(400, fontSize + delta))
     setFontSize(newSize)
     // Apply font size to selected text using TextStyle extension
-    editor.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
-  }
-
-  const handleFontSizeInput = (size: number) => {
-    const newSize = Math.max(8, Math.min(400, size))
-    setFontSize(newSize)
-    // Apply font size to selected text
     editor.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
   }
 
@@ -306,7 +347,7 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
     { label: 'Heading 3', value: 'h3' },
   ]
 
-  const fonts = ['Inter', 'Open Sans', 'Roboto', 'Arial', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana']
+  const fonts = ['Noto Sans SC', 'Inter', 'Open Sans', 'Roboto', 'Arial', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana']
 
   // Get current style label
   const getCurrentStyle = () => {
@@ -321,7 +362,7 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
   // Get current font family
   const getCurrentFontFamily = () => {
     const attrs = editor.getAttributes('textStyle')
-    return attrs.fontFamily || 'Inter'
+    return attrs.fontFamily || 'Noto Sans SC'
   }
 
   // Normalize color for comparison (handles different formats)
@@ -677,32 +718,90 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
       >
         <RemoveIcon style={{ fontSize: '18px' }} />
       </button>
-      <input
-        type="number"
-        value={fontSize}
-        onChange={(e) => {
-          const newSize = parseInt(e.target.value) || 12
-          handleFontSizeInput(newSize)
-        }}
-        onMouseDown={(e) => e.stopPropagation()}
-        onBlur={(e) => {
-          const newSize = parseInt(e.target.value) || 12
-          handleFontSizeInput(newSize)
-        }}
-        style={{
-          width: '40px',
-          height: '24px',
-          border: `1px solid ${theme === 'dark' ? '#2d2d2d' : '#dadce0'}`,
-          borderRadius: '4px',
-          textAlign: 'center',
-          fontSize: '13px',
-          padding: '2px 4px',
-          backgroundColor: theme === 'dark' ? '#181818' : '#ffffff',
-          color: theme === 'dark' ? '#a0a0a0' : '#5f6368'
-        }}
-        min="8"
-        max="400"
-      />
+      {/* Font Size Dropdown */}
+      <div ref={fontSizeMenuRef} style={{ position: 'relative' }}>
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            const newState = !showFontSizeMenu
+            closeAllMenusExcept(newState ? 'fontSize' : null)
+            setShowFontSizeMenu(newState)
+          }}
+          style={{
+            ...buttonStyle,
+            padding: '6px 12px',
+            minWidth: 'auto',
+            fontSize: '13px',
+            fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
+            justifyContent: 'center'
+          }}
+          title="Font size"
+          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
+          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center' }}>
+            {fontSize}
+          </span>
+        </button>
+        {showFontSizeMenu && (() => {
+          const rect = fontSizeMenuRef.current?.getBoundingClientRect()
+          const fontSizes = [8, 9, 10, 11, 12, 14, 18, 24, 30, 36, 48, 60, 72, 96]
+          return (
+            <div style={{
+              position: 'fixed',
+              top: rect ? `${rect.bottom + 4}px` : '100%',
+              left: rect ? `${rect.left}px` : 0,
+              backgroundColor: dropdownBg,
+              border: `1px solid ${dropdownBorder}`,
+              borderRadius: '12px',
+              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              zIndex: 10010,
+              minWidth: '70px',
+              maxHeight: '300px',
+              overflowY: 'auto'
+            }}>
+            {fontSizes.map((size) => {
+              const isActive = fontSize === size
+              return (
+                <div
+                  key={size}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    handleFontSizeSelect(size)
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    color: dropdownTextColor,
+                    backgroundColor: isActive 
+                      ? (theme === 'dark' ? '#2a2a2a' : '#f0f0f0')
+                      : 'transparent',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.backgroundColor = dropdownHoverBg
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isActive) {
+                      e.currentTarget.style.backgroundColor = 'transparent'
+                    } else {
+                      e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f0f0f0'
+                    }
+                  }}
+                >
+                  <span>{size}</span>
+                </div>
+              )
+            })}
+            </div>
+          )
+        })()}
+      </div>
       <button
         onMouseDown={(e) => {
           e.preventDefault()
@@ -976,7 +1075,7 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
                     cursor: 'pointer',
                     fontSize: '13px',
                     textAlign: 'left',
-                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
+                    fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
                     transition: 'background-color 0.15s'
                   }}
                   onMouseEnter={(e) => {

@@ -91,6 +91,28 @@ function createWindow() {
         // 生产环境：加载打包后的文件
         mainWindow.loadFile(path.join(__dirname, '../../frontend/dist/index.html'));
     }
+    // Enable zoom commands (Ctrl/Cmd + Plus, Minus, 0)
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+        if (input.control || input.meta) {
+            if (input.key === '+' || input.key === '=') {
+                // Zoom in
+                const currentZoom = mainWindow.webContents.getZoomLevel();
+                mainWindow.webContents.setZoomLevel(currentZoom + 0.5);
+                event.preventDefault();
+            }
+            else if (input.key === '-' || input.key === '_') {
+                // Zoom out
+                const currentZoom = mainWindow.webContents.getZoomLevel();
+                mainWindow.webContents.setZoomLevel(currentZoom - 0.5);
+                event.preventDefault();
+            }
+            else if (input.key === '0') {
+                // Reset zoom
+                mainWindow.webContents.setZoomLevel(0);
+                event.preventDefault();
+            }
+        }
+    });
 }
 // Set app icon (macOS)
 const logoPath = path.join(projectRoot, 'frontend', 'public', 'lemonalogo.png');
