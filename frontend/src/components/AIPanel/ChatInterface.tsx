@@ -46,7 +46,6 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const scrollSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const updateMessageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentAssistantMessageIdRef = useRef<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -59,25 +58,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
 
-  // Save scroll position to localStorage
-  const saveScrollPosition = (docId: string, chatId: string, scrollTop: number) => {
-    try {
-      localStorage.setItem(`chatScroll_${docId}_${chatId}`, scrollTop.toString())
-    } catch (error) {
-      console.error('Failed to save chat scroll position:', error)
-    }
-  }
-
-  // Load scroll position from localStorage
-  const loadScrollPosition = (docId: string, chatId: string): number | null => {
-    try {
-      const saved = localStorage.getItem(`chatScroll_${docId}_${chatId}`)
-      return saved ? parseFloat(saved) : null
-    } catch (error) {
-      console.error('Failed to load chat scroll position:', error)
-      return null
-    }
-  }
+  // Removed scroll position saving/loading - AI panel should maintain consistent state across files
   const brighterBg = theme === 'dark' ? '#141414' : '#ffffff'
   const inputBg = theme === 'dark' ? '#1d1d1d' : '#ffffff'
   const borderColor = theme === 'dark' ? '#313131' : '#dadce0'
@@ -89,29 +70,19 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  // Restore scroll position when documentId or chatId changes
+  // Reset scroll state when documentId or chatId changes
+  // Keep scroll position unchanged when switching files - don't auto-scroll
   useEffect(() => {
     if (!documentId || !chatId || !scrollContainerRef.current) return
 
     hasRestoredScrollRef.current = false
     previousMessageCountRef.current = 0
 
-    const savedScrollTop = loadScrollPosition(documentId, chatId)
-    if (savedScrollTop !== null) {
-      // Small delay to ensure messages are rendered
-      setTimeout(() => {
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTop = savedScrollTop
-          hasRestoredScrollRef.current = true
-        }
-      }, 150)
-    } else {
-      // If no saved position, scroll to bottom for new chats
-      setTimeout(() => {
-        scrollToBottom()
-        hasRestoredScrollRef.current = true
-      }, 150)
-    }
+    // Don't auto-scroll when switching files - maintain current scroll position
+    // Just mark as restored so new messages can still auto-scroll if user is near bottom
+    setTimeout(() => {
+      hasRestoredScrollRef.current = true
+    }, 150)
   }, [documentId, chatId])
 
   // Auto-scroll to bottom only when new messages are added (not on initial load)
@@ -288,13 +259,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
           }
         }, 600) // Slightly longer than transition duration (400ms) to allow fade-out
 
-        // Save scroll position with debouncing
-        if (scrollSaveTimeoutRef.current) {
-          clearTimeout(scrollSaveTimeoutRef.current)
-        }
-        scrollSaveTimeoutRef.current = setTimeout(() => {
-          saveScrollPosition(documentId, chatId, container.scrollTop)
-        }, 300)
+        // Removed scroll position saving - AI panel maintains consistent state across files
       }
     }
 
@@ -333,9 +298,6 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
       container.removeEventListener('mouseleave', handleMouseLeave)
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current)
-      }
-      if (scrollSaveTimeoutRef.current) {
-        clearTimeout(scrollSaveTimeoutRef.current)
       }
     }
   }, [documentId, chatId])

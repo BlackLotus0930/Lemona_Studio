@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import DocumentList from './pages/DocumentList'
-import DocumentEditorPage from './pages/DocumentEditorPage'
+import Layout from './components/Layout/Layout'
 
 function App() {
   return (
@@ -8,7 +8,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/documents" replace />} />
         <Route path="/documents" element={<DocumentList />} />
-        <Route path="/document/:id" element={<DocumentEditorPage />} />
+        <Route path="/document/:id" element={<Layout />} />
       </Routes>
     </BrowserRouter>
   )

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Document } from '@shared/types'
 import { useTheme } from '../../contexts/ThemeContext'
 import { documentApi } from '../../services/api'
+import { memo } from 'react'
 // @ts-ignore
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 // @ts-ignore
@@ -1390,5 +1391,5 @@ function FileExplorer({
   )
 }
 
-export default FileExplorer
+export default memo(FileExplorer)
 

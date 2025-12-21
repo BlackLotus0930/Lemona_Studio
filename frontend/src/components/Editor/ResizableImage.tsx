@@ -2,19 +2,6 @@ import Image from '@tiptap/extension-image'
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react'
 import React, { useEffect, useRef, useState } from 'react'
 
-interface ResizableImageProps {
-  node: {
-    attrs: {
-      src: string
-      width?: number
-      height?: number
-    }
-  }
-  updateAttributes: (attrs: { width?: number; height?: number }) => void
-  selected: boolean
-  editor: any
-}
-
 const ResizableImageComponent = (props: any) => {
   const { node, updateAttributes, selected, editor, getPos } = props
   const imgRef = useRef<HTMLImageElement>(null)
@@ -24,7 +11,6 @@ const ResizableImageComponent = (props: any) => {
   const [startPos, setStartPos] = useState({ x: 0, y: 0 })
   const [startSize, setStartSize] = useState({ width: 0, height: 0 })
   const [aspectRatio, setAspectRatio] = useState(1)
-  const [imageLoaded, setImageLoaded] = useState(false)
 
   useEffect(() => {
     if (imgRef.current && imgRef.current.complete) {
@@ -33,7 +19,6 @@ const ResizableImageComponent = (props: any) => {
       const naturalHeight = img.naturalHeight
       if (naturalWidth > 0 && naturalHeight > 0) {
         setAspectRatio(naturalWidth / naturalHeight)
-        setImageLoaded(true)
       }
     }
   }, [node.attrs.src])
@@ -45,7 +30,6 @@ const ResizableImageComponent = (props: any) => {
       const naturalHeight = img.naturalHeight
       if (naturalWidth > 0 && naturalHeight > 0) {
         setAspectRatio(naturalWidth / naturalHeight)
-        setImageLoaded(true)
         // Set initial dimensions if not set
         if (!node.attrs.width && !node.attrs.height) {
           updateAttributes({

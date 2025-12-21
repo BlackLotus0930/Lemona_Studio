@@ -37,11 +37,10 @@ import AddIcon from '@mui/icons-material/Add'
 // @ts-ignore
 import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder'
 import TopBar from './TopBar'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 
 interface LayoutProps {
-  document: Document | null
-  onDocumentChange: (doc: Document | null) => void
+  // No longer needed - Layout will load document internally based on route
 }
 
 const AI_PANEL_STORAGE_KEY = 'aiPanelState'
@@ -75,9 +74,12 @@ function saveAIPanelState(state: AIPanelState) {
   }
 }
 
-export default function Layout({ document, onDocumentChange }: LayoutProps) {
+export default function Layout({}: LayoutProps) {
   const { theme } = useTheme()
   const navigate = useNavigate()
+  const { id } = useParams<{ id: string }>()
+  const [document, setDocument] = useState<Document | null>(null)
+  const [isLoadingDocument, setIsLoadingDocument] = useState(true)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [isAIPanelOpen, setIsAIPanelOpen] = useState(() => {
     const savedState = loadAIPanelState()
@@ -179,6 +181,59 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
       console.warn('Failed to restore search mode:', e)
     }
   }, [document?.id]) // Run when document changes (navigation)
+
+  // Load document when route parameter changes
+  useEffect(() => {
+    if (id) {
+      // When switching documents, keep the UI visible for smooth transition
+      // Only set loading state if we're switching to a different document
+      if (!document || document.id !== id) {
+        setIsLoadingDocument(true)
+        loadDocument(id)
+      }
+    } else {
+      setDocument(null)
+      setIsLoadingDocument(false)
+    }
+  }, [id])
+
+  const loadDocument = async (docId: string) => {
+    try {
+      const doc = await documentApi.get(docId)
+      if (!doc || !doc.id) {
+        console.error('Document not found or invalid:', docId)
+        setDocument(null)
+        navigate('/documents')
+        return
+      }
+      // Only update document if this is still the current route
+      // This prevents race conditions when rapidly switching files
+      if (id === docId) {
+        setDocument(doc)
+      }
+      
+      // Save last opened document ID per project
+      if (doc?.projectId) {
+        try {
+          localStorage.setItem(`lastDocument_${doc.projectId}`, docId)
+        } catch (error) {
+          console.error('Failed to save last document:', error)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load document:', error)
+      // Only clear document if this is still the current route
+      if (id === docId) {
+        setDocument(null)
+        navigate('/documents')
+      }
+    } finally {
+      // Only clear loading state if this is still the current route
+      if (id === docId) {
+        setIsLoadingDocument(false)
+      }
+    }
+  }
 
   // Load all documents for FileExplorer and TopBar
   useEffect(() => {
@@ -593,7 +648,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
       // Update current document if it's the one being renamed
       if (document?.id === docId) {
         const updatedDoc = await documentApi.get(docId)
-        onDocumentChange(updatedDoc)
+        setDocument(updatedDoc)
       }
     } catch (error) {
       console.error('Failed to rename document:', error)
@@ -657,7 +712,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
         
         // Clear the current document reference first
         // This prevents stale state issues during navigation
-        onDocumentChange(null)
+        setDocument(null)
         lastContentRef.current = ''
         currentDocIdRef.current = null
         
@@ -1424,10 +1479,27 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
     try {
       // IPC returns data directly, not wrapped in { data: ... }
       const updatedDocument = await documentApi.updateTitle(document.id, newTitle.trim())
-      onDocumentChange(updatedDocument)
+      setDocument(updatedDocument)
     } catch (error) {
       console.error('Failed to update document title:', error)
     }
+  }
+
+  // Only show full-screen loading on initial load when there's no document yet
+  // When switching documents, keep the UI visible for smooth transition
+  if (isLoadingDocument && id && !document) {
+    return (
+      <div style={{
+        height: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: bgColor,
+        color: secondaryTextColor
+      }}>
+        <div>Loading...</div>
+      </div>
+    )
   }
 
   return (
@@ -1612,7 +1684,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
                   onSearchQueryChange={setSearchQuery}
                   searchQueryProp={searchQuery}
                   onDocumentsUpdated={loadDocuments}
-                  onDocumentChange={onDocumentChange}
+                  onDocumentChange={setDocument}
                   onSelectedFolderChange={setSelectedFolder}
                   onFileUploaded={async (newDoc) => {
                     // Reload documents to show the new file
@@ -1646,7 +1718,19 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
           } 
           minSize={40}
         >
-          {document && document.title.toLowerCase().endsWith('.pdf') ? (
+          {isLoadingDocument && !document ? (
+            // Show loading state in editor area only when loading first document
+            <div style={{
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: bgColor,
+              color: secondaryTextColor
+            }}>
+              <div>Loading...</div>
+            </div>
+          ) : document && document.title.toLowerCase().endsWith('.pdf') ? (
             // PDF file - show full screen PDF viewer
             <FullScreenPDFViewer document={document} />
           ) : (
@@ -1654,7 +1738,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
             <DocumentEditor 
               document={document}
               editor={editor}
-              onDocumentChange={onDocumentChange}
+              onDocumentChange={setDocument}
               showToolbarOnly={false}
               isAIPanelOpen={isAIPanelOpen}
               aiPanelWidth={aiPanelWidth}
