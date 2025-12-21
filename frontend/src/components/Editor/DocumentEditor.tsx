@@ -14,9 +14,11 @@ interface DocumentEditorProps {
   editor: Editor | null
   onDocumentChange?: (doc: Document | null) => void
   showToolbarOnly?: boolean
+  isAIPanelOpen?: boolean
+  aiPanelWidth?: number // Percentage width of AI panel
 }
 
-export default function DocumentEditor({ document, editor }: DocumentEditorProps) {
+export default function DocumentEditor({ document, editor, isAIPanelOpen = false, aiPanelWidth = 20 }: DocumentEditorProps) {
   const { theme } = useTheme()
   const navigate = useNavigate()
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -32,8 +34,19 @@ export default function DocumentEditor({ document, editor }: DocumentEditorProps
   const [selectedRange, setSelectedRange] = useState<{ from: number; to: number } | null>(null)
   const [showRephrasePopup, setShowRephrasePopup] = useState(false)
   const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 })
-  const [showSearch, setShowSearch] = useState(false)
-  const searchInputRef = useRef<HTMLInputElement>(null)
+  
+  // Inline search/replace state
+  const [showInlineSearch, setShowInlineSearch] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [replaceQuery, setReplaceQuery] = useState('')
+  const [matches, setMatches] = useState<Array<{ from: number; to: number }>>([])
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(-1)
+  const [activeSearchQuery, setActiveSearchQuery] = useState('') // The query that was actually searched
+  const inlineSearchInputRef = useRef<HTMLInputElement>(null)
+  const inlineReplaceInputRef = useRef<HTMLInputElement>(null)
+  const isSearchInputFocusedRef = useRef(false)
+  const isReplaceInputFocusedRef = useRef(false)
+  const [rightOffset, setRightOffset] = useState(20)
   
   const bgColor = theme === 'dark' ? '#181818' : '#ffffff'
   const textColor = theme === 'dark' ? '#FFFFFF' : '#202124'
@@ -68,6 +81,55 @@ export default function DocumentEditor({ document, editor }: DocumentEditorProps
     }
   }
 
+  // Prevent editor from stealing focus when search inputs are active
+  useEffect(() => {
+    if (!editor) return
+
+    const handleEditorBlur = (event: FocusEvent) => {
+      // If focus is moving to search input, prevent editor from regaining focus
+      const relatedTarget = event.relatedTarget as HTMLElement
+      if (relatedTarget === inlineSearchInputRef.current || relatedTarget === inlineReplaceInputRef.current) {
+        // Don't let editor steal focus back
+        return
+      }
+      
+      // If search input is focused, prevent editor from regaining focus
+      if (isSearchInputFocusedRef.current || isReplaceInputFocusedRef.current) {
+        event.preventDefault?.()
+        return
+      }
+    }
+
+    const handleFocusAttempt = (event: FocusEvent) => {
+      // If search input is focused, prevent editor from stealing focus
+      if (isSearchInputFocusedRef.current || isReplaceInputFocusedRef.current) {
+        const target = event.target as HTMLElement
+        if (target === editor.view.dom || editor.view.dom.contains(target)) {
+          event.preventDefault()
+          event.stopPropagation()
+          // Keep focus on the search input
+          if (isSearchInputFocusedRef.current && inlineSearchInputRef.current) {
+            inlineSearchInputRef.current.focus()
+          } else if (isReplaceInputFocusedRef.current && inlineReplaceInputRef.current) {
+            inlineReplaceInputRef.current.focus()
+          }
+        }
+      }
+    }
+
+    const editorElement = editor.view.dom as HTMLElement
+    const globalDoc = window.document
+    if (editorElement) {
+      editorElement.addEventListener('blur', handleEditorBlur, true)
+      // Also listen for focus events to prevent stealing
+      globalDoc.addEventListener('focusin', handleFocusAttempt, true)
+      return () => {
+        editorElement.removeEventListener('blur', handleEditorBlur, true)
+        globalDoc.removeEventListener('focusin', handleFocusAttempt, true)
+      }
+    }
+  }, [editor])
+
   // Track text selection for rephrase popup
   useEffect(() => {
     if (!editor) return
@@ -87,6 +149,11 @@ export default function DocumentEditor({ document, editor }: DocumentEditorProps
     }
 
     const handleSelectionUpdate = () => {
+      // Don't update selection popup if search input is focused
+      if (isSearchInputFocusedRef.current || isReplaceInputFocusedRef.current) {
+        return
+      }
+      
       const { from, to } = editor.state.selection
       const isEmpty = from === to
       
@@ -231,6 +298,406 @@ export default function DocumentEditor({ document, editor }: DocumentEditorProps
       }
     }
   }, [document?.id])
+
+  // Clear inline search highlights (both all matches and current match highlights)
+  const clearInlineSearchHighlights = () => {
+    if (!editor) return
+    
+    try {
+      const { state, dispatch } = editor.view
+      const { tr } = state
+      let modified = false
+      
+      // Find all highlight marks and remove inline search highlights
+      state.doc.descendants((node, pos) => {
+        if (node.marks) {
+          node.marks.forEach((mark) => {
+            if (mark.type.name === 'highlight') {
+              const color = mark.attrs?.color
+              // Use specific colors to identify inline search highlights (distinct from global search)
+              // All matches: #6b7280, Current match: #6366f1
+              if (color === '#fde047' || color === '#6b7280' || color === '#6366f1') {
+                const from = pos
+                const to = pos + node.nodeSize
+                tr.removeMark(from, to, mark.type)
+                modified = true
+              }
+            }
+          })
+        }
+      })
+      
+      if (modified) {
+        dispatch(tr)
+      }
+    } catch (error) {
+      console.error('Error clearing inline search highlights:', error)
+    }
+  }
+
+  // Find all matches in the document
+  const findMatches = (query: string, caseSensitive: boolean = false): Array<{ from: number; to: number }> => {
+    if (!editor || !query.trim()) return []
+    
+    const matches: Array<{ from: number; to: number }> = []
+    const searchText = caseSensitive ? query : query.toLowerCase()
+    
+    try {
+      editor.state.doc.descendants((node: any, pos: number) => {
+        if (node.isText) {
+          const text = node.text || ''
+          const textToSearch = caseSensitive ? text : text.toLowerCase()
+          let searchIndex = 0
+          
+          while (true) {
+            const index = textToSearch.indexOf(searchText, searchIndex)
+            if (index === -1) break
+            
+            const from = pos + index
+            const to = from + query.length
+            matches.push({ from, to })
+            searchIndex = index + 1
+          }
+        }
+      })
+    } catch (error) {
+      console.error('Error finding matches:', error)
+    }
+    
+    return matches
+  }
+
+  // Perform search manually (called on Enter)
+  const performSearch = () => {
+    if (!editor || !searchQuery.trim()) {
+      clearInlineSearchHighlights()
+      setMatches([])
+      setCurrentMatchIndex(-1)
+      setActiveSearchQuery('')
+      return
+    }
+    
+    // Clear previous highlights before new search
+    clearInlineSearchHighlights()
+    
+    const foundMatches = findMatches(searchQuery, false) // Always case-insensitive now
+    setMatches(foundMatches)
+    setActiveSearchQuery(searchQuery)
+    
+    if (foundMatches.length > 0) {
+      setCurrentMatchIndex(0)
+      // Highlight all matches with current match highlighted differently
+      highlightMatches(foundMatches, 0)
+      navigateToMatch(0, foundMatches)
+    } else {
+      setCurrentMatchIndex(-1)
+      highlightMatches(foundMatches, -1)
+    }
+  }
+
+  // Navigate to previous match
+  const navigateToPrevious = () => {
+    if (matches.length === 0) return
+    const prevIndex = currentMatchIndex <= 0 ? matches.length - 1 : currentMatchIndex - 1
+    setCurrentMatchIndex(prevIndex)
+    updateCurrentMatchHighlight(prevIndex)
+    navigateToMatch(prevIndex)
+  }
+
+  // Navigate to next match
+  const navigateToNext = () => {
+    if (matches.length === 0) return
+    const nextIndex = (currentMatchIndex + 1) % matches.length
+    setCurrentMatchIndex(nextIndex)
+    updateCurrentMatchHighlight(nextIndex)
+    navigateToMatch(nextIndex)
+  }
+
+  // Highlight all matches (temporary highlights) - all matches get the same color
+  const highlightMatches = (matchesToHighlight: Array<{ from: number; to: number }>, currentIndex: number = -1) => {
+    if (!editor || matchesToHighlight.length === 0) {
+      // Clear highlights if no matches
+      clearInlineSearchHighlights()
+      return
+    }
+    
+    try {
+      // Always clear existing highlights before adding new ones
+      clearInlineSearchHighlights()
+      
+      const { state, dispatch } = editor.view
+      const { tr } = state
+      // Use dark gray for all matches
+      const allMatchesColor = '#6b7280'
+      // Use purple/indigo for current match
+      const currentMatchColor = '#6366f1'
+      
+      matchesToHighlight.forEach(({ from, to }, index) => {
+        // Use different color for current match
+        const color = index === currentIndex ? currentMatchColor : allMatchesColor
+        tr.addMark(from, to, state.schema.marks.highlight.create({ color }))
+      })
+      
+      dispatch(tr)
+    } catch (error) {
+      console.error('Error highlighting matches:', error)
+    }
+  }
+
+  // Update current match highlight when navigating
+  const updateCurrentMatchHighlight = (newIndex: number) => {
+    if (!editor || matches.length === 0 || newIndex < 0 || newIndex >= matches.length) return
+    
+    try {
+      const { state, dispatch } = editor.view
+      const { tr } = state
+      const allMatchesColor = '#6b7280'
+      const currentMatchColor = '#6366f1'
+      
+      // Remove highlight from previous current match
+      if (currentMatchIndex >= 0 && currentMatchIndex < matches.length) {
+        const prevMatch = matches[currentMatchIndex]
+        tr.removeMark(prevMatch.from, prevMatch.to, state.schema.marks.highlight)
+        tr.addMark(prevMatch.from, prevMatch.to, state.schema.marks.highlight.create({ color: allMatchesColor }))
+      }
+      
+      // Add highlight to new current match
+      const newMatch = matches[newIndex]
+      tr.removeMark(newMatch.from, newMatch.to, state.schema.marks.highlight)
+      tr.addMark(newMatch.from, newMatch.to, state.schema.marks.highlight.create({ color: currentMatchColor }))
+      
+      dispatch(tr)
+    } catch (error) {
+      console.error('Error updating current match highlight:', error)
+    }
+  }
+
+  // Navigate to a specific match
+  const navigateToMatch = (index: number, matchesToUse?: Array<{ from: number; to: number }>) => {
+    const matchesList = matchesToUse || matches
+    if (!editor || matchesList.length === 0 || index < 0 || index >= matchesList.length) return
+    
+    const match = matchesList[index]
+    try {
+      // Update highlight for current match if navigating within existing matches
+      if (!matchesToUse && currentMatchIndex !== index && currentMatchIndex >= 0) {
+        updateCurrentMatchHighlight(index)
+      }
+      
+      // Don't set text selection - just scroll to the match
+      // The highlight is enough to show which match is current
+      
+      // Scroll to match
+      setTimeout(() => {
+        const coords = editor.view.coordsAtPos(match.from)
+        if (coords && scrollContainerRef.current) {
+          const container = scrollContainerRef.current
+          const containerRect = container.getBoundingClientRect()
+          const matchY = coords.top - containerRect.top + container.scrollTop
+          const viewportHeight = container.clientHeight
+          const targetY = matchY - viewportHeight * 0.3 // Position at 30% from top
+          
+          container.scrollTo({
+            top: Math.max(0, targetY),
+            behavior: 'smooth'
+          })
+        }
+      }, 50)
+    } catch (error) {
+      console.error('Error navigating to match:', error)
+    }
+  }
+
+  // Calculate right offset based on AI panel state
+  useEffect(() => {
+    const calculateRightOffset = () => {
+      if (!isAIPanelOpen) return 20
+      // AI panel takes up a percentage of the viewport width
+      // FileExplorer typically takes ~14% of width, so AI panel is percentage of remaining 86%
+      const viewportWidth = window.innerWidth
+      const fileExplorerPercent = 14 // Approximate FileExplorer width
+      const remainingWidth = viewportWidth * (1 - fileExplorerPercent / 100)
+      const aiPanelPixelWidth = remainingWidth * (aiPanelWidth / 100)
+      return aiPanelPixelWidth + 20 // Add 20px margin
+    }
+    
+    setRightOffset(calculateRightOffset())
+    
+    // Update on window resize
+    const handleResize = () => {
+      setRightOffset(calculateRightOffset())
+    }
+    
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isAIPanelOpen, aiPanelWidth])
+
+  // Clear search when dialog closes - ensure highlights are removed
+  useEffect(() => {
+    if (!showInlineSearch) {
+      // Clear highlights immediately when dialog closes
+      clearInlineSearchHighlights()
+      setMatches([])
+      setCurrentMatchIndex(-1)
+      setActiveSearchQuery('')
+      setSearchQuery('')
+      setReplaceQuery('')
+    }
+  }, [showInlineSearch, editor])
+
+  // Handle replace current match
+  const handleReplace = () => {
+    if (!editor || currentMatchIndex < 0 || currentMatchIndex >= matches.length || !replaceQuery.trim()) return
+    
+    const match = matches[currentMatchIndex]
+    try {
+      // Set selection only when replacing (needed for the replace operation)
+      editor.chain()
+        .focus()
+        .setTextSelection(match)
+        .deleteSelection()
+        .insertContent(replaceQuery)
+        .run()
+      
+      // Re-search to update matches
+      const newMatches = findMatches(activeSearchQuery, false)
+      setMatches(newMatches)
+      
+      // Adjust current match index and highlight
+      if (currentMatchIndex < newMatches.length) {
+        highlightMatches(newMatches, currentMatchIndex)
+        navigateToMatch(currentMatchIndex)
+      } else if (newMatches.length > 0) {
+        const newIndex = newMatches.length - 1
+        setCurrentMatchIndex(newIndex)
+        highlightMatches(newMatches, newIndex)
+        navigateToMatch(newIndex)
+      } else {
+        setCurrentMatchIndex(-1)
+        highlightMatches(newMatches, -1)
+      }
+      
+      // Restore focus to replace input after replace
+      requestAnimationFrame(() => {
+        inlineReplaceInputRef.current?.focus()
+      })
+    } catch (error) {
+      console.error('Error replacing text:', error)
+    }
+  }
+
+  // Handle replace all
+  const handleReplaceAll = () => {
+    if (!editor || matches.length === 0 || !replaceQuery.trim()) return
+    
+    try {
+      // Replace from end to start to preserve positions
+      const sortedMatches = [...matches].sort((a, b) => b.from - a.from)
+      
+      editor.chain().focus().run()
+      
+      sortedMatches.forEach((match) => {
+        editor.chain()
+          .setTextSelection(match)
+          .deleteSelection()
+          .insertContent(replaceQuery)
+          .run()
+      })
+      
+      // Clear search
+      setSearchQuery('')
+      setMatches([])
+      setCurrentMatchIndex(-1)
+      clearInlineSearchHighlights()
+    } catch (error) {
+      console.error('Error replacing all:', error)
+    }
+  }
+
+  // Keyboard shortcuts for inline search
+  useEffect(() => {
+    if (!showInlineSearch) return
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't interfere with input fields
+      if (e.target instanceof HTMLInputElement) {
+        if (e.key === 'Enter' && e.target === inlineSearchInputRef.current) {
+          e.preventDefault()
+          // Perform search on Enter
+          performSearch()
+          return
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setShowInlineSearch(false)
+          setSearchQuery('')
+          setReplaceQuery('')
+          clearInlineSearchHighlights()
+          editor?.chain().focus().run()
+          return
+        }
+        return
+      }
+      
+      // Ctrl+F to toggle (only when not in input)
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && !e.shiftKey) {
+        e.preventDefault()
+        setShowInlineSearch(false)
+        setSearchQuery('')
+        setReplaceQuery('')
+        clearInlineSearchHighlights()
+        editor?.chain().focus().run()
+        return
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showInlineSearch, editor, searchQuery, performSearch])
+
+  // Keyboard shortcut to open inline search (Ctrl+F)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't prevent default if typing in an input field or textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return
+      }
+      
+      // Ctrl+F (or Cmd+F on Mac) - toggle inline search
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && !e.shiftKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        setShowInlineSearch((prev) => {
+          if (!prev) {
+            // Opening search - focus input after a short delay
+            setTimeout(() => {
+              inlineSearchInputRef.current?.focus()
+            }, 50)
+          } else {
+            // Closing search
+            clearInlineSearchHighlights()
+            setSearchQuery('')
+            setReplaceQuery('')
+          }
+          return !prev
+        })
+        return
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // Focus search input when opening
+  useEffect(() => {
+    if (showInlineSearch && inlineSearchInputRef.current) {
+      setTimeout(() => {
+        inlineSearchInputRef.current?.focus()
+        inlineSearchInputRef.current?.select()
+      }, 50)
+    }
+  }, [showInlineSearch])
 
   if (!document) {
     return (
@@ -813,57 +1280,345 @@ export default function DocumentEditor({ document, editor }: DocumentEditorProps
           <EditorContent editor={editor} />
           <Autocomplete editor={editor} documentContent={document?.content} documentId={document?.id} />
           
-          {/* Search Bar */}
-          {showSearch && (
+          {/* Inline Search/Replace Bar - Dark Mode */}
+          {showInlineSearch && (
             <div
               style={{
-                position: 'absolute',
-                top: '20px',
-                right: '20px',
-                backgroundColor: bgColor,
-                border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
-                borderRadius: '6px',
-                padding: '8px 12px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                position: 'fixed',
+                top: '92px', // TopBar (32px) + Toolbar container padding (8px top) + Toolbar content (~32px) + margin (20px) = 92px to match right margin
+                right: `${rightOffset}px`,
+                backgroundColor: '#1e1e1e',
+                borderRadius: '8px',
+                padding: '12px',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)',
                 zIndex: 1000,
                 display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                minWidth: '300px',
+                flexDirection: 'column',
+                gap: '12px', // Increased from 10px for more spacing
+                minWidth: '280px',
+                maxWidth: '300px',
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                fontWeight: '300', // Apply to whole modal
+                transition: 'right 0.3s ease',
+              }}
+              onMouseDown={(e) => {
+                // Prevent editor from intercepting clicks on the search dialog
+                e.stopPropagation()
+              }}
+              onClick={(e) => {
+                // Prevent editor from intercepting clicks on the search dialog
+                e.stopPropagation()
               }}
             >
-              <input
-                ref={searchInputRef}
-                type="text"
-                placeholder="Search..."
-                style={{
-                  flex: 1,
-                  border: 'none',
-                  outline: 'none',
-                  backgroundColor: 'transparent',
-                  color: textColor,
-                  fontSize: '14px',
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    setShowSearch(false)
-                    editor?.chain().focus().run()
-                  }
-                }}
-              />
+              {/* Close button */}
               <button
-                onClick={() => setShowSearch(false)}
+                onClick={() => {
+                  setShowInlineSearch(false)
+                  setSearchQuery('')
+                  setReplaceQuery('')
+                  clearInlineSearchHighlights()
+                  editor?.chain().focus().run()
+                }}
                 style={{
-                  padding: '4px 8px',
+                  position: 'absolute',
+                  top: '8px',
+                  right: '8px',
+                  padding: '2px',
                   backgroundColor: 'transparent',
                   border: 'none',
-                  color: textColor,
+                  color: '#999',
                   cursor: 'pointer',
-                  fontSize: '12px',
+                  fontSize: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '4px',
+                  width: '18px',
+                  height: '18px',
+                  fontWeight: '300',
                 }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#2a2a2a'
+                  e.currentTarget.style.color = '#fff'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent'
+                  e.currentTarget.style.color = '#999'
+                }}
+                title="Close (Esc)"
               >
                 ✕
               </button>
+
+              {/* Find section */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: '300', width: '100%' }}>
+                <label style={{
+                  fontSize: '11px',
+                  fontWeight: '300',
+                  color: '#e0e0e0',
+                  margin: 0,
+                }}>
+                  Find
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%' }}>
+                  <input
+                    ref={inlineSearchInputRef}
+                    type="text"
+                    placeholder=""
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{
+                      flex: 1,
+                      minWidth: 0, // Allow flex item to shrink below content size
+                      padding: '6px 10px',
+                      border: '1px solid #333',
+                      borderRadius: '4px',
+                      backgroundColor: '#252525',
+                      color: '#e0e0e0',
+                      fontSize: '13px',
+                      outline: 'none',
+                      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                      fontWeight: '300',
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        performSearch()
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault()
+                        setShowInlineSearch(false)
+                        setSearchQuery('')
+                        setReplaceQuery('')
+                        clearInlineSearchHighlights()
+                        editor?.chain().focus().run()
+                      }
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#555' // Darker gray on focus
+                      isSearchInputFocusedRef.current = true
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#333'
+                      // Use setTimeout to check if focus moved to replace input
+                      setTimeout(() => {
+                        if (window.document.activeElement !== inlineReplaceInputRef.current) {
+                          isSearchInputFocusedRef.current = false
+                        }
+                      }, 0)
+                    }}
+                    onMouseDown={(e) => {
+                      // Prevent editor from intercepting the click
+                      e.stopPropagation()
+                      isSearchInputFocusedRef.current = true
+                    }}
+                  />
+                  {activeSearchQuery && matches.length > 0 && (
+                    <>
+                      <div style={{
+                        fontSize: '11px',
+                        color: '#999',
+                        minWidth: '35px',
+                        textAlign: 'center',
+                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                        fontWeight: '300',
+                      }}>
+                        {currentMatchIndex + 1}/{matches.length}
+                      </div>
+                      <button
+                        onClick={navigateToPrevious}
+                        disabled={matches.length === 0}
+                        style={{
+                          padding: '4px 6px',
+                          backgroundColor: 'transparent',
+                          border: '1px solid #333',
+                          borderRadius: '4px',
+                          color: matches.length > 0 ? '#e0e0e0' : '#666',
+                          cursor: matches.length > 0 ? 'pointer' : 'not-allowed',
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          minWidth: '24px',
+                          height: '24px',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (matches.length > 0) {
+                            e.currentTarget.style.backgroundColor = '#333'
+                            e.currentTarget.style.borderColor = '#444'
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (matches.length > 0) {
+                            e.currentTarget.style.backgroundColor = 'transparent'
+                            e.currentTarget.style.borderColor = '#333'
+                          }
+                        }}
+                        title="Previous match"
+                      >
+                        ‹
+                      </button>
+                      <button
+                        onClick={navigateToNext}
+                        disabled={matches.length === 0}
+                        style={{
+                          padding: '4px 6px',
+                          backgroundColor: 'transparent',
+                          border: '1px solid #333',
+                          borderRadius: '4px',
+                          color: matches.length > 0 ? '#e0e0e0' : '#666',
+                          cursor: matches.length > 0 ? 'pointer' : 'not-allowed',
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          minWidth: '24px',
+                          height: '24px',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (matches.length > 0) {
+                            e.currentTarget.style.backgroundColor = '#333'
+                            e.currentTarget.style.borderColor = '#444'
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (matches.length > 0) {
+                            e.currentTarget.style.backgroundColor = 'transparent'
+                            e.currentTarget.style.borderColor = '#333'
+                          }
+                        }}
+                        title="Next match"
+                      >
+                        ›
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              
+              {/* Replace with section */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: '300', width: '100%' }}>
+                <label style={{
+                  fontSize: '11px',
+                  fontWeight: '300',
+                  color: '#e0e0e0',
+                  margin: 0,
+                }}>
+                  Replace with
+                </label>
+                <input
+                  ref={inlineReplaceInputRef}
+                  type="text"
+                  placeholder=""
+                  value={replaceQuery}
+                  onChange={(e) => setReplaceQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    border: '1px solid #333',
+                    borderRadius: '4px',
+                    backgroundColor: '#252525',
+                    color: '#e0e0e0',
+                    fontSize: '13px',
+                    outline: 'none',
+                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                    fontWeight: '300',
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      setShowInlineSearch(false)
+                      setSearchQuery('')
+                      setReplaceQuery('')
+                      clearInlineSearchHighlights()
+                      editor?.chain().focus().run()
+                    }
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = '#555' // Darker gray on focus
+                    isReplaceInputFocusedRef.current = true
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = '#333'
+                    // Use setTimeout to check if focus moved to search input
+                    setTimeout(() => {
+                      if (window.document.activeElement !== inlineSearchInputRef.current) {
+                        isReplaceInputFocusedRef.current = false
+                      }
+                    }, 0)
+                  }}
+                  onMouseDown={(e) => {
+                    // Prevent editor from intercepting the click
+                    e.stopPropagation()
+                    isReplaceInputFocusedRef.current = true
+                  }}
+                />
+              </div>
+              
+              {/* Action buttons */}
+              <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
+                <button
+                  onClick={handleReplaceAll}
+                  disabled={matches.length === 0 || !replaceQuery.trim()}
+                  style={{
+                    flex: 1,
+                    padding: '6px 12px',
+                    backgroundColor: '#2a2a2a',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: matches.length > 0 && replaceQuery.trim() ? '#e0e0e0' : '#666',
+                    cursor: matches.length > 0 && replaceQuery.trim() ? 'pointer' : 'not-allowed',
+                    fontSize: '12px',
+                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                    fontWeight: '300',
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (matches.length > 0 && replaceQuery.trim()) {
+                      e.currentTarget.style.backgroundColor = '#333'
+                      e.currentTarget.style.borderColor = '#444'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (matches.length > 0 && replaceQuery.trim()) {
+                      e.currentTarget.style.backgroundColor = '#2a2a2a'
+                      e.currentTarget.style.borderColor = '#333'
+                    }
+                  }}
+                  title="Replace All"
+                >
+                  Replace all
+                </button>
+                <button
+                  onClick={handleReplace}
+                  disabled={currentMatchIndex < 0 || !replaceQuery.trim()}
+                  style={{
+                    flex: 1,
+                    padding: '6px 12px',
+                    backgroundColor: currentMatchIndex >= 0 && replaceQuery.trim() ? '#6366f1' : '#333',
+                    border: 'none',
+                    borderRadius: '6px',
+                    color: currentMatchIndex >= 0 && replaceQuery.trim() ? '#ffffff' : '#666',
+                    cursor: currentMatchIndex >= 0 && replaceQuery.trim() ? 'pointer' : 'not-allowed',
+                    fontSize: '12px',
+                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                    fontWeight: '300',
+                    transition: 'background-color 0.2s',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (currentMatchIndex >= 0 && replaceQuery.trim()) {
+                      e.currentTarget.style.backgroundColor = '#4f46e5'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (currentMatchIndex >= 0 && replaceQuery.trim()) {
+                      e.currentTarget.style.backgroundColor = '#6366f1'
+                    }
+                  }}
+                  title="Replace"
+                >
+                  Replace
+                </button>
+              </div>
             </div>
           )}
         </div>

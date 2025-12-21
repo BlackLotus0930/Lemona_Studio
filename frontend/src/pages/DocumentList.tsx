@@ -905,11 +905,6 @@ function DocumentList() {
             padding: '80px 20px', 
             color: secondaryTextColor 
           }}>
-            <div style={{
-              fontSize: '48px',
-              marginBottom: '16px',
-              animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-            }}>📁</div>
             <p style={{
               fontSize: '14px',
               fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
@@ -926,15 +921,9 @@ function DocumentList() {
         ) : filteredProjects.length === 0 ? (
           <div style={{
             textAlign: 'center',
-            padding: '120px 20px',
+            padding: '60px 20px',
             color: secondaryTextColor
           }}>
-            <div style={{
-              fontSize: '72px',
-              marginBottom: '24px',
-              filter: 'grayscale(0.3)',
-              opacity: 0.8,
-            }}>📁</div>
             <h2 style={{ 
               fontSize: '24px', 
               fontWeight: 600, 
@@ -1083,7 +1072,7 @@ function DocumentList() {
                     flex: 1,
                   display: 'flex',
                     flexDirection: 'column',
-                    gap: '10px',
+                    gap: '6px',
                     position: 'relative',
                     background: theme === 'dark' ? '#0a0a0a' : '#ffffff',
                     borderBottomLeftRadius: '12px',
@@ -1313,11 +1302,10 @@ function DocumentList() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px',
-                      marginTop: 'auto',
+                      marginTop: '3px',
                       cursor: 'pointer',
                       fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                 }}>
-                      <span style={{ fontSize: '14px' }}>📄</span>
                       <span style={{ fontWeight: 500 }}>{project.actualDocumentCount ?? project.documentIds?.length ?? 0} {project.actualDocumentCount === 1 ? 'file' : 'files'}</span>
                       <span style={{ opacity: 0.5 }}>•</span>
                       <span>{formatDate(lastOpened)}</span>

@@ -5,6 +5,7 @@ import { config } from 'dotenv';
 import { existsSync } from 'fs';
 import { setupIPC } from './ipc.js';
 import { migrateDocuments } from './services/migration.js';
+import { documentService } from './services/documentService.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // Load .env file
@@ -130,6 +131,15 @@ else {
 app.whenReady().then(async () => {
     // Migrate documents first
     await migrateDocuments();
+    // Clean up orphaned/corrupted documents
+    console.log('🧹 Cleaning up orphaned documents...');
+    const cleanupResult = await documentService.cleanupOrphanedFiles();
+    if (cleanupResult.removed > 0) {
+        console.log(`✅ Removed ${cleanupResult.removed} orphaned/corrupted document(s)`);
+    }
+    if (cleanupResult.errors.length > 0) {
+        console.warn(`⚠️  Cleanup errors:`, cleanupResult.errors);
+    }
     // Then create window
     createWindow();
     app.on('activate', () => {

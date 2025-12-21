@@ -14,7 +14,7 @@ import UndoIcon from '@mui/icons-material/Undo'
 // @ts-ignore
 import RedoIcon from '@mui/icons-material/Redo'
 // @ts-ignore
-import PrintIcon from '@mui/icons-material/Print'
+import LocalPrintshopIcon from '@mui/icons-material/LocalPrintshop'
 // @ts-ignore
 import FormatBoldIcon from '@mui/icons-material/FormatBold'
 // @ts-ignore
@@ -46,8 +46,6 @@ import FormatIndentDecreaseIcon from '@mui/icons-material/FormatIndentDecrease'
 // @ts-ignore
 import FormatIndentIncreaseIcon from '@mui/icons-material/FormatIndentIncrease'
 // @ts-ignore
-import UploadIcon from '@mui/icons-material/Upload'
-// @ts-ignore
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
 // @ts-ignore
 import AddIcon from '@mui/icons-material/Add'
@@ -57,53 +55,17 @@ import RemoveIcon from '@mui/icons-material/Remove'
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf'
 // @ts-ignore
 import DescriptionIcon from '@mui/icons-material/Description'
+// @ts-ignore
+import FormatLineSpacingIcon from '@mui/icons-material/FormatLineSpacing'
 
 interface ToolbarProps {
   editor: Editor | null
-  onExport: (format: 'pdf' | 'docx', filename?: string) => void
-  documentTitle?: string
-  documentId?: string
-  onTitleUpdate?: (title: string) => void
+  onToggleSearch?: () => void
+  isSearchActive?: boolean
 }
 
-export default function Toolbar({ editor, onExport, documentTitle, documentId, onTitleUpdate }: ToolbarProps) {
+export default function Toolbar({ editor, onToggleSearch, isSearchActive = false }: ToolbarProps) {
   const { theme, toggleTheme } = useTheme()
-  const [showShareMenu, setShowShareMenu] = useState(false)
-  const [downloadFilename, setDownloadFilename] = useState(documentTitle || 'document')
-  const titleUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Update filename when document title changes
-  useEffect(() => {
-    if (documentTitle) {
-      setDownloadFilename(documentTitle)
-    }
-  }, [documentTitle])
-
-  // Save title when filename changes (debounced)
-  const handleFilenameChange = (newFilename: string) => {
-    setDownloadFilename(newFilename)
-    
-    // Clear existing timeout
-    if (titleUpdateTimeoutRef.current) {
-      clearTimeout(titleUpdateTimeoutRef.current)
-    }
-    
-    // Update title after user stops typing (1 second delay)
-    if (newFilename.trim() && newFilename !== documentTitle && documentId && onTitleUpdate) {
-      titleUpdateTimeoutRef.current = setTimeout(() => {
-        onTitleUpdate(newFilename.trim())
-      }, 1000)
-    }
-  }
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (titleUpdateTimeoutRef.current) {
-        clearTimeout(titleUpdateTimeoutRef.current)
-      }
-    }
-  }, [])
   const [fontSize, setFontSize] = useState(14)
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [showFontMenu, setShowFontMenu] = useState(false)
@@ -120,7 +82,6 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
   const highlightMenuRef = useRef<HTMLDivElement>(null)
   const alignMenuRef = useRef<HTMLDivElement>(null)
   const spacingMenuRef = useRef<HTMLDivElement>(null)
-  const shareMenuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fontSizeMenuRef = useRef<HTMLDivElement>(null)
 
@@ -133,17 +94,65 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
     if (except !== 'highlight') setShowHighlightMenu(false)
     if (except !== 'align') setShowAlignMenu(false)
     if (except !== 'spacing') setShowSpacingMenu(false)
-    if (except !== 'share') setShowShareMenu(false)
   }
 
   // Update toolbar when editor selection changes
   useEffect(() => {
     if (!editor) return
 
+    const getFontSizeFromDOM = (): number | null => {
+      try {
+        const { from } = editor.state.selection
+        const view = editor.view
+        
+        // Get the DOM node at the cursor/selection position
+        const domPos = view.domAtPos(from)
+        let domNode: Node | null = domPos.node
+        
+        if (!domNode) return null
+        
+        // Find the actual text element (could be a text node or an element with text)
+        let element: HTMLElement | null = null
+        
+        if (domNode.nodeType === Node.TEXT_NODE) {
+          element = domNode.parentElement
+        } else if (domNode.nodeType === Node.ELEMENT_NODE) {
+          element = domNode as HTMLElement
+          // If it's an element but not a text container, find the first text node or text container
+          if (element && !element.textContent?.trim()) {
+            // Try to find a child element that contains text
+            const textContainer = element.querySelector('p, span, div, h1, h2, h3, h4, h5, h6, li')
+            if (textContainer) {
+              element = textContainer as HTMLElement
+            }
+          }
+        }
+        
+        if (!element) return null
+        
+        // Get computed font size
+        const computedStyle = window.getComputedStyle(element)
+        const fontSize = computedStyle.fontSize
+        
+        if (fontSize) {
+          // Parse fontSize (e.g., "18px" -> 18)
+          const size = parseFloat(fontSize)
+          if (!isNaN(size) && size > 0) {
+            return Math.round(size)
+          }
+        }
+        
+        return null
+      } catch (error) {
+        console.error('Error getting font size from DOM:', error)
+        return null
+      }
+    }
+
     const handleUpdate = () => {
       forceUpdate({})
-      // Update fontSize state from editor selection
-      // getAttributes('textStyle') gets the fontSize mark at the current cursor/selection position
+      
+      // First, try to get fontSize from TipTap marks
       const attrs = editor.getAttributes('textStyle')
       if (attrs.fontSize) {
         const size = parseInt(attrs.fontSize)
@@ -177,7 +186,14 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
         }
       }
       
-      // Default font size if no fontSize attribute found
+      // If no fontSize mark found, get the computed font size from the DOM
+      const domFontSize = getFontSizeFromDOM()
+      if (domFontSize !== null) {
+        setFontSize(domFontSize)
+        return
+      }
+      
+      // Default font size if nothing found
       setFontSize(14)
     }
 
@@ -212,12 +228,12 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
 
   const toolbarBgColor = theme === 'dark' ? '#141414' : '#ffffff'
   const toolbarTextColor = theme === 'dark' ? '#D6D6DD' : '#5f6368'
-  const toolbarHoverBg = theme === 'dark' ? '#181818' : '#f1f3f4'
+  const toolbarHoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'
   const dropdownBg = theme === 'dark' ? '#141414' : '#ffffff'
   const dropdownBorder = theme === 'dark' ? '#202020' : '#c0c0c0'
   const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const dropdownHoverBg = theme === 'dark' ? '#3e3e42' : '#f8f9fa'
-  const dropdownActiveBg = theme === 'dark' ? '#181818' : '#f1f3f4'
+  const dropdownActiveBg = theme === 'dark' ? '#1f1f1f' : '#e8eaed'
   const dropdownActiveColor = theme === 'dark' ? '#4fc3f7' : '#1a73e8'
 
   const buttonStyle: React.CSSProperties = {
@@ -241,7 +257,7 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
 
   const activeButtonStyle: React.CSSProperties = {
     ...buttonStyle,
-    backgroundColor: theme === 'dark' ? '#2d2d2d' : '#e8f0fe',
+    backgroundColor: theme === 'dark' ? '#252525' : '#e0e8f5',
     color: theme === 'dark' ? '#D6D6DD' : '#1967d2',
   }
 
@@ -327,17 +343,6 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
     }
   }
 
-  const handleShare = (e: React.MouseEvent) => {
-    e.preventDefault()
-    const newState = !showShareMenu
-    closeAllMenusExcept(newState ? 'share' : null)
-    setShowShareMenu(newState)
-    // Reset filename to document title when opening menu
-    if (newState && documentTitle) {
-      setDownloadFilename(documentTitle)
-    }
-  }
-
   const styles = [
     { label: 'Title', value: 'title' },
     { label: 'Subtitle', value: 'subtitle' },
@@ -347,7 +352,7 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
     { label: 'Heading 3', value: 'h3' },
   ]
 
-  const fonts = ['Noto Sans SC', 'Inter', 'Open Sans', 'Roboto', 'Arial', 'Times New Roman', 'Courier New', 'Georgia', 'Verdana']
+  const fonts = ['Noto Sans SC', 'Inter', 'Open Sans', 'Roboto', 'Montserrat', 'Poppins']
 
   // Get current style label
   const getCurrentStyle = () => {
@@ -412,7 +417,7 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
       ref={toolbarRef}
       className="toolbar-container"
       style={{
-        padding: '2px 8px',
+        padding: '2px 6px 2px 0px',
         display: 'flex',
         gap: '2px',
         alignItems: 'center',
@@ -438,28 +443,20 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
         <HomeIcon style={{ fontSize: '20px' }} />
       </button>
 
-      {/* Theme Toggle */}
-      <button 
-        style={buttonStyle}
-        title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-        onClick={toggleTheme}
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        {theme === 'light' ? (
-          <DarkModeIcon style={{ fontSize: '18px' }} />
-        ) : (
-          <LightModeIcon style={{ fontSize: '18px' }} />
-        )}
-      </button>
-
       {/* Search */}
       <button 
-        style={buttonStyle}
+        style={isSearchActive ? activeButtonStyle : buttonStyle}
         title="Search"
-        onMouseDown={(e) => e.preventDefault()}
+        onMouseDown={(e) => {
+          e.preventDefault()
+          onToggleSearch?.()
+        }}
         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+        onMouseLeave={(e) => {
+          if (!isSearchActive) {
+            e.currentTarget.style.backgroundColor = 'transparent'
+          }
+        }}
       >
         <SearchIcon style={{ fontSize: '20px' }} />
       </button>
@@ -511,10 +508,25 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
-        <PrintIcon style={{ fontSize: '20px' }} />
+        <LocalPrintshopIcon style={{ fontSize: '20px' }} />
       </button>
 
-      <div style={dividerStyle} />
+      {/* Theme Toggle */}
+      <button 
+        style={buttonStyle}
+        title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+        onClick={toggleTheme}
+        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
+        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+      >
+        {theme === 'light' ? (
+          <DarkModeIcon style={{ fontSize: '18px' }} />
+        ) : (
+          <LightModeIcon style={{ fontSize: '18px' }} />
+        )}
+      </button>
+
+      <div style={{ ...dividerStyle, marginLeft: '7px' }} />
 
       {/* Style Dropdown */}
       <div ref={styleMenuRef} style={{ position: 'relative' }}>
@@ -921,13 +933,26 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
               gap: '4px'
             }}>
             {['#000000', '#434343', '#666666', '#999999', '#b7b7b7', '#cccccc', '#d9d9d9', '#efefef', '#f3f3f3', '#ffffff', '#980000', '#ff0000', '#ff9900', '#ffff00', '#00ff00', '#00ffff', '#4a86e8', '#0000ff', '#9900ff', '#ff00ff'].map((color) => {
-              const isActive = getCurrentColor() === color.toLowerCase()
+              const currentColor = getCurrentColor()
+              // Check if this is "default" color (black or white) - should unset color instead
+              const isDefaultColor = color === '#000000' || color === '#ffffff'
+              // For default colors, show as active when no color is set (null)
+              // For other colors, show as active when they match the current color
+              const isActive = isDefaultColor 
+                ? (currentColor === null || currentColor === '#000000' || currentColor === '#ffffff')
+                : (currentColor === color.toLowerCase())
               return (
                 <div
                   key={color}
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    editor.chain().focus().setColor(color).run()
+                    if (isDefaultColor) {
+                      // For black/white, unset color to use theme's default text color
+                      editor.chain().focus().unsetColor().run()
+                    } else {
+                      // For other colors, set them normally
+                      editor.chain().focus().setColor(color).run()
+                    }
                     setShowColorMenu(false)
                   }}
                   style={{
@@ -1155,13 +1180,13 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
             closeAllMenusExcept(newState ? 'align' : null)
             setShowAlignMenu(newState)
           }}
-          style={buttonStyle}
+          style={{ ...buttonStyle, padding: '4px 4px 4px 4px' }}
           title="Align & indent"
           onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
           onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
           <FormatAlignLeftIcon style={{ fontSize: '20px' }} />
-          <ArrowDropDownIcon style={{ fontSize: '16px', marginLeft: '2px' }} />
+          <ArrowDropDownIcon style={{ fontSize: '16px', marginLeft: '0px' }} />
         </button>
         {showAlignMenu && (() => {
           const rect = alignMenuRef.current?.getBoundingClientRect()
@@ -1274,13 +1299,13 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
             closeAllMenusExcept(newState ? 'spacing' : null)
             setShowSpacingMenu(newState)
           }}
-          style={buttonStyle}
+          style={{ ...buttonStyle, padding: '4px 4px 4px 2px' }}
           title="Line & paragraph spacing"
           onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
           onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          <div style={{ fontSize: '18px', lineHeight: '1' }}>≡</div>
-          <ArrowDropDownIcon style={{ fontSize: '16px', marginLeft: '2px' }} />
+          <FormatLineSpacingIcon style={{ fontSize: '20px' }} />
+          <ArrowDropDownIcon style={{ fontSize: '16px', marginLeft: '0px' }} />
         </button>
         {showSpacingMenu && (() => {
           const rect = spacingMenuRef.current?.getBoundingClientRect()
@@ -1395,154 +1420,6 @@ export default function Toolbar({ editor, onExport, documentTitle, documentId, o
       </button>
 
       <div style={{ flex: 1 }} />
-
-      {/* Share Button */}
-      <div ref={shareMenuRef} style={{ position: 'relative' }}>
-        <button
-          onMouseDown={handleShare}
-          style={{
-            ...buttonStyle,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '6px 12px'
-          }}
-          title="Share"
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-        >
-          <UploadIcon style={{ fontSize: '20px' }} />
-          <span>Share</span>
-        </button>
-        {showShareMenu && (() => {
-          const rect = shareMenuRef.current?.getBoundingClientRect()
-          return (
-            <div style={{
-              position: 'fixed',
-              top: rect ? `${rect.bottom + 8}px` : '100%',
-              right: rect ? `${window.innerWidth - rect.right}px` : 0,
-              backgroundColor: dropdownBg,
-              border: `1px solid ${dropdownBorder}`,
-              borderRadius: '12px',
-              boxShadow: theme === 'dark' ? '0 4px 16px rgba(0,0,0,0.5)' : '0 4px 16px rgba(0,0,0,0.2)',
-              zIndex: 10010,
-              minWidth: '200px',
-              padding: '8px 0'
-            }}>
-            <div style={{ padding: '16px 16px 12px 16px' }}>
-              <label style={{ 
-                display: 'block', 
-                fontSize: '12px', 
-                color: theme === 'dark' ? '#858585' : '#5f6368', 
-                marginBottom: '6px',
-                fontWeight: 500
-              }}>
-                File name
-              </label>
-            <input
-              type="text"
-                value={downloadFilename}
-                onChange={(e) => handleFilenameChange(e.target.value)}
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    // Save immediately if changed
-                    const newFilename = e.currentTarget.value.trim()
-                    if (newFilename && newFilename !== documentTitle && documentId && onTitleUpdate) {
-                      if (titleUpdateTimeoutRef.current) {
-                        clearTimeout(titleUpdateTimeoutRef.current)
-                      }
-                      onTitleUpdate(newFilename)
-                    }
-                    // Blur the input to remove focus, but keep menu open
-                    e.currentTarget.blur()
-                  }
-                }}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                border: `1px solid ${dropdownBorder}`,
-                borderRadius: '4px',
-                fontSize: '14px',
-                  color: dropdownTextColor,
-                  backgroundColor: dropdownBg,
-                  outline: 'none'
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = theme === 'dark' ? '#4fc3f7' : '#1a73e8'
-                  e.target.style.boxShadow = theme === 'dark' ? '0 0 0 1px #4fc3f7' : '0 0 0 1px #1a73e8'
-              }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = dropdownBorder
-                  e.target.style.boxShadow = 'none'
-                  // Save immediately on blur if changed
-                  if (e.target.value.trim() && e.target.value !== documentTitle && documentId && onTitleUpdate) {
-                    if (titleUpdateTimeoutRef.current) {
-                      clearTimeout(titleUpdateTimeoutRef.current)
-                    }
-                    onTitleUpdate(e.target.value.trim())
-                  }
-                }}
-                placeholder="Enter file name"
-              />
-            </div>
-              <button
-              onMouseDown={(e) => {
-                e.preventDefault()
-                setShowShareMenu(false)
-                onExport('pdf', downloadFilename)
-              }}
-                style={{
-                width: '100%',
-                padding: '12px 16px',
-                  border: 'none',
-                backgroundColor: 'transparent',
-                  color: dropdownTextColor,
-                  cursor: 'pointer',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                textAlign: 'left'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = dropdownHoverBg}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-            >
-              <PictureAsPdfIcon style={{ fontSize: '20px', color: '#d32f2f' }} />
-              <span>Download as PDF</span>
-              </button>
-              <button
-              onMouseDown={(e) => {
-                e.preventDefault()
-                  setShowShareMenu(false)
-                onExport('docx', downloadFilename)
-                }}
-                style={{
-                width: '100%',
-                padding: '12px 16px',
-                  border: 'none',
-                backgroundColor: 'transparent',
-                color: dropdownTextColor,
-                  cursor: 'pointer',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                textAlign: 'left'
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = dropdownHoverBg}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-            >
-              <DescriptionIcon style={{ fontSize: '20px', color: '#1976d2' }} />
-              <span>Download as DOCX</span>
-              </button>
-            </div>
-          )
-        })()}
-      </div>
     </div>
   )
 }

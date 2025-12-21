@@ -1,5 +1,5 @@
 import { Panel, PanelGroup, PanelResizeHandle, ImperativePanelHandle } from 'react-resizable-panels'
-import { useEditor } from '@tiptap/react'
+import { useEditor, Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Extension } from '@tiptap/core'
 import TextAlign from '@tiptap/extension-text-align'
@@ -97,28 +97,144 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
   const isUserResizingRef = useRef<boolean>(false) // Track if user is actively resizing
   const [fileExplorerSize, setFileExplorerSize] = useState<number>(14) // Track File Explorer size as state
   const [selectedFolder, setSelectedFolder] = useState<'library' | 'project' | null>(null) // Track selected folder
+  const [isSearchMode, setIsSearchMode] = useState(() => {
+    // Restore search mode from sessionStorage if available (persists across navigation)
+    try {
+      const saved = sessionStorage.getItem('isSearchMode')
+      return saved === 'true'
+    } catch {
+      return false
+    }
+  }) // Track search mode state
+  const [searchQuery, setSearchQuery] = useState(() => {
+    // Restore search query from sessionStorage if available (persists across navigation)
+    try {
+      const saved = sessionStorage.getItem('searchQuery')
+      return saved || ''
+    } catch {
+      return ''
+    }
+  }) // Track search query for highlighting
   const lastContentRef = useRef<string>('') // Track last set content to avoid unnecessary updates
   const currentDocIdRef = useRef<string | null>(null) // Track current document ID
   const currentDocTitleRef = useRef<string | null>(null) // Track current document title for placeholder
+  const pendingSearchNavRef = useRef<{ query: string; position: number } | null>(null) // Track pending search navigation
+  const isNavigatingFromSearchRef = useRef<boolean>(false) // Track if we're navigating from search results
+  const lastRestoredDocIdRef = useRef<string | null>(null) // Track last document ID we restored search state for
   
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
   const borderColor = theme === 'dark' ? '#232323' : '#dadce0'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#5f6368'
 
-  // Load all documents for FileExplorer
+  // Restore search mode and query from sessionStorage when document changes (after navigation)
+  useEffect(() => {
+    // Only restore once per document change
+    if (document?.id === lastRestoredDocIdRef.current) {
+      return
+    }
+    
+    // Check sessionStorage for persisted search mode state
+    try {
+      const savedSearchMode = sessionStorage.getItem('isSearchMode')
+      const savedQuery = sessionStorage.getItem('searchQuery')
+      
+      // Use functional updates to avoid dependency issues
+      if (savedSearchMode === 'true') {
+        setIsSearchMode((prev) => {
+          if (!prev) {
+            return true
+          }
+          return prev
+        })
+        if (savedQuery) {
+          setSearchQuery((prev) => {
+            if (prev !== savedQuery) {
+              return savedQuery
+            }
+            return prev
+          })
+        }
+      } else if (savedSearchMode === 'false') {
+        setIsSearchMode((prev) => {
+          if (prev) {
+            return false
+          }
+          return prev
+        })
+        setSearchQuery((prev) => {
+          if (prev) {
+            return ''
+          }
+          return prev
+        })
+        try {
+          sessionStorage.removeItem('searchQuery')
+        } catch (e) {
+          console.warn('Failed to clear search query from sessionStorage:', e)
+        }
+      }
+      
+      lastRestoredDocIdRef.current = document?.id || null
+    } catch (e) {
+      console.warn('Failed to restore search mode:', e)
+    }
+  }, [document?.id]) // Run when document changes (navigation)
+
+  // Load all documents for FileExplorer and TopBar
   useEffect(() => {
     loadDocuments()
-  }, [])
+  }, [document?.projectId]) // Reload when project changes
 
-  // Keyboard shortcut: Ctrl+Shift+E to toggle FileExplorer
+  // Keyboard shortcuts: Ctrl+Shift+E to toggle FileExplorer, Ctrl+Shift+F to toggle search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Check if Ctrl+Shift+E (or Cmd+Shift+E on Mac)
+      // Don't prevent default if typing in an input field or textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        // Allow Ctrl+F in input fields for browser's native find
+        return
+      }
+      
+      // Check if Ctrl+Shift+F (or Cmd+Shift+F on Mac) - activate search mode
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsSearchMode((prev) => {
+          const newValue = !prev
+          // Persist search mode state
+          try {
+            if (newValue) {
+              sessionStorage.setItem('isSearchMode', 'true')
+              // Keep existing search query if there is one
+              if (searchQuery) {
+                sessionStorage.setItem('searchQuery', searchQuery)
+              }
+            } else {
+              // User explicitly turned off search mode - clear everything
+              sessionStorage.setItem('isSearchMode', 'false')
+              sessionStorage.removeItem('searchQuery')
+              setSearchQuery('') // Clear the query state
+              // Clear highlights immediately when search mode is turned off
+              if (editor && !editor.isDestroyed) {
+                clearSearchHighlights(editor)
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to persist search mode:', e)
+          }
+          // Ensure FileExplorer is visible when entering search mode
+          if (newValue && fileExplorerPanelRef.current) {
+            const currentSize = fileExplorerPanelRef.current.getSize()
+            if (currentSize === 0) {
+              fileExplorerPanelRef.current.resize(14)
+            }
+          }
+          return newValue
+        })
+        return
+      }
+      
+      // Check if Ctrl+Shift+E (or Cmd+Shift+E on Mac) - toggle FileExplorer
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
-        // Don't prevent default if typing in an input field
-        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-          return
-        }
         e.preventDefault()
         e.stopPropagation()
         if (fileExplorerPanelRef.current) {
@@ -133,7 +249,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
     // Use capture phase to catch events before they reach the editor
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [])
+  }, [searchQuery])
 
   const loadDocuments = async () => {
     try {
@@ -172,8 +288,300 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
     }
   }
 
-  const handleDocumentClick = (docId: string) => {
+  const handleDocumentClick = (docId: string, searchQueryParam?: string, matchPosition?: number) => {
+    // If called from search results, ensure search mode stays active
+    const wasCalledFromSearch = !!searchQueryParam
+    
+    if (searchQueryParam) {
+      // Mark that we're navigating from search results BEFORE loading doc
+      // This prevents focus attempts from interrupting navigation
+      isNavigatingFromSearchRef.current = true
+      
+      // Use the query from the clicked result, but prefer current query if it exists and is different
+      // This ensures we preserve the user's search query when clicking results
+      const queryToUse = searchQuery && searchQuery.trim() ? searchQuery : searchQueryParam
+      
+      // Update query if it's different from current
+      if (queryToUse !== searchQuery) {
+        setSearchQuery(queryToUse)
+      }
+      
+      // Persist search mode to sessionStorage so it survives navigation/remount
+      try {
+        sessionStorage.setItem('isSearchMode', 'true')
+        // Always persist the current query (either from state or from clicked result)
+        sessionStorage.setItem('searchQuery', queryToUse)
+      } catch (e) {
+        // Silently fail
+      }
+      
+      // Update searchQueryParam to use the preserved query for navigation
+      searchQueryParam = queryToUse
+    }
+    
+    // Store match position for navigation after document loads
+    if (matchPosition !== undefined && searchQueryParam) {
+      pendingSearchNavRef.current = { query: searchQueryParam, position: matchPosition }
+      
+      // ALSO store in sessionStorage as backup (survives re-renders)
+      try {
+        sessionStorage.setItem('pendingSearchNav', JSON.stringify({
+          query: searchQueryParam,
+          position: matchPosition,
+          targetDocId: docId
+        }))
+      } catch (e) {
+        // Silently fail
+      }
+      
+      // If clicking on same document, navigate immediately without waiting for document load
+      if (document?.id === docId && editor && !editor.isDestroyed) {
+        setTimeout(() => {
+          if (editor && !editor.isDestroyed) {
+            navigateToMatch(editor, searchQueryParam, matchPosition)
+            // Clear pending nav since we've used it
+            pendingSearchNavRef.current = null
+            try {
+              sessionStorage.removeItem('pendingSearchNav')
+            } catch (e) {
+              // Silently fail
+            }
+          }
+        }, 100)
+        // Don't navigate() since we're already on this document
+        // But still ensure search mode is active
+        if (wasCalledFromSearch) {
+          setIsSearchMode(true)
+        }
+        return
+      }
+    }
+    
+    // Ensure search mode stays active when clicking search results
+    if (wasCalledFromSearch) {
+      setIsSearchMode(true)
+    }
+    
+    // Always navigate, even if it's the current document (for different document case)
     navigate(`/document/${docId}`)
+  }
+  
+  // Clear all search highlights (temporary highlights, not saved to document)
+  const clearSearchHighlights = (editor: Editor) => {
+    if (!editor) return
+    
+    try {
+      const { state, dispatch } = editor.view
+      const { tr, doc } = state
+      const searchHighlightColors = ['#FFEB3B', '#FDD835', '#fef08a', '#4a5568', '#e3f2fd', '#5a6b7d']
+      const highlightMarkType = state.schema.marks.highlight
+      
+      if (!highlightMarkType) return
+      
+      let modified = false
+      
+      // Iterate through all nodes and remove search highlight marks
+      doc.descendants((node, pos) => {
+        if (node.marks && node.marks.length > 0) {
+          node.marks.forEach(mark => {
+            if (mark.type.name === 'highlight') {
+              const color = mark.attrs?.color
+              if (color && searchHighlightColors.includes(color)) {
+                // Remove this specific mark from this node's range
+                tr.removeMark(pos, pos + node.nodeSize, mark.type)
+                modified = true
+              }
+            }
+          })
+        }
+      })
+      
+      if (modified) {
+        dispatch(tr)
+      }
+    } catch (error) {
+      console.error('Error clearing search highlights:', error)
+    }
+  }
+  
+  // Highlight all matches in the document (Chrome-style temporary highlights)
+  const highlightAllMatches = (editor: Editor, query: string) => {
+    if (!editor || !query.trim()) return
+    
+    try {
+      // First clear existing search highlights
+      clearSearchHighlights(editor)
+      
+      const { state, dispatch } = editor.view
+      const { tr } = state
+      const queryLower = query.toLowerCase()
+      const matches: Array<{ from: number; to: number }> = []
+      
+      // Find all matches
+      state.doc.descendants((node: any, pos: number) => {
+        if (node.isText) {
+          const text = node.text || ''
+          const textLower = text.toLowerCase()
+          let searchIndex = 0
+          
+          while (true) {
+            const index = textLower.indexOf(queryLower, searchIndex)
+            if (index === -1) break
+            
+            const from = pos + index
+            const to = from + query.length
+            matches.push({ from, to })
+            searchIndex = index + 1
+          }
+        }
+      })
+      
+      // Apply highlight marks to all matches
+      // Use a distinct color for search highlights (slightly bluish yellow for light mode, bluish gray for dark mode)
+      const highlightColor = theme === 'dark' ? '#5a6b7d' : '#e3f2fd'
+      
+      matches.forEach(({ from, to }) => {
+        tr.addMark(from, to, state.schema.marks.highlight.create({ color: highlightColor }))
+      })
+      
+      if (matches.length > 0) {
+        dispatch(tr)
+        
+        // Scroll to first match
+        if (matches[0]) {
+          setTimeout(() => {
+            try {
+              const editorElement = editor.view.dom.closest('.editor-container') || editor.view.dom
+              const editorRect = editorElement.getBoundingClientRect()
+              const viewportHeight = window.innerHeight
+              const targetY = viewportHeight * 0.15 // Top 15% of screen
+              
+              const coords = editor.view.coordsAtPos(matches[0].from)
+              
+              if (coords) {
+                const currentScrollTop = editorElement.scrollTop || 0
+                const scrollOffset = coords.top - editorRect.top - targetY + currentScrollTop
+                
+                editorElement.scrollTo({
+                  top: Math.max(0, scrollOffset),
+                  behavior: 'smooth'
+                })
+              }
+            } catch (error) {
+              console.error('Error scrolling to first match:', error)
+            }
+          }, 100)
+        }
+      }
+    } catch (error) {
+      console.error('Error highlighting matches:', error)
+    }
+  }
+  
+  // Navigate to specific match position and scroll to it (no selection, just scroll)
+  const navigateToMatch = (editor: Editor, query: string, charPosition: number) => {
+    if (!editor || !query.trim()) {
+      return
+    }
+    
+    try {
+      const { state } = editor
+      const { doc } = state
+      const queryLower = query.toLowerCase()
+      
+      // Convert character position to TipTap position
+      let currentCharPos = 0
+      let matchFound: { from: number; to: number } | null = null
+      
+      doc.descendants((node: any, pos: number) => {
+        if (node.isText && !matchFound) {
+          const text = node.text || ''
+          const textLower = text.toLowerCase()
+          
+          const nodeStart = currentCharPos
+          const nodeEnd = currentCharPos + text.length
+          
+          if (charPosition >= nodeStart && charPosition < nodeEnd) {
+            const offsetInNode = charPosition - nodeStart
+            const searchStart = Math.max(0, offsetInNode - query.length)
+            const searchIndex = textLower.indexOf(queryLower, searchStart)
+            
+            if (searchIndex !== -1 && searchIndex <= offsetInNode + query.length) {
+              const from = pos + searchIndex
+              const to = from + query.length
+              matchFound = { from, to }
+            }
+          }
+          
+          currentCharPos += text.length
+        }
+        return !matchFound
+      })
+      
+      // If exact position not found, find closest match
+      if (!matchFound) {
+        currentCharPos = 0
+        let closestMatch: { from: number; to: number; distance: number } | null = null
+        
+        doc.descendants((node: any, pos: number) => {
+          if (node.isText) {
+            const text = node.text || ''
+            const textLower = text.toLowerCase()
+            const searchIndex = textLower.indexOf(queryLower)
+            
+            if (searchIndex !== -1) {
+              const matchCharPos = currentCharPos + searchIndex
+              const distance = Math.abs(matchCharPos - charPosition)
+              
+              if (!closestMatch || distance < closestMatch.distance) {
+                const from = pos + searchIndex
+                const to = from + query.length
+                closestMatch = { from, to, distance }
+              }
+            }
+            
+            currentCharPos += text.length
+          }
+          return true
+        })
+        
+        if (closestMatch !== null) {
+          matchFound = { 
+            from: (closestMatch as { from: number; to: number; distance: number }).from, 
+            to: (closestMatch as { from: number; to: number; distance: number }).to 
+          }
+        }
+      }
+      
+      // Scroll to match
+      if (matchFound) {
+        try {
+          const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
+          if (!scrollContainer) {
+            editor.commands.scrollIntoView()
+            return
+          }
+          
+          const coords = editor.view.coordsAtPos(matchFound.from)
+          
+          if (coords) {
+            const containerRect = scrollContainer.getBoundingClientRect()
+            const matchY = coords.top - containerRect.top + scrollContainer.scrollTop
+            const viewportHeight = scrollContainer.clientHeight
+            const targetY = matchY - viewportHeight * 0.4
+            
+            scrollContainer.scrollTo({
+              top: Math.max(0, targetY),
+              behavior: 'auto'
+            })
+          }
+        } catch (error) {
+          editor.commands.scrollIntoView()
+        }
+      }
+    } catch (error) {
+      // Silently fail
+    }
   }
 
   const handleDocumentRename = async (docId: string, newTitle: string) => {
@@ -199,8 +607,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
       const docToDelete = document?.id === docId ? document : documents.find(doc => doc.id === docId)
       const projectId = docToDelete?.projectId
       
-      const deleteResult = await documentApi.delete(docId)
-      console.log('[Layout] Delete result for', docId, ':', deleteResult)
+      await documentApi.delete(docId)
       
       // Remove document from project if it belongs to one
       if (projectId) {
@@ -214,8 +621,38 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
       
       // If current document was deleted, find next file to navigate to
       if (document?.id === docId) {
-        // Find the index of the deleted document
-        const deletedIndex = documents.findIndex(doc => doc.id === docId)
+        // Helper function to get documents in file explorer order:
+        // 1. README.md (if exists)
+        // 2. Library files (sorted by order or createdAt)
+        // 3. Project files (sorted by order or createdAt)
+        const getDocumentsInFileExplorerOrder = (docs: Document[]): Document[] => {
+          const readmeDoc = docs.find(doc => doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md')
+          const libraryDocs = docs.filter(doc => doc.folder === 'library' && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
+          const projectDocs = docs.filter(doc => (!doc.folder || doc.folder === 'project') && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
+          
+          // Sort documents by order if available, otherwise by creation time
+          const sortDocuments = (docsToSort: Document[]) => {
+            return [...docsToSort].sort((a, b) => {
+              if (a.order !== undefined && b.order !== undefined) {
+                return a.order - b.order
+              }
+              return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            })
+          }
+          
+          const orderedDocs: Document[] = []
+          if (readmeDoc) {
+            orderedDocs.push(readmeDoc)
+          }
+          orderedDocs.push(...sortDocuments(libraryDocs))
+          orderedDocs.push(...sortDocuments(projectDocs))
+          
+          return orderedDocs
+        }
+        
+        // Get documents in file explorer order
+        const orderedDocuments = getDocumentsInFileExplorerOrder(documents)
+        const deletedIndex = orderedDocuments.findIndex(doc => doc.id === docId)
         const updatedDocuments = documents.filter(doc => doc.id !== docId)
         
         // Clear the current document reference first
@@ -227,9 +664,19 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
         setDocuments(updatedDocuments)
         
         if (updatedDocuments.length > 0) {
-          // Navigate to the previous file (or first file if deleting the first one)
-          const previousIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
-          navigate(`/document/${updatedDocuments[previousIndex].id}`)
+          // Get updated documents in file explorer order
+          const updatedOrderedDocuments = getDocumentsInFileExplorerOrder(updatedDocuments)
+          
+          // Find the file that appears above the deleted one
+          // If deleting the first file, navigate to the new first file
+          const targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
+          
+          if (targetIndex < updatedOrderedDocuments.length) {
+            navigate(`/document/${updatedOrderedDocuments[targetIndex].id}`)
+          } else {
+            // Fallback: navigate to first file if index is out of bounds
+            navigate(`/document/${updatedOrderedDocuments[0].id}`)
+          }
         } else {
           // No more documents in project, go to home
           setDocuments([])
@@ -270,9 +717,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
       
       // Use selected folder if available, otherwise default to 'project'
       const folder = selectedFolder || 'project'
-      console.log('[Layout] Creating document with folder:', folder, 'selectedFolder state:', selectedFolder)
       const newDoc = await documentApi.create(newTitle, folder)
-      console.log('[Layout] Created document:', newDoc.id, 'folder:', newDoc.folder)
       
       // If current document has projectId, add new doc to same project
       if (document?.projectId) {
@@ -586,6 +1031,9 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
       }
     },
   })
+  
+
+  // Search results use temporary highlights (Chrome-style) that are not saved to the document
 
   // Update editor content when document changes
   useEffect(() => {
@@ -602,7 +1050,9 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
     
     // Skip if content hasn't changed AND document ID is the same
     const documentChanged = currentDocIdRef.current !== document.id
-    if (!documentChanged && lastContentRef.current === document.content) {
+    const contentChanged = lastContentRef.current !== document.content
+    
+    if (!documentChanged && !contentChanged) {
       return
     }
     
@@ -627,57 +1077,142 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
         
          try {
           const content = JSON.parse(docContent)
+          
           // Check if editor is still mounted and ready
           if (editor && !editor.isDestroyed && editor.view) {
+            // Always clear search highlights before setting new content
+            // This ensures highlights don't persist when navigating between documents
+            clearSearchHighlights(editor)
+            
             // Set content
             editor.commands.setContent(content)
             lastContentRef.current = docContent
             
-            // Focus the editor after content is fully rendered
-            // Use multiple focus attempts with increasing delays to ensure focus is regained
-            const focusEditor = (attempt: number = 0) => {
-              if (isCancelled || attempt > 5) return
-              
-              if (editor && !editor.isDestroyed && editor.view) {
-                const editorElement = editor.view.dom as HTMLElement
-                
-                if (editorElement) {
-                  // Try to focus the editor
-                  editorElement.focus()
-                  
-                  // Ensure it's editable
-                  if (!editorElement.isContentEditable) {
-                    editorElement.contentEditable = 'true'
-                  }
-                  
-                  // Use TipTap commands as well
-                  try {
-                    editor.commands.focus('end')
-                  } catch (e) {
-                    // Ignore focus errors
-                  }
-                  
-                  // Check if focus was successful
-                  setTimeout(() => {
-                    if (isCancelled) return
-                    
-                    const isFocused = window.document.activeElement === editorElement || 
-                                     editorElement.contains(window.document.activeElement)
-                    
-                    if (!isFocused && attempt < 5) {
-                      // Focus didn't work, try again with longer delay
-                      focusTimeoutId = setTimeout(() => focusEditor(attempt + 1), 100 * (attempt + 1))
-                    }
-                  }, 50)
+            // After content is set, clear highlights again if search mode is off
+            // This handles cases where content from server might have highlights
+            if (!isSearchMode || !searchQuery.trim()) {
+              setTimeout(() => {
+                if (editor && !editor.isDestroyed) {
+                  clearSearchHighlights(editor)
                 }
+              }, 50)
+            }
+            
+            // Check if we have a pending search navigation
+            // First check the ref
+            let pendingNav = pendingSearchNavRef.current
+            
+            // If ref is null, try to restore from sessionStorage (backup)
+            if (!pendingNav) {
+              try {
+                const stored = sessionStorage.getItem('pendingSearchNav')
+                if (stored) {
+                  const parsed = JSON.parse(stored)
+                  
+                  // Only use if it matches current document
+                  if (parsed.targetDocId === document.id) {
+                    pendingNav = { query: parsed.query, position: parsed.position }
+                    // Also restore to ref for consistency
+                    pendingSearchNavRef.current = pendingNav
+                  } else {
+                    // Clear stale sessionStorage entry
+                    try {
+                      sessionStorage.removeItem('pendingSearchNav')
+                    } catch (e) {
+                      // Silently fail
+                    }
+                  }
+                }
+              } catch (e) {
+                // Silently fail
               }
             }
             
-            // Start focus attempts after render
-            requestAnimationFrame(() => {
-              if (isCancelled) return
-              setTimeout(() => focusEditor(0), 50)
-            })
+            if (pendingNav) {
+              const { query, position } = pendingNav
+              
+              // Clear both ref and sessionStorage immediately (before setTimeout)
+              // This prevents it from being used again if component re-renders
+              pendingSearchNavRef.current = null
+              try {
+                sessionStorage.removeItem('pendingSearchNav')
+              } catch (e) {
+                // Silently fail
+              }
+              
+              setTimeout(() => {
+                if (editor && !editor.isDestroyed) {
+                  navigateToMatch(editor, query, position)
+                  
+                  // Clear flag AFTER navigation completes (with small delay to ensure scroll completes)
+                  setTimeout(() => {
+                    isNavigatingFromSearchRef.current = false
+                  }, 100) // Small delay to ensure scroll completes
+                }
+              }, 300)
+            } else {
+              // No pending navigation - reset the flag
+              isNavigatingFromSearchRef.current = false
+              
+              if (searchQuery.trim() && isSearchMode) {
+                // Highlight all matches if search query is present but no specific position
+                setTimeout(() => {
+                  if (editor && !editor.isDestroyed) {
+                    highlightAllMatches(editor, searchQuery)
+                  }
+                }, 200)
+              }
+            }
+            
+            // Focus the editor after content is fully rendered
+            // Skip focus if we're navigating from search results OR have pending search navigation
+            // to prevent interrupting navigation
+            if (!isNavigatingFromSearchRef.current && !pendingSearchNavRef.current) {
+              // Use multiple focus attempts with increasing delays to ensure focus is regained
+              const focusEditor = (attempt: number = 0) => {
+                if (isCancelled || attempt > 5) return
+                
+                if (editor && !editor.isDestroyed && editor.view) {
+                  const editorElement = editor.view.dom as HTMLElement
+                  
+                  if (editorElement) {
+                    // Try to focus the editor
+                    editorElement.focus()
+                    
+                    // Ensure it's editable
+                    if (!editorElement.isContentEditable) {
+                      editorElement.contentEditable = 'true'
+                    }
+                    
+                    // Use TipTap commands as well
+                    try {
+                      editor.commands.focus('end')
+                    } catch (e) {
+                      // Ignore focus errors
+                    }
+                    
+                    // Check if focus was successful
+                    setTimeout(() => {
+                      if (isCancelled) return
+                      
+                      const isFocused = window.document.activeElement === editorElement || 
+                                       editorElement.contains(window.document.activeElement)
+                      
+                      if (!isFocused && attempt < 5) {
+                        // Focus didn't work, try again with longer delay
+                        focusTimeoutId = setTimeout(() => focusEditor(attempt + 1), 100 * (attempt + 1))
+                      }
+                    }, 50)
+                  }
+                }
+              }
+              
+              // Start focus attempts after render
+              requestAnimationFrame(() => {
+                if (isCancelled) return
+                setTimeout(() => focusEditor(0), 50)
+              })
+            }
           }
         } catch (error) {
           console.error('Failed to parse document content:', error)
@@ -690,7 +1225,52 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
       if (timeoutId) clearTimeout(timeoutId)
       if (focusTimeoutId) clearTimeout(focusTimeoutId)
     }
-  }, [document?.id, document?.content, editor])
+  }, [document?.id, document?.content, editor, searchQuery])
+
+  // Automatically highlight all matches when search query changes and search mode is active
+  // Also clear highlights when search mode is turned off
+  useEffect(() => {
+    if (!editor || !document) return
+    
+    if (isSearchMode && searchQuery.trim()) {
+      // Wait a bit for editor to be ready, then highlight all matches
+      const timeoutId = setTimeout(() => {
+        if (editor && !editor.isDestroyed) {
+          highlightAllMatches(editor, searchQuery)
+        }
+      }, 300)
+      
+      return () => clearTimeout(timeoutId)
+    } else {
+      // Clear highlights when search mode is off or query is empty
+      // This ensures ALL temporary highlights are cleared, not just in current document
+      // Use a small delay to ensure editor is ready
+      const clearTimeoutId = setTimeout(() => {
+        if (editor && !editor.isDestroyed) {
+          clearSearchHighlights(editor)
+        }
+      }, 100)
+      
+      return () => clearTimeout(clearTimeoutId)
+    }
+  }, [searchQuery, isSearchMode, editor, document?.id, theme])
+  
+  // Additional effect: Clear highlights whenever search mode is turned off
+  // This ensures highlights are cleared even when switching documents
+  useEffect(() => {
+    if (!editor || !document) return
+    
+    if (!isSearchMode) {
+      // Search mode is off - clear highlights immediately
+      const clearTimeoutId = setTimeout(() => {
+        if (editor && !editor.isDestroyed) {
+          clearSearchHighlights(editor)
+        }
+      }, 50)
+      
+      return () => clearTimeout(clearTimeoutId)
+    }
+  }, [isSearchMode, editor, document?.id])
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -798,14 +1378,30 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
     }
   }, [])
 
-  const handleExport = async (format: 'pdf' | 'docx', filename?: string) => {
-    if (!document) return
+  const handleExport = async (format: 'pdf' | 'docx', filename?: string, documentIds?: string[]) => {
+    // If documentIds provided, use them; otherwise fall back to current document
+    const idsToExport = documentIds && documentIds.length > 0 ? documentIds : (document ? [document.id] : [])
+    
+    if (idsToExport.length === 0) {
+      alert('Please select at least one document to export.')
+      return
+    }
     
     try {
-      const exportFilename = filename || document.title || 'document'
-      // IPC returns data directly, not wrapped in { data: ... }
-      const exportData = await exportApi.export(document.id, format, exportFilename)
-      const blob = new Blob([exportData], { 
+      const exportFilename = filename || document?.title || 'document'
+      
+      // Use exportMultiple for multiple documents (merges into one file)
+      // Use export for single document
+      let exportData: number[]
+      if (idsToExport.length === 1) {
+        exportData = await exportApi.export(idsToExport[0], format, exportFilename)
+      } else {
+        // Multiple documents - merge into one file (WYSIWYG)
+        exportData = await exportApi.exportMultiple(idsToExport, format, exportFilename)
+      }
+      
+      // Convert array back to Buffer/Blob
+      const blob = new Blob([new Uint8Array(exportData)], { 
         type: format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
       })
       const url = window.URL.createObjectURL(blob)
@@ -842,7 +1438,25 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
       backgroundColor: bgColor
     }}>
       {/* Top Bar - Logo + Menu */}
-      <TopBar />
+      <TopBar 
+        onExport={handleExport}
+        documentTitle={document?.title}
+        documentId={document?.id}
+        onTitleUpdate={handleTitleUpdate}
+        documents={documents}
+        projectName={projectName}
+        editor={editor}
+        onToggleFileExplorer={() => {
+          if (fileExplorerPanelRef.current) {
+            const currentSize = fileExplorerPanelRef.current.getSize()
+            const newSize = currentSize > 0 ? 0 : 14
+            fileExplorerPanelRef.current.resize(newSize)
+          }
+        }}
+        onToggleAIPanel={() => {
+          setIsAIPanelOpen(!isAIPanelOpen)
+        }}
+      />
       
       {/* Toolbar - Independent, full width - Hide for PDF files */}
       {!(document && document.title.toLowerCase().endsWith('.pdf')) && (
@@ -856,11 +1470,42 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
             overflow: 'visible'
           }}>
             <Toolbar 
-              editor={editor} 
-              onExport={handleExport} 
-              documentTitle={document?.title}
-              documentId={document?.id}
-              onTitleUpdate={handleTitleUpdate}
+              editor={editor}
+              onToggleSearch={() => {
+                setIsSearchMode((prev) => {
+                  const newValue = !prev
+                  // Persist search mode state
+                  try {
+                    if (newValue) {
+                      sessionStorage.setItem('isSearchMode', 'true')
+                      // Keep existing search query if there is one
+                      if (searchQuery) {
+                        sessionStorage.setItem('searchQuery', searchQuery)
+                      }
+                    } else {
+                      // User explicitly turned off search mode - clear everything
+                      sessionStorage.setItem('isSearchMode', 'false')
+                      sessionStorage.removeItem('searchQuery')
+                      setSearchQuery('') // Clear the query state
+                      // Clear highlights immediately when search mode is turned off
+                      if (editor && !editor.isDestroyed) {
+                        clearSearchHighlights(editor)
+                      }
+                    }
+                  } catch (e) {
+                    console.warn('Failed to persist search mode:', e)
+                  }
+                  // Ensure FileExplorer is visible when entering search mode
+                  if (newValue && fileExplorerPanelRef.current) {
+                    const currentSize = fileExplorerPanelRef.current.getSize()
+                    if (currentSize === 0) {
+                      fileExplorerPanelRef.current.resize(14)
+                    }
+                  }
+                  return newValue
+                })
+              }}
+              isSearchActive={isSearchMode}
             />
           </div>
           
@@ -910,7 +1555,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
               alignItems: 'center',
               justifyContent: 'space-between'
             }}>
-              <span>{projectName}</span>
+              <span>{isSearchMode ? 'SEARCH' : projectName}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <button
                   onClick={handleCreateDocument}
@@ -962,6 +1607,12 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
                   onDocumentDelete={handleDocumentDelete}
                   onReorderDocuments={handleReorderDocuments}
                   projectName={projectName}
+                  isSearchMode={isSearchMode}
+                  onSearchModeChange={setIsSearchMode}
+                  onSearchQueryChange={setSearchQuery}
+                  searchQueryProp={searchQuery}
+                  onDocumentsUpdated={loadDocuments}
+                  onDocumentChange={onDocumentChange}
                   onSelectedFolderChange={setSelectedFolder}
                   onFileUploaded={async (newDoc) => {
                     // Reload documents to show the new file
@@ -1005,6 +1656,8 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
               editor={editor}
               onDocumentChange={onDocumentChange}
               showToolbarOnly={false}
+              isAIPanelOpen={isAIPanelOpen}
+              aiPanelWidth={aiPanelWidth}
             />
           )}
         </Panel>
@@ -1036,7 +1689,7 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
               width: '48px',
               height: '48px',
               borderRadius: '50%',
-              backgroundColor: theme === 'dark' ? '#2d2d2d' : '#f1f3f4',
+              backgroundColor: theme === 'dark' ? '#252525' : '#e8e8e8',
               border: 'none',
               cursor: 'pointer',
               display: 'flex',
@@ -1048,11 +1701,11 @@ export default function Layout({ document, onDocumentChange }: LayoutProps) {
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.transform = 'scale(1.05)'
-              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#3e3e42' : '#e8eaed'
+              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#353535' : '#d8d8d8'
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.transform = 'scale(1)'
-              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#f1f3f4'
+              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#252525' : '#e8e8e8'
             }}
             title="Open AI Chat"
           >

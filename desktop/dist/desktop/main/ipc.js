@@ -4,6 +4,7 @@ import { documentService } from './services/documentService.js';
 import { chatHistoryService } from './services/chatHistoryService.js';
 import { geminiService } from './services/geminiService.js';
 import { projectService } from './services/projectService.js';
+import { exportService } from './services/export.js';
 export function setupIPC() {
     // Document operations
     ipcMain.handle('document:getAll', async () => {
@@ -72,6 +73,15 @@ export function setupIPC() {
         }
         catch (error) {
             console.error('IPC document:delete error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('document:cleanupOrphaned', async () => {
+        try {
+            return await documentService.cleanupOrphanedFiles();
+        }
+        catch (error) {
+            console.error('IPC document:cleanupOrphaned error:', error);
             throw error;
         }
     });
@@ -407,6 +417,36 @@ Rephrased text:`;
         }
         catch (error) {
             console.error('IPC file:saveTemp error:', error);
+            throw error;
+        }
+    });
+    // Export operations - WYSIWYG (What You See Is What You Get)
+    ipcMain.handle('export:export', async (_, documentId, format, filename) => {
+        try {
+            if (!format || !['pdf', 'docx'].includes(format)) {
+                throw new Error('Invalid format. Must be pdf or docx');
+            }
+            const fileBuffer = await exportService.exportDocument(documentId, format);
+            return Array.from(fileBuffer); // Convert Buffer to array for IPC
+        }
+        catch (error) {
+            console.error('IPC export:export error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('export:exportMultiple', async (_, documentIds, format, filename) => {
+        try {
+            if (!format || !['pdf', 'docx'].includes(format)) {
+                throw new Error('Invalid format. Must be pdf or docx');
+            }
+            if (!documentIds || documentIds.length === 0) {
+                throw new Error('No documents selected');
+            }
+            const fileBuffer = await exportService.exportMultipleDocuments(documentIds, format);
+            return Array.from(fileBuffer); // Convert Buffer to array for IPC
+        }
+        catch (error) {
+            console.error('IPC export:exportMultiple error:', error);
             throw error;
         }
     });

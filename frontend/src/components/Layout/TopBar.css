@@ -48,14 +48,15 @@
   display: flex;
   align-items: center;
   gap: 0;
+  margin-left: -3px;
   -webkit-app-region: no-drag; /* Prevent dragging on menu */
 }
 
 .menu-item {
   background: none;
   border: none;
-  padding: 4px 12px;
-  font-size: 13px;
+  padding: 2px 12px;
+  font-size: 12px;
   font-family: 'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   cursor: pointer;
   border-radius: 4px;
@@ -68,8 +69,8 @@
 }
 
 .topbar-light .menu-item:hover {
-  background-color: #f1f3f4;
-  color: #202124;
+  background-color: #eaebee;
+  color: #5f6368;
 }
 
 .topbar-dark .menu-item {
@@ -77,8 +78,8 @@
 }
 
 .topbar-dark .menu-item:hover {
-  background-color: #2d2d2d;
-  color: #ffffff;
+  background-color: #252525;
+  color: #d6d6dd;
 }
 
 .topbar-right {
@@ -136,5 +137,26 @@
 .topbar-dark .window-control-btn.close-btn:hover {
   background-color: #e81123;
   color: #ffffff;
+}
+
+/* Thinner checkbox lines */
+.thin-checkbox {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s ease;
+}
+
+.thin-checkbox:active {
+  transform: scale(0.9);
+}
+
+.thin-checkbox svg,
+.thin-checkbox path,
+.thin-checkbox rect {
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Custom styles for checkboxes to make them more premium */
+.thin-checkbox[data-selected="true"] {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
 }
 

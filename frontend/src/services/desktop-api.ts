@@ -104,6 +104,8 @@ export const aiApi = {
 export const exportApi = {
   export: (documentId: string, format: 'pdf' | 'docx', filename?: string) =>
     invokeOrFetch('export:export', documentId, format, filename),
+  exportMultiple: (documentIds: string[], format: 'pdf' | 'docx', filename?: string) =>
+    invokeOrFetch('export:exportMultiple', documentIds, format, filename),
 }
 
 export const chatApi = {

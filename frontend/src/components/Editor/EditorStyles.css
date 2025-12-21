@@ -1,0 +1,25 @@
+/* Editor Styles */
+
+/* Fix for hardcoded black text in dark mode */
+/* When user accidentally sets text to black (#000000), automatically convert it to white in dark mode */
+.dark-theme .ProseMirror span[style*="color: #000000"],
+.dark-theme .ProseMirror span[style*="color: rgb(0, 0, 0)"],
+.dark-theme .ProseMirror span[style*="color: rgb(0,0,0)"],
+.dark-theme .ProseMirror [style*="color: #000000"],
+.dark-theme .ProseMirror [style*="color: rgb(0, 0, 0)"],
+.dark-theme .ProseMirror [style*="color: rgb(0,0,0)"] {
+  color: #FFFFFF !important;
+}
+
+/* Fix for hardcoded white text in light mode */
+/* When user accidentally sets text to white (#ffffff), automatically convert it to black in light mode */
+:not(.dark-theme) .ProseMirror span[style*="color: #ffffff"],
+:not(.dark-theme) .ProseMirror span[style*="color: #FFFFFF"],
+:not(.dark-theme) .ProseMirror span[style*="color: rgb(255, 255, 255)"],
+:not(.dark-theme) .ProseMirror span[style*="color: rgb(255,255,255)"],
+:not(.dark-theme) .ProseMirror [style*="color: #ffffff"],
+:not(.dark-theme) .ProseMirror [style*="color: #FFFFFF"],
+:not(.dark-theme) .ProseMirror [style*="color: rgb(255, 255, 255)"],
+:not(.dark-theme) .ProseMirror [style*="color: rgb(255,255,255)"] {
+  color: #202124 !important;
+}
