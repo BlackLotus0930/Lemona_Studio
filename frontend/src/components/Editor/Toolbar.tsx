@@ -1450,7 +1450,7 @@ export default function Toolbar({
               setShowExportModal((prev: boolean) => !prev)
             }}
             style={buttonStyle}
-            title="Share / Export"
+            title="Export"
             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >

@@ -557,3 +557,26 @@ input[type="number"] {
   appearance: textfield;
 }
 
+/* Chat tabs horizontal scrollbar styling */
+.chat-tabs-scrollable {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-color-thumb) transparent;
+}
+
+.chat-tabs-scrollable::-webkit-scrollbar {
+  height: 4px;
+}
+
+.chat-tabs-scrollable::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-tabs-scrollable::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-color-thumb);
+  border-radius: 2px;
+}
+
+.dark-theme .chat-tabs-scrollable::-webkit-scrollbar-thumb {
+  background-color: #3e3e3e;
+}
+

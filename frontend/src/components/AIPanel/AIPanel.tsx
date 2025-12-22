@@ -29,11 +29,14 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     { id: 'chat_default', name: 'Chat 1', messages: [] }
   ])
   const [activeChatId, setActiveChatId] = useState<string>('chat_default')
+  const previousActiveChatIdRef = useRef<string>('chat_default') // Track previous activeChatId to maintain across file switches
+  const chatsRef = useRef<Chat[]>([]) // Track current chats to preserve new chats when switching files
   const [isStreaming, setIsStreaming] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [hoveredChatId, setHoveredChatId] = useState<string | null>(null)
   const [chatInputText, setChatInputText] = useState<string>('')
   const headerScrollRef = useRef<HTMLDivElement>(null)
+  const chatTabsScrollRef = useRef<HTMLDivElement>(null) // Ref for chat tabs scrollable container
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   
@@ -57,17 +60,30 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
 
   const documentContent = document?.content || undefined
 
+  // Update chatsRef whenever chats change
+  useEffect(() => {
+    chatsRef.current = chats
+  }, [chats])
+
   // Load chat history when document changes
   useEffect(() => {
     if (!document?.id) {
       // Reset to default if no document
       setChats([{ id: 'chat_default', name: 'Chat 1', messages: [] }])
-      setActiveChatId('chat_default')
+      const defaultChatId = 'chat_default'
+      setActiveChatId(defaultChatId)
+      if (previousActiveChatIdRef) {
+        previousActiveChatIdRef.current = defaultChatId
+      }
       return
     }
 
     const loadChatHistory = async () => {
       try {
+        // Capture current chats and activeChatId before async operation
+        const currentChatsSnapshot = chatsRef.current
+        const currentChatId = (previousActiveChatIdRef && previousActiveChatIdRef.current) || activeChatId
+        
         // IPC returns data directly, not wrapped in { data: ... }
         const chatHistory = await chatApi.getChatHistory(document.id) || {}
         
@@ -75,10 +91,12 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         const chatEntries = Object.entries(chatHistory)
         
         if (chatEntries.length === 0) {
-          // No chat history, start with consistent default chat ID
-          // This ensures all documents in the same project share the same default chat
-          setChats([{ id: 'chat_default', name: 'Chat 1', messages: [] }])
-          setActiveChatId('chat_default')
+          // No chat history, but maintain current activeChatId instead of switching
+          // Only create default chat if we don't have a current activeChatId
+          const chatIdToUse = currentChatId || 'chat_default'
+          setChats([{ id: chatIdToUse, name: 'Chat 1', messages: [] }])
+          setActiveChatId(chatIdToUse)
+          previousActiveChatIdRef.current = chatIdToUse
         } else {
           // Load existing chats
           const loadedChats: Chat[] = chatEntries.map(([chatId, messages], index) => {
@@ -95,19 +113,46 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               messages: messageArray
             }
           })
+          
+          // Always maintain the current activeChatId when switching files/tabs
+          // Don't auto-switch to first chat - keep whatever chat is currently active
+          
+          // Check if current chat exists in loaded chats
+          const chatExists = loadedChats.some(chat => chat.id === currentChatId)
+          
+          // If current chat doesn't exist in new file, add it to preserve it
+          if (!chatExists && currentChatId) {
+            // Find the chat name from current chats snapshot
+            const existingChat = currentChatsSnapshot.find(c => c.id === currentChatId)
+            const chatName = existingChat?.name || `Chat ${loadedChats.length + 1}`
+            
+            // Add the current chat to loaded chats to preserve it
+            loadedChats.push({
+              id: currentChatId,
+              name: chatName,
+              messages: []
+            })
+          }
+          
           setChats(loadedChats)
-          setActiveChatId(loadedChats[0].id)
+          
+          // Keep the same chat ID when switching files, regardless of whether it exists in new file
+          setActiveChatId(currentChatId)
+          // Keep ref in sync
+          previousActiveChatIdRef.current = currentChatId
         }
       } catch (error) {
         console.error('Failed to load chat history:', error)
         // Fallback to default chat on error
-        setChats([{ id: 'chat_default', name: 'Chat 1', messages: [] }])
-        setActiveChatId('chat_default')
+        const defaultChatId = 'chat_default'
+        setChats([{ id: defaultChatId, name: 'Chat 1', messages: [] }])
+        setActiveChatId(defaultChatId)
+        previousActiveChatIdRef.current = defaultChatId
       }
     }
 
     loadChatHistory()
-  }, [document?.id])
+  }, [document?.id]) // Only reload when document changes, not when activeChatId changes
 
   // Add scroll detection and edge detection to show scrollbar
   useEffect(() => {
@@ -201,6 +246,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     }
     setChats([...chats, newChat])
     setActiveChatId(newChatId)
+    previousActiveChatIdRef.current = newChatId // Update ref when creating new chat
   }
 
   const handleCloseChat = (chatId: string, e?: React.MouseEvent) => {
@@ -224,7 +270,9 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
       if (activeChatId === chatId) {
         const closedIndex = chats.findIndex(c => c.id === chatId)
         const newActiveIndex = closedIndex > 0 ? closedIndex - 1 : 0
-        setActiveChatId(newChats[newActiveIndex]?.id || newChats[0]?.id)
+        const newActiveChatId = newChats[newActiveIndex]?.id || newChats[0]?.id
+        setActiveChatId(newActiveChatId)
+        previousActiveChatIdRef.current = newActiveChatId
       }
       
       // Delete from backend
@@ -269,7 +317,9 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
       messages: []
     }
     setChats([newChat])
-    setActiveChatId('chat_default')
+    const defaultChatId = 'chat_default'
+    setActiveChatId(defaultChatId)
+    previousActiveChatIdRef.current = defaultChatId
     setShowMenu(false)
   }
 
@@ -309,18 +359,28 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
           overflow: 'hidden'
         }}>
         {/* Chat Containers - Scrollable area that compresses */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '4px',
-          flex: '1',
-          minWidth: 0,
-          overflow: 'hidden'
-        }}>
+        <div 
+          ref={chatTabsScrollRef}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            flex: '1',
+            minWidth: 0,
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            scrollbarWidth: 'thin', // Firefox - thin scrollbar
+            msOverflowStyle: 'auto', // IE/Edge
+          } as React.CSSProperties}
+          className="chat-tabs-scrollable"
+        >
           {chats.map((chat) => (
             <div
               key={chat.id}
-              onClick={() => setActiveChatId(chat.id)}
+              onClick={() => {
+                setActiveChatId(chat.id)
+                previousActiveChatIdRef.current = chat.id
+              }}
               onMouseEnter={() => setHoveredChatId(chat.id)}
               onMouseLeave={() => setHoveredChatId(null)}
               style={{
@@ -335,7 +395,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                 transition: 'all 0.2s ease',
                 minWidth: '60px',
                 maxWidth: '200px',
-                flexShrink: 1,
+                flexShrink: 0, // Don't shrink, allow horizontal scroll instead
                 flexGrow: 0,
                 position: 'relative'
               }}

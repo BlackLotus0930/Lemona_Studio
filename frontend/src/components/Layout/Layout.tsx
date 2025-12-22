@@ -285,10 +285,30 @@ export default function Layout({}: LayoutProps) {
       // Clear documents immediately when project changes to prevent showing stale data
       setDocuments([])
       setIsLoadingDocuments(true)
+      
+      // Clear tabs that don't belong to the current project
+      setOpenTabs(prevTabs => {
+        if (currentProjectId) {
+          // Filter out tabs that don't belong to the current project
+          const filteredTabs = prevTabs.filter(tab => tab.projectId === currentProjectId)
+          
+          // If active tab doesn't belong to current project, clear it
+          if (activeTabId && !filteredTabs.find(tab => tab.id === activeTabId)) {
+            setActiveTabId(null)
+          }
+          
+          return filteredTabs
+        } else {
+          // No project selected, clear all tabs
+          setActiveTabId(null)
+          return []
+        }
+      })
+      
       previousProjectIdRef.current = currentProjectId
       loadDocuments()
     }
-  }, [document?.projectId]) // Reload when project changes
+  }, [document?.projectId, activeTabId]) // Reload when project changes
 
   // Keyboard shortcuts: Ctrl+Shift+E to toggle FileExplorer, Ctrl+Shift+F to toggle search
   useEffect(() => {
