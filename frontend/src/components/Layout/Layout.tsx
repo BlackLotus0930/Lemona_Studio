@@ -37,10 +37,6 @@ import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder'
 import TopBar from './TopBar'
 import { useNavigate, useParams } from 'react-router-dom'
 
-interface LayoutProps {
-  // No longer needed - Layout will load document internally based on route
-}
-
 const AI_PANEL_STORAGE_KEY = 'aiPanelState'
 
 interface AIPanelState {
@@ -72,7 +68,7 @@ function saveAIPanelState(state: AIPanelState) {
   }
 }
 
-export default function Layout({}: LayoutProps) {
+export default function Layout() {
   const { theme } = useTheme()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
@@ -1228,11 +1224,13 @@ export default function Layout({}: LayoutProps) {
   // Create ONE shared editor instance
   const editor = useEditor({
     extensions: [
-      // StarterKit without list extensions (we'll configure them separately)
+      // StarterKit without list extensions and link/underline (we'll configure them separately)
       StarterKit.configure({
         bulletList: false,
         orderedList: false,
         listItem: false,
+        link: false,
+        underline: false,
       }),
       FileExplorerToggleExtension,
       // Custom list configuration with better keyboard shortcuts
@@ -2092,6 +2090,8 @@ export default function Layout({}: LayoutProps) {
       >
         {/* File Explorer Sidebar */}
         <Panel 
+          id="file-explorer"
+          order={1}
           ref={fileExplorerPanelRef}
           defaultSize={fileExplorerSize} 
           minSize={0}
@@ -2229,7 +2229,12 @@ export default function Layout({}: LayoutProps) {
             </div>
           ) : document && document.title.toLowerCase().endsWith('.pdf') ? (
             // PDF file - show full screen PDF viewer
-            <FullScreenPDFViewer ref={pdfViewerRef} document={document} />
+            <FullScreenPDFViewer 
+              ref={pdfViewerRef} 
+              document={document}
+              isAIPanelOpen={isAIPanelOpen}
+              aiPanelWidth={aiPanelWidth}
+            />
           ) : (
             // Regular document - show document editor
             <DocumentEditor 
@@ -2252,6 +2257,8 @@ export default function Layout({}: LayoutProps) {
               transition: 'background-color 0.2s'
             }} />
             <Panel 
+              id="ai-panel"
+              order={3}
               ref={aiPanelRef} 
               defaultSize={(aiPanelWidth / 100) * (100 - fileExplorerSize)} 
               minSize={15}

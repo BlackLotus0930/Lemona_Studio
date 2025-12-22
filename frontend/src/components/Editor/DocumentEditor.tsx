@@ -1181,12 +1181,60 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   const currentPos = getPositionAtCoords(moveEvent.clientX, moveEvent.clientY)
                   
                   if (currentPos !== null && initialSelectionPosRef.current !== null) {
-                    // Set text selection from initial position to current position
-                    // Use from/to directly without sorting - this preserves selection direction
-                    editor.chain().focus().setTextSelection({ 
-                      from: initialSelectionPosRef.current, 
-                      to: currentPos 
-                    }).run()
+                    // Validate positions to ensure they point to inline content
+                    const { state } = editor.view
+                    const { doc } = state
+                    const docSize = doc.content.size
+                    
+                    // Skip if document is empty
+                    if (docSize === 0) {
+                      return
+                    }
+                    
+                    // Clamp positions to valid document bounds
+                    let from = Math.max(0, Math.min(initialSelectionPosRef.current, docSize))
+                    let to = Math.max(0, Math.min(currentPos, docSize))
+                    
+                    // Ensure positions are different
+                    if (from === to) {
+                      // If positions are the same, try to adjust slightly
+                      if (to < docSize) {
+                        to = Math.min(to + 1, docSize)
+                      } else if (from > 0) {
+                        from = Math.max(from - 1, 0)
+                      } else {
+                        // Can't create selection, skip
+                        return
+                      }
+                    }
+                    
+                    // Validate positions point to valid inline content
+                    try {
+                      const $from = doc.resolve(from)
+                      const $to = doc.resolve(to)
+                      
+                      // Ensure positions are within valid nodes that can contain text
+                      // Check if we're at a valid selection boundary
+                      if ($from.parent.content.size === 0 && $from.parentOffset === 0) {
+                        // At start of empty block - skip selection
+                        return
+                      }
+                      if ($to.parent.content.size === 0 && $to.parentOffset === 0) {
+                        // At start of empty block - skip selection
+                        return
+                      }
+                      
+                      // Set text selection from initial position to current position
+                      // Use from/to directly without sorting - this preserves selection direction
+                      editor.chain().focus().setTextSelection({ 
+                        from, 
+                        to 
+                      }).run()
+                    } catch (error) {
+                      // Silently ignore selection errors (e.g., invalid positions)
+                      // This can happen when positions point to block boundaries without inline content
+                      console.debug('Text selection error (ignored):', error)
+                    }
                   }
                 } else {
                   // No initial position, treat as drag

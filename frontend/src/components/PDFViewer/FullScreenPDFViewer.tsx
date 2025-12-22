@@ -4,6 +4,8 @@ import { Document } from '@shared/types'
 
 interface FullScreenPDFViewerProps {
   document: Document | null
+  isAIPanelOpen?: boolean
+  aiPanelWidth?: number // Percentage width of AI panel
 }
 
 export interface PDFViewerSearchHandle {
@@ -13,7 +15,7 @@ export interface PDFViewerSearchHandle {
 }
 
 const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewerProps>(
-  ({ document }, ref) => {
+  ({ document, isAIPanelOpen = false, aiPanelWidth = 20 }, ref) => {
     const { theme } = useTheme()
     const [pdfSrc, setPdfSrc] = useState<string | null>(null)
     const [basePdfSrc, setBasePdfSrc] = useState<string | null>(null) // Store base URL without page anchor
@@ -29,7 +31,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     const [activeSearchQuery, setActiveSearchQuery] = useState('') // The query that was actually searched
     const inlineSearchInputRef = useRef<HTMLInputElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
-    const rightOffset = 20 // Fixed offset for search modal
+    const [rightOffset, setRightOffset] = useState(20)
     
     // Expose search API to parent (Layout)
     useImperativeHandle(ref, () => ({
@@ -360,6 +362,30 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
       clearTimeout(timeoutId)
     }
   }, [searchQuery, document])
+
+  // Calculate right offset based on AI panel state
+  useEffect(() => {
+    const calculateRightOffset = () => {
+      if (!isAIPanelOpen) return 20
+      // AI panel takes up a percentage of the viewport width
+      // FileExplorer typically takes ~14% of width, so AI panel is percentage of remaining 86%
+      const viewportWidth = window.innerWidth
+      const fileExplorerPercent = 14 // Approximate FileExplorer width
+      const remainingWidth = viewportWidth * (1 - fileExplorerPercent / 100)
+      const aiPanelPixelWidth = remainingWidth * (aiPanelWidth / 100)
+      return aiPanelPixelWidth + 20 // Add 20px margin
+    }
+    
+    setRightOffset(calculateRightOffset())
+    
+    // Update on window resize
+    const handleResize = () => {
+      setRightOffset(calculateRightOffset())
+    }
+    
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [isAIPanelOpen, aiPanelWidth])
 
   // Early returns AFTER all hooks
   if (!document) {
