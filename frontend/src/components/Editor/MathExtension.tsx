@@ -1,31 +1,20 @@
 import { Node, mergeAttributes } from '@tiptap/core'
-import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
+import { ReactNodeViewRenderer, NodeViewWrapper, ReactNodeViewProps } from '@tiptap/react'
 import React, { useState, useEffect, useRef } from 'react'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 
-interface MathComponentProps {
-  node: {
-    attrs: {
-      formula: string
-      display?: boolean
-    }
-  }
-  updateAttributes: (attrs: { formula?: string; display?: boolean }) => void
-  selected: boolean
-  editor: any
-}
-
-const MathComponent = ({ node, updateAttributes, selected, editor }: MathComponentProps) => {
+const MathComponent = ({ node, updateAttributes, selected, editor }: ReactNodeViewProps) => {
   const [isEditing, setIsEditing] = useState(false)
-  const [formula, setFormula] = useState(node.attrs.formula || '')
+  const [formulaState, setFormulaState] = useState((node.attrs.formula as string) || '')
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const display = node.attrs.display ?? false
+  const display = (node.attrs.display as boolean) ?? false
 
   useEffect(() => {
-    setFormula(node.attrs.formula || '')
+    const newFormula = (node.attrs.formula as string) || ''
+    setFormulaState(newFormula)
   }, [node.attrs.formula])
 
   useEffect(() => {
@@ -41,16 +30,16 @@ const MathComponent = ({ node, updateAttributes, selected, editor }: MathCompone
   }
 
   const handleBlur = () => {
-    if (formula.trim()) {
+    if (formulaState.trim()) {
       try {
         // Validate the formula by trying to render it
-        katex.renderToString(formula, { throwOnError: true, displayMode: display })
-        updateAttributes({ formula: formula.trim() })
+        katex.renderToString(formulaState, { throwOnError: true, displayMode: display })
+        updateAttributes({ formula: formulaState.trim() })
         setError(null)
       } catch (err) {
         setError('Invalid LaTeX formula')
         // Still update to show the error state
-        updateAttributes({ formula: formula.trim() })
+        updateAttributes({ formula: formulaState.trim() })
       }
     } else {
       // If empty, remove the math node
@@ -64,26 +53,28 @@ const MathComponent = ({ node, updateAttributes, selected, editor }: MathCompone
       e.preventDefault()
       handleBlur()
     } else if (e.key === 'Escape') {
-      setFormula(node.attrs.formula || '')
+      const currentFormula = (node.attrs.formula as string) || ''
+      setFormulaState(currentFormula)
       setIsEditing(false)
       setError(null)
     }
   }
 
   const renderFormula = () => {
-    if (!formula.trim()) {
+    const currentFormula = (node.attrs.formula as string) || ''
+    if (!currentFormula.trim()) {
       return <span style={{ color: '#999', fontStyle: 'italic' }}>Double-click to edit formula</span>
     }
 
     try {
-      const html = katex.renderToString(formula, {
+      const html = katex.renderToString(currentFormula, {
         throwOnError: false,
         displayMode: display,
         errorColor: '#cc0000',
       })
       return <span dangerouslySetInnerHTML={{ __html: html }} />
     } catch (err) {
-      return <span style={{ color: '#cc0000' }}>Invalid formula: {formula}</span>
+      return <span style={{ color: '#cc0000' }}>Invalid formula: {currentFormula}</span>
     }
   }
 
@@ -108,8 +99,8 @@ const MathComponent = ({ node, updateAttributes, selected, editor }: MathCompone
         <input
           ref={inputRef}
           type="text"
-          value={formula}
-          onChange={(e) => setFormula(e.target.value)}
+          value={formulaState}
+          onChange={(e) => setFormulaState(e.target.value)}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           placeholder="Enter LaTeX formula (e.g., E=mc^2)"
@@ -198,13 +189,13 @@ export const MathExtension = Node.create({
     return {
       setMath:
         (formula: string, display: boolean = false) =>
-        ({ commands }) => {
+        ({ commands }: { commands: any }) => {
           return commands.insertContent({
             type: this.name,
             attrs: { formula, display },
           })
         },
-    }
+    } as any
   },
 })
 

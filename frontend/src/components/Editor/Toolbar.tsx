@@ -93,7 +93,13 @@ export default function Toolbar({
   const [, forceUpdate] = useState({})
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [showExportModal, setShowExportModal] = useState(false)
+  const [showMathDialog, setShowMathDialog] = useState(false)
+  const [showLinkDialog, setShowLinkDialog] = useState(false)
+  const [mathFormula, setMathFormula] = useState('E=mc^2')
+  const [linkUrl, setLinkUrl] = useState('')
   const shareButtonRef = useRef<HTMLButtonElement>(null)
+  const mathInputRef = useRef<HTMLInputElement>(null)
+  const linkInputRef = useRef<HTMLInputElement>(null)
   const styleMenuRef = useRef<HTMLDivElement>(null)
   const fontMenuRef = useRef<HTMLDivElement>(null)
   const colorMenuRef = useRef<HTMLDivElement>(null)
@@ -324,10 +330,22 @@ export default function Toolbar({
   }
 
   const handleInsertLink = () => {
-    const url = window.prompt('Enter URL:')
-    if (url) {
-      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+    setLinkUrl('')
+    setShowLinkDialog(true)
+  }
+
+  const handleLinkSubmit = (): void => {
+    if (!editor) return
+    if (linkUrl.trim()) {
+      editor.chain().focus().extendMarkRange('link').setLink({ href: linkUrl.trim() }).run()
     }
+    setShowLinkDialog(false)
+    setLinkUrl('')
+  }
+
+  const handleLinkCancel = (): void => {
+    setShowLinkDialog(false)
+    setLinkUrl('')
   }
 
   const handleInsertImage = () => {
@@ -354,12 +372,34 @@ export default function Toolbar({
   }
 
   const handleInsertMath = () => {
-    const formula = window.prompt('Enter LaTeX formula (e.g., E=mc^2, \\frac{a}{b}):', 'E=mc^2')
-    if (formula) {
-      // @ts-ignore - Math extension command
-      editor.chain().focus().setMath(formula.trim(), false).run()
-    }
+    setMathFormula('E=mc^2')
+    setShowMathDialog(true)
   }
+
+  const handleMathSubmit = () => {
+    if (mathFormula.trim()) {
+      // @ts-ignore - Math extension command
+      editor.chain().focus().setMath(mathFormula.trim(), false).run()
+    }
+    setShowMathDialog(false)
+  }
+
+  const handleMathCancel = () => {
+    setShowMathDialog(false)
+  }
+
+  // Focus input when dialog opens
+  useEffect(() => {
+    if (showMathDialog && mathInputRef.current) {
+      setTimeout(() => mathInputRef.current?.focus(), 100)
+    }
+  }, [showMathDialog])
+
+  useEffect(() => {
+    if (showLinkDialog && linkInputRef.current) {
+      setTimeout(() => linkInputRef.current?.focus(), 100)
+    }
+  }, [showLinkDialog])
 
   const styles = [
     { label: 'Title', value: 'title' },
@@ -1466,6 +1506,205 @@ export default function Toolbar({
             triggerRef={shareButtonRef}
           />
         </>
+      )}
+
+      {/* Math Formula Input Dialog */}
+      {showMathDialog && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: theme === 'dark' ? 'rgba(0, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+          }}
+          onClick={handleMathCancel}
+        >
+          <div
+            style={{
+              backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+              borderRadius: '8px',
+              padding: '24px',
+              minWidth: '400px',
+              maxWidth: '500px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 32px rgba(0, 0, 0, 0.5)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.2)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                handleMathCancel()
+              } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                handleMathSubmit()
+              }
+            }}
+          >
+            <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 500, color: theme === 'dark' ? '#ffffff' : '#202124' }}>
+              Enter LaTeX Formula
+            </div>
+            <input
+              ref={mathInputRef}
+              type="text"
+              value={mathFormula}
+              onChange={(e) => setMathFormula(e.target.value)}
+              placeholder="E.g., E=mc^2, \\frac{a}{b}"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                fontSize: '14px',
+                border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
+                borderRadius: '4px',
+                backgroundColor: theme === 'dark' ? '#2a2a2a' : '#ffffff',
+                color: theme === 'dark' ? '#ffffff' : '#202124',
+                outline: 'none',
+                fontFamily: 'monospace',
+                marginBottom: '16px',
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleMathSubmit()
+                } else if (e.key === 'Escape') {
+                  handleMathCancel()
+                }
+              }}
+            />
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={handleMathCancel}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                  border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
+                  borderRadius: '4px',
+                  backgroundColor: 'transparent',
+                  color: theme === 'dark' ? '#cccccc' : '#202124',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleMathSubmit}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                  border: 'none',
+                  borderRadius: '4px',
+                  backgroundColor: '#1a73e8',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                }}
+              >
+                Insert
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Link URL Input Dialog */}
+      {showLinkDialog && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: theme === 'dark' ? 'rgba(0, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+          }}
+          onClick={handleLinkCancel}
+        >
+          <div
+            style={{
+              backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+              borderRadius: '8px',
+              padding: '24px',
+              minWidth: '400px',
+              maxWidth: '500px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 32px rgba(0, 0, 0, 0.5)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.2)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                handleLinkCancel()
+              } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                handleLinkSubmit()
+              }
+            }}
+          >
+            <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 500, color: theme === 'dark' ? '#ffffff' : '#202124' }}>
+              Enter URL
+            </div>
+            <input
+              ref={linkInputRef}
+              type="text"
+              value={linkUrl}
+              onChange={(e) => setLinkUrl(e.target.value)}
+              placeholder="https://example.com"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                fontSize: '14px',
+                border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
+                borderRadius: '4px',
+                backgroundColor: theme === 'dark' ? '#2a2a2a' : '#ffffff',
+                color: theme === 'dark' ? '#ffffff' : '#202124',
+                outline: 'none',
+                marginBottom: '16px',
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleLinkSubmit()
+                } else if (e.key === 'Escape') {
+                  handleLinkCancel()
+                }
+              }}
+            />
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={handleLinkCancel}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                  border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
+                  borderRadius: '4px',
+                  backgroundColor: 'transparent',
+                  color: theme === 'dark' ? '#cccccc' : '#202124',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLinkSubmit}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                  border: 'none',
+                  borderRadius: '4px',
+                  backgroundColor: '#1a73e8',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                }}
+              >
+                Insert
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -1,23 +1,13 @@
 import { Node, mergeAttributes } from '@tiptap/core'
-import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
-import React, { useState } from 'react'
+import { ReactNodeViewRenderer, NodeViewWrapper, ReactNodeViewProps } from '@tiptap/react'
+import { useState } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 
-interface PDFViewerProps {
-  node: {
-    attrs: {
-      src: string
-      fileName?: string
-    }
-  }
-  selected: boolean
-}
-
-const PDFViewerComponent = ({ node, selected }: PDFViewerProps) => {
+const PDFViewerComponent = ({ node, selected }: ReactNodeViewProps) => {
   const { theme } = useTheme()
   const [error, setError] = useState(false)
-  const pdfSrc = node.attrs.src
-  const fileName = node.attrs.fileName || 'document.pdf'
+  const pdfSrc = (node.attrs.src as string) || ''
+  const fileName = (node.attrs.fileName as string) || 'document.pdf'
 
   return (
     <NodeViewWrapper

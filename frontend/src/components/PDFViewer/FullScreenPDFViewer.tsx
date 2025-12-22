@@ -26,6 +26,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     const [searchQuery, setSearchQuery] = useState('')
     const [matches, setMatches] = useState<Array<{ pageNumber: number; from: number; to: number }>>([])
     const [currentMatchIndex, setCurrentMatchIndex] = useState(-1)
+    const [activeSearchQuery, setActiveSearchQuery] = useState('') // The query that was actually searched
     const inlineSearchInputRef = useRef<HTMLInputElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
     const rightOffset = 20 // Fixed offset for search modal
@@ -44,6 +45,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
         setSearchQuery('')
         setMatches([])
         setCurrentMatchIndex(-1)
+        setActiveSearchQuery('')
       },
       toggleSearch: () => {
         if (showInlineSearch) {
@@ -51,6 +53,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
           setSearchQuery('')
           setMatches([])
           setCurrentMatchIndex(-1)
+          setActiveSearchQuery('')
         } else {
           setShowInlineSearch(true)
           setTimeout(() => {
@@ -184,11 +187,13 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     if (!searchQuery.trim()) {
       setMatches([])
       setCurrentMatchIndex(-1)
+      setActiveSearchQuery('')
       return
     }
     
     const foundMatches = findMatches(searchQuery)
     setMatches(foundMatches)
+    setActiveSearchQuery(searchQuery)
     
     if (foundMatches.length > 0) {
       setCurrentMatchIndex(0)
@@ -270,50 +275,42 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     }
   }, [document])
   
-  // Handle search input keydown - Enter 确认导航
+  // Handle Escape key to close search (when search is open)
   useEffect(() => {
     if (!showInlineSearch) return
     
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't interfere with input fields - input handlers will handle their own keys
       if (e.target instanceof HTMLInputElement) {
-        if (e.key === 'Enter') {
-          e.preventDefault()
-          // Enter 确认导航：跳转到当前匹配的页面
-          if (!searchQuery.trim()) {
-            setMatches([])
-            setCurrentMatchIndex(-1)
-            return
-          }
-          
-          // 如果已经有匹配结果，导航到当前匹配
-          if (matches.length > 0 && currentMatchIndex >= 0) {
-            const targetMatch = matches[currentMatchIndex]
-            navigateToPage(targetMatch.pageNumber)
-          } else {
-            // 如果没有匹配结果，重新搜索一次
-            const foundMatches = findMatches(searchQuery)
-            setMatches(foundMatches)
-            if (foundMatches.length > 0) {
-              setCurrentMatchIndex(0)
-              const firstMatch = foundMatches[0]
-              navigateToPage(firstMatch.pageNumber, firstMatch)
-            } else {
-              setCurrentMatchIndex(-1)
-            }
-          }
-        } else if (e.key === 'Escape') {
+        // Let the input's onKeyDown handler handle Enter and Escape
+        // This listener only handles Escape when input is not focused
+        if (e.key === 'Escape' && e.target !== inlineSearchInputRef.current) {
           e.preventDefault()
           setShowInlineSearch(false)
           setSearchQuery('')
           setMatches([])
           setCurrentMatchIndex(-1)
+          setActiveSearchQuery('')
+          return
         }
+        return
+      }
+      
+      // Handle Escape when search is open but no input is focused
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setShowInlineSearch(false)
+        setSearchQuery('')
+        setMatches([])
+        setCurrentMatchIndex(-1)
+        setActiveSearchQuery('')
+        return
       }
     }
     
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showInlineSearch, searchQuery, document, matches, currentMatchIndex])
+  }, [showInlineSearch])
   
   // Focus search input when opening
   useEffect(() => {
@@ -416,6 +413,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
             setSearchQuery('')
             setMatches([])
             setCurrentMatchIndex(-1)
+            setActiveSearchQuery('')
           } else {
             setShowInlineSearch(true)
             setTimeout(() => {
@@ -531,6 +529,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
               setSearchQuery('')
               setMatches([])
               setCurrentMatchIndex(-1)
+              setActiveSearchQuery('')
             }}
             style={{
               position: 'absolute',
@@ -597,24 +596,22 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault()
-                    // Enter 确认导航：跳转到当前匹配的页面
-                    if (matches.length > 0 && currentMatchIndex >= 0) {
-                      const targetMatch = matches[currentMatchIndex]
-                      navigateToPage(targetMatch.pageNumber, targetMatch)
-                    } else if (matches.length > 0) {
-                      // 如果有匹配但索引无效，导航到第一个
-                      setCurrentMatchIndex(0)
-                      navigateToPage(matches[0].pageNumber, matches[0])
+                    e.stopPropagation() // Prevent window-level listener from also handling this
+                    // If search query hasn't changed, navigate to next match
+                    // Otherwise, perform a new search (goes to first match)
+                    if (searchQuery === activeSearchQuery && matches.length > 0) {
+                      navigateToNext()
                     } else {
-                      // 没有匹配，重新搜索
                       performSearch()
                     }
                   } else if (e.key === 'Escape') {
                     e.preventDefault()
+                    e.stopPropagation() // Prevent window-level listener from also handling this
                     setShowInlineSearch(false)
                     setSearchQuery('')
                     setMatches([])
                     setCurrentMatchIndex(-1)
+                    setActiveSearchQuery('')
                   }
                 }}
                 onFocus={(e) => {

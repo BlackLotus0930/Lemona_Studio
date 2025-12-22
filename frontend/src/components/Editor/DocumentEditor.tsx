@@ -720,15 +720,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     if (!showInlineSearch) return
     
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't interfere with input fields
+      // Don't interfere with input fields - input handlers will handle their own keys
       if (e.target instanceof HTMLInputElement) {
-        if (e.key === 'Enter' && e.target === inlineSearchInputRef.current) {
-          e.preventDefault()
-          // Perform search on Enter
-          performSearch()
-          return
-        }
-        if (e.key === 'Escape') {
+        // Let the input's onKeyDown handler handle Enter and Escape
+        // This listener only handles Escape when input is not focused
+        if (e.key === 'Escape' && e.target !== inlineSearchInputRef.current && e.target !== inlineReplaceInputRef.current) {
           e.preventDefault()
           setShowInlineSearch(false)
           setSearchQuery('')
@@ -740,12 +736,23 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         return
       }
       
+      // Handle Escape when search is open but no input is focused
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setShowInlineSearch(false)
+        setSearchQuery('')
+        setReplaceQuery('')
+        clearInlineSearchHighlights()
+        editor?.chain().focus().run()
+        return
+      }
+      
       // Note: Ctrl+F handling is done in Layout.tsx to avoid conflicts
     }
     
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showInlineSearch, editor, searchQuery, performSearch])
+  }, [showInlineSearch, editor])
 
   // Note: Ctrl+F handling is now done in Layout.tsx to avoid conflicts
   // Layout delegates to the active surface (DocumentEditor or PDFViewer)
@@ -1445,9 +1452,17 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault()
-                        performSearch()
+                        e.stopPropagation() // Prevent window-level listener from also handling this
+                        // If search query hasn't changed, navigate to next match
+                        // Otherwise, perform a new search (goes to first match)
+                        if (searchQuery === activeSearchQuery && matches.length > 0) {
+                          navigateToNext()
+                        } else {
+                          performSearch()
+                        }
                       } else if (e.key === 'Escape') {
                         e.preventDefault()
+                        e.stopPropagation() // Prevent window-level listener from also handling this
                         setShowInlineSearch(false)
                         setSearchQuery('')
                         setReplaceQuery('')

@@ -1,9 +1,8 @@
 import Image from '@tiptap/extension-image'
-import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react'
+import { NodeViewWrapper, ReactNodeViewRenderer, ReactNodeViewProps } from '@tiptap/react'
 import React, { useEffect, useRef, useState } from 'react'
 
-const ResizableImageComponent = (props: any) => {
-  const { node, updateAttributes, selected, editor, getPos } = props
+const ResizableImageComponent = ({ node, updateAttributes, selected, editor, getPos }: ReactNodeViewProps) => {
   const imgRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isResizing, setIsResizing] = useState(false)
@@ -137,17 +136,19 @@ const ResizableImageComponent = (props: any) => {
     
     const imagePos = getPos()
     
-    if (imagePos >= 0) {
-      if (clickedOnRightSide) {
-        // Place cursor after the image
-        const afterImagePos = imagePos + node.nodeSize
-        editor.commands.setTextSelection(afterImagePos).focus()
-      } else {
-        // Select the image node when clicked on left side
-        const { NodeSelection } = editor.view.state.selection.constructor as any
-        const tr = editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, imagePos))
-        editor.view.dispatch(tr)
-      }
+    // Handle undefined case (Tiptap 3.x breaking change)
+    if (imagePos === undefined || imagePos < 0) return
+    
+    if (clickedOnRightSide) {
+      // Place cursor after the image
+      const afterImagePos = imagePos + node.nodeSize
+      editor.commands.setTextSelection(afterImagePos)
+      editor.commands.focus()
+    } else {
+      // Select the image node when clicked on left side
+      const { NodeSelection } = editor.view.state.selection.constructor as any
+      const tr = editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, imagePos))
+      editor.view.dispatch(tr)
     }
   }
 
