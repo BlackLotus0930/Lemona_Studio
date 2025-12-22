@@ -1619,17 +1619,19 @@ export default function Layout() {
               }
             })()
             
-            // Set scroll position BEFORE setting content to prevent any scroll animation
-            // This ensures the scroll is already at the correct position when content loads
-            if (savedScrollTop !== null && savedScrollTop > 0) {
-              const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
-              if (scrollContainer) {
+            // Get scroll container and disable scroll behavior temporarily to prevent animation
+            const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
+            let originalScrollBehavior: string | null = null
+            
+            if (scrollContainer) {
+              // Save original scroll-behavior and set to 'auto' to disable smooth scrolling
+              originalScrollBehavior = scrollContainer.style.scrollBehavior || ''
+              scrollContainer.style.scrollBehavior = 'auto'
+              
+              // Set scroll position BEFORE setting content to prevent any scroll animation
+              if (savedScrollTop !== null && savedScrollTop > 0) {
                 scrollContainer.scrollTop = savedScrollTop
-              }
-            } else if (isNewTab) {
-              // For new tabs, set scroll to top
-              const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
-              if (scrollContainer) {
+              } else if (isNewTab) {
                 scrollContainer.scrollTop = 0
               }
             }
@@ -1644,31 +1646,44 @@ export default function Layout() {
               documentEditorRef.current.clearSearch()
             }
             
-            // Restore scroll position again immediately after content is set to ensure it stays correct
-            // Use requestAnimationFrame to ensure DOM is updated, then immediately set scroll
-            if (savedScrollTop !== null && savedScrollTop > 0) {
-              // Use requestAnimationFrame to ensure DOM is ready, then immediately set scroll
-              // Double RAF ensures we're after the browser's layout pass
+            // Restore scroll position immediately after content is set (synchronously, no animation)
+            if (scrollContainer) {
+              // Set scroll position synchronously immediately after setContent
+              if (savedScrollTop !== null && savedScrollTop > 0) {
+                scrollContainer.scrollTop = savedScrollTop
+              } else if (isNewTab) {
+                scrollContainer.scrollTop = 0
+              }
+              
+              // Use requestAnimationFrame to ensure DOM layout is complete, then set scroll again
+              // This ensures scroll position is correct even if content layout changed
+              // Keep scroll-behavior as 'auto' during this to prevent any animation
               requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                  if (isCancelled || !editor || editor.isDestroyed) return
-                  const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
-                  if (scrollContainer) {
-                    // Set scroll position directly without any animation
-                    scrollContainer.scrollTop = savedScrollTop
+                if (isCancelled || !editor || editor.isDestroyed || !scrollContainer) {
+                  // Restore scroll-behavior even if cancelled
+                  if (originalScrollBehavior !== null) {
+                    scrollContainer.style.scrollBehavior = originalScrollBehavior || ''
                   }
-                })
-              })
-            } else if (isNewTab) {
-              // For new tabs, ensure scroll stays at top after content is set
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                  if (isCancelled || !editor || editor.isDestroyed) return
-                  const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
-                  if (scrollContainer) {
-                    scrollContainer.scrollTop = 0
+                  return
+                }
+                
+                // Ensure scroll-behavior is still 'auto' before setting scroll
+                scrollContainer.style.scrollBehavior = 'auto'
+                
+                // Set scroll position synchronously (no animation)
+                if (savedScrollTop !== null && savedScrollTop > 0) {
+                  scrollContainer.scrollTop = savedScrollTop
+                } else if (isNewTab) {
+                  scrollContainer.scrollTop = 0
+                }
+                
+                // Restore original scroll-behavior after setting scroll position
+                // Use a tiny delay to ensure scroll position is applied
+                setTimeout(() => {
+                  if (scrollContainer && originalScrollBehavior !== null) {
+                    scrollContainer.style.scrollBehavior = originalScrollBehavior || ''
                   }
-                })
+                }, 0)
               })
             }
             
