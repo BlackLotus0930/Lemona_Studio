@@ -92,6 +92,28 @@ export default function Layout({}: LayoutProps) {
   const [documents, setDocuments] = useState<Document[]>([])
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
   const [projectName, setProjectName] = useState<string>('LEMONA')
+  // Load tabs from localStorage on mount
+  const [openTabs, setOpenTabs] = useState<Document[]>(() => {
+    try {
+      const saved = localStorage.getItem('openTabs')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        return Array.isArray(parsed) ? parsed : []
+      }
+    } catch (error) {
+      console.error('Failed to load tabs from localStorage:', error)
+    }
+    return []
+  })
+  const [activeTabId, setActiveTabId] = useState<string | null>(() => {
+    try {
+      const saved = localStorage.getItem('activeTabId')
+      return saved || null
+    } catch (error) {
+      console.error('Failed to load activeTabId from localStorage:', error)
+      return null
+    }
+  })
   const editorPanelRef = useRef<ImperativePanelHandle>(null)
   const aiPanelRef = useRef<ImperativePanelHandle>(null)
   const fileExplorerPanelRef = useRef<ImperativePanelHandle>(null)
@@ -191,11 +213,27 @@ export default function Layout({}: LayoutProps) {
         setIsLoadingDocument(true)
         loadDocument(id)
       }
+      // Update active tab when route changes
+      setActiveTabId(id)
     } else {
       setDocument(null)
       setIsLoadingDocument(false)
+      setActiveTabId(null)
     }
   }, [id])
+
+  // Add document to tabs when it loads
+  useEffect(() => {
+    if (document && !openTabs.find(tab => tab.id === document.id)) {
+      setOpenTabs(prevTabs => [...prevTabs, document])
+      setActiveTabId(document.id)
+    } else if (document) {
+      // Update tab if document changes (e.g., title update)
+      setOpenTabs(prevTabs => 
+        prevTabs.map(tab => tab.id === document.id ? document : tab)
+      )
+    }
+  }, [document])
 
   const loadDocument = async (docId: string) => {
     try {
@@ -417,9 +455,116 @@ export default function Layout({}: LayoutProps) {
       setIsSearchMode(true)
     }
     
+    // Add or update tab when opening a document
+    const clickedDoc = documents.find(doc => doc.id === docId)
+    if (clickedDoc) {
+      setOpenTabs(prevTabs => {
+        // Check if tab already exists
+        const existingTabIndex = prevTabs.findIndex(tab => tab.id === docId)
+        if (existingTabIndex >= 0) {
+          // Tab exists, just set it as active
+          setActiveTabId(docId)
+          return prevTabs
+        } else {
+          // Add new tab
+          const newTabs = [...prevTabs, clickedDoc]
+          setActiveTabId(docId)
+          return newTabs
+        }
+      })
+    }
+    
     // Always navigate, even if it's the current document (for different document case)
     navigate(`/document/${docId}`)
   }
+
+  // Handle tab click (switch to tab)
+  const handleTabClick = (docId: string) => {
+    setActiveTabId(docId)
+    navigate(`/document/${docId}`)
+  }
+
+  // Handle tab close
+  const handleTabClose = (e: React.MouseEvent, docId: string) => {
+    e.stopPropagation()
+    
+    setOpenTabs(prevTabs => {
+      // Prevent closing if it's the only tab
+      if (prevTabs.length <= 1) {
+        return prevTabs
+      }
+      
+      const newTabs = prevTabs.filter(tab => tab.id !== docId)
+      
+      // Clear scroll position for the closed tab
+      // This ensures that when the file is reopened, it shows at the top instead of the previous position
+      try {
+        localStorage.removeItem(`documentScroll_${docId}`)
+      } catch (error) {
+        console.error('Failed to clear scroll position:', error)
+      }
+      
+      // If closing the active tab, switch to another tab or navigate away
+      if (activeTabId === docId) {
+        if (newTabs.length > 0) {
+          // Switch to the last tab, or the one before if closing the last one
+          const closedIndex = prevTabs.findIndex(tab => tab.id === docId)
+          const targetIndex = closedIndex > 0 ? closedIndex - 1 : 0
+          const targetTab = newTabs[targetIndex] || newTabs[0]
+          setActiveTabId(targetTab.id)
+          navigate(`/document/${targetTab.id}`)
+        } else {
+          // No tabs left, navigate to document list
+          setActiveTabId(null)
+          navigate('/documents')
+        }
+      }
+      
+      return newTabs
+    })
+  }
+
+  // Save tabs to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('openTabs', JSON.stringify(openTabs))
+    } catch (error) {
+      console.error('Failed to save tabs to localStorage:', error)
+    }
+  }, [openTabs])
+
+  // Save activeTabId to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      if (activeTabId) {
+        localStorage.setItem('activeTabId', activeTabId)
+      } else {
+        localStorage.removeItem('activeTabId')
+      }
+    } catch (error) {
+      console.error('Failed to save activeTabId to localStorage:', error)
+    }
+  }, [activeTabId])
+
+  // Restore tabs and navigate to active tab on mount if tabs were saved
+  const hasRestoredTabsRef = useRef(false)
+  useEffect(() => {
+    if (!hasRestoredTabsRef.current && openTabs.length > 0 && activeTabId && !id) {
+      // Only restore if we're not already on a document page
+      hasRestoredTabsRef.current = true
+      // Check if the active tab still exists in the restored tabs
+      const activeTabExists = openTabs.some(tab => tab.id === activeTabId)
+      if (activeTabExists) {
+        // Navigate to the active tab
+        navigate(`/document/${activeTabId}`)
+      } else if (openTabs.length > 0) {
+        // If active tab doesn't exist, navigate to the first tab
+        setActiveTabId(openTabs[0].id)
+        navigate(`/document/${openTabs[0].id}`)
+      }
+    }
+  }, [openTabs, activeTabId, navigate, id])
+
   
   // Clear all search highlights (temporary highlights, not saved to document)
   const clearSearchHighlights = (editor: Editor) => {
@@ -517,10 +662,7 @@ export default function Layout({}: LayoutProps) {
                 const currentScrollTop = editorElement.scrollTop || 0
                 const scrollOffset = coords.top - editorRect.top - targetY + currentScrollTop
                 
-                editorElement.scrollTo({
-                  top: Math.max(0, scrollOffset),
-                  behavior: 'smooth'
-                })
+                editorElement.scrollTop = Math.max(0, scrollOffset)
               }
             } catch (error) {
               console.error('Error scrolling to first match:', error)
@@ -613,7 +755,16 @@ export default function Layout({}: LayoutProps) {
         try {
           const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
           if (!scrollContainer) {
-            editor.commands.scrollIntoView()
+            // Use direct scroll instead of scrollIntoView to avoid animation
+            const coords = editor.view.coordsAtPos(matchFound.from)
+            if (coords) {
+              const editorElement = editor.view.dom as HTMLElement
+              const editorRect = editorElement.getBoundingClientRect()
+              const matchY = coords.top - editorRect.top + (editorElement.scrollTop || 0)
+              const viewportHeight = editorElement.clientHeight
+              const targetY = matchY - viewportHeight * 0.4
+              editorElement.scrollTop = Math.max(0, targetY)
+            }
             return
           }
           
@@ -625,13 +776,21 @@ export default function Layout({}: LayoutProps) {
             const viewportHeight = scrollContainer.clientHeight
             const targetY = matchY - viewportHeight * 0.4
             
-            scrollContainer.scrollTo({
-              top: Math.max(0, targetY),
-              behavior: 'auto'
-            })
+            scrollContainer.scrollTop = Math.max(0, targetY)
           }
         } catch (error) {
-          editor.commands.scrollIntoView()
+          // Fallback: use direct scroll instead of scrollIntoView
+          const coords = editor.view.coordsAtPos(matchFound.from)
+          if (coords) {
+            const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
+            if (scrollContainer) {
+              const containerRect = scrollContainer.getBoundingClientRect()
+              const matchY = coords.top - containerRect.top + scrollContainer.scrollTop
+              const viewportHeight = scrollContainer.clientHeight
+              const targetY = matchY - viewportHeight * 0.4
+              scrollContainer.scrollTop = Math.max(0, targetY)
+            }
+          }
         }
       }
     } catch (error) {
@@ -1139,9 +1298,71 @@ export default function Layout({}: LayoutProps) {
             // This ensures highlights don't persist when navigating between documents
             clearSearchHighlights(editor)
             
+            // Check if this is a new tab (document not in openTabs before)
+            const isNewTab = !openTabs.some(tab => tab.id === document.id)
+            
+            // Restore scroll position BEFORE setting content to prevent any scrolling animation
+            // Only restore scroll position if this is NOT a new tab (i.e., switching to existing tab)
+            // If it's a new tab, show top of document instead
+            const savedScrollTop = (() => {
+              // If it's a new tab, don't restore scroll position - show top instead
+              if (isNewTab) {
+                return null
+              }
+              try {
+                const saved = localStorage.getItem(`documentScroll_${document.id}`)
+                return saved ? parseFloat(saved) : null
+              } catch {
+                return null
+              }
+            })()
+            
+            // Set scroll position BEFORE setting content to prevent any scroll animation
+            // This ensures the scroll is already at the correct position when content loads
+            if (savedScrollTop !== null && savedScrollTop > 0) {
+              const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
+              if (scrollContainer) {
+                scrollContainer.scrollTop = savedScrollTop
+              }
+            } else if (isNewTab) {
+              // For new tabs, set scroll to top
+              const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
+              if (scrollContainer) {
+                scrollContainer.scrollTop = 0
+              }
+            }
+            
             // Set content
             editor.commands.setContent(content)
             lastContentRef.current = docContent
+            
+            // Restore scroll position again immediately after content is set to ensure it stays correct
+            // Use requestAnimationFrame to ensure DOM is updated, then immediately set scroll
+            if (savedScrollTop !== null && savedScrollTop > 0) {
+              // Use requestAnimationFrame to ensure DOM is ready, then immediately set scroll
+              // Double RAF ensures we're after the browser's layout pass
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  if (isCancelled || !editor || editor.isDestroyed) return
+                  const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
+                  if (scrollContainer) {
+                    // Set scroll position directly without any animation
+                    scrollContainer.scrollTop = savedScrollTop
+                  }
+                })
+              })
+            } else if (isNewTab) {
+              // For new tabs, ensure scroll stays at top after content is set
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                  if (isCancelled || !editor || editor.isDestroyed) return
+                  const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
+                  if (scrollContainer) {
+                    scrollContainer.scrollTop = 0
+                  }
+                })
+              })
+            }
             
             // After content is set, clear highlights again if search mode is off
             // This handles cases where content from server might have highlights
@@ -1219,54 +1440,59 @@ export default function Layout({}: LayoutProps) {
               }
             }
             
-            // Focus the editor after content is fully rendered
+            // Handle focus and cursor position based on scenario
             // Skip focus if we're navigating from search results OR have pending search navigation
-            // to prevent interrupting navigation
-            if (!isNavigatingFromSearchRef.current && !pendingSearchNavRef.current) {
-              // Use multiple focus attempts with increasing delays to ensure focus is regained
-              const focusEditor = (attempt: number = 0) => {
-                if (isCancelled || attempt > 5) return
-                
-                if (editor && !editor.isDestroyed && editor.view) {
-                  const editorElement = editor.view.dom as HTMLElement
+            if (!isNavigatingFromSearchRef.current && !pendingNav) {
+              // Check if document is empty (new file)
+              const isEmpty = !content || 
+                             (typeof content === 'object' && 
+                              (!content.content || 
+                               (Array.isArray(content.content) && content.content.length === 0) ||
+                               (Array.isArray(content.content) && content.content.length === 1 && 
+                                content.content[0]?.type === 'paragraph' && 
+                                (!content.content[0]?.content || content.content[0]?.content.length === 0))))
+              
+              // Check if this is a new tab (document not in openTabs before)
+              const isNewTab = !openTabs.some(tab => tab.id === document.id)
+              
+              if (isEmpty) {
+                // Scenario 1: New file - autofocus at top
+                const focusEditor = (attempt: number = 0) => {
+                  if (isCancelled || attempt > 5) return
                   
-                  if (editorElement) {
-                    // Try to focus the editor
-                    editorElement.focus()
+                  if (editor && !editor.isDestroyed && editor.view) {
+                    const editorElement = editor.view.dom as HTMLElement
                     
-                    // Ensure it's editable
-                    if (!editorElement.isContentEditable) {
-                      editorElement.contentEditable = 'true'
-                    }
-                    
-                    // Use TipTap commands as well
-                    try {
-                      editor.commands.focus('end')
-                    } catch (e) {
-                      // Ignore focus errors
-                    }
-                    
-                    // Check if focus was successful
-                    setTimeout(() => {
-                      if (isCancelled) return
+                    if (editorElement) {
+                      editorElement.focus()
                       
-                      const isFocused = window.document.activeElement === editorElement || 
-                                       editorElement.contains(window.document.activeElement)
-                      
-                      if (!isFocused && attempt < 5) {
-                        // Focus didn't work, try again with longer delay
-                        focusTimeoutId = setTimeout(() => focusEditor(attempt + 1), 100 * (attempt + 1))
+                      if (!editorElement.isContentEditable) {
+                        editorElement.contentEditable = 'true'
                       }
-                    }, 50)
+                      
+                      // Focus at the beginning (top)
+                      try {
+                        editor.commands.focus('start')
+                      } catch (e) {
+                        // Ignore focus errors
+                      }
+                    }
                   }
                 }
+                
+                requestAnimationFrame(() => {
+                  if (isCancelled) return
+                  setTimeout(() => focusEditor(0), 50)
+                })
+              } else if (isNewTab) {
+                // Scenario 2: Opening existing file (no tab) - show top, no autofocus
+                // Scroll position is already set to 0 before and after setContent above
+                // Don't focus - let user click to focus
+              } else {
+                // Scenario 3: Switching to existing tab - restore scroll position, no autofocus
+                // Scroll position is already restored before and after setContent above
+                // Don't focus - let user click to focus
               }
-              
-              // Start focus attempts after render
-              requestAnimationFrame(() => {
-                if (isCancelled) return
-                setTimeout(() => focusEditor(0), 50)
-              })
             }
           }
         } catch (error) {
@@ -1280,7 +1506,7 @@ export default function Layout({}: LayoutProps) {
       if (timeoutId) clearTimeout(timeoutId)
       if (focusTimeoutId) clearTimeout(focusTimeoutId)
     }
-  }, [document?.id, document?.content, editor, searchQuery])
+  }, [document?.id, document?.content, editor, searchQuery, openTabs])
 
   // Automatically highlight all matches when search query changes and search mode is active
   // Also clear highlights when search mode is turned off
@@ -1509,7 +1735,7 @@ export default function Layout({}: LayoutProps) {
       flexDirection: 'column',
       backgroundColor: bgColor
     }}>
-      {/* Top Bar - Logo + Menu */}
+      {/* Top Bar - Logo + Tabs */}
       <TopBar 
         onExport={handleExport}
         documentTitle={document?.title}
@@ -1528,7 +1754,18 @@ export default function Layout({}: LayoutProps) {
         onToggleAIPanel={() => {
           setIsAIPanelOpen(!isAIPanelOpen)
         }}
+        openTabs={openTabs}
+        activeTabId={activeTabId}
+        onTabClick={handleTabClick}
+        onTabClose={handleTabClose}
       />
+      
+      {/* Separator line between topbar and toolbar */}
+      <div style={{
+        width: '100%',
+        height: '1px',
+        backgroundColor: borderColor
+      }} />
       
       {/* Toolbar - Independent, full width - Hide for PDF files */}
       {!(document && document.title.toLowerCase().endsWith('.pdf')) && (
@@ -1543,6 +1780,10 @@ export default function Layout({}: LayoutProps) {
           }}>
             <Toolbar 
               editor={editor}
+              onExport={handleExport}
+              documents={documents}
+              projectName={projectName}
+              documentTitle={document?.title}
               onToggleSearch={() => {
                 setIsSearchMode((prev) => {
                   const newValue = !prev
@@ -1581,7 +1822,7 @@ export default function Layout({}: LayoutProps) {
             />
           </div>
           
-          {/* Separator line */}
+          {/* Separator line between toolbar and editor */}
           <div style={{
             width: '100%',
             height: '1px',

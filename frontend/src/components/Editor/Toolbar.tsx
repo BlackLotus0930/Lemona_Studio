@@ -1,6 +1,10 @@
 import { Editor } from '@tiptap/react'
 import { useState, useEffect, useRef } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
+import ExportModal from '../Layout/ExportModal'
+import { Document } from '@shared/types'
+// @ts-ignore
+import ShareIcon from '@mui/icons-material/Share'
 // @ts-ignore - Material UI icons
 import SearchIcon from '@mui/icons-material/Search'
 // @ts-ignore
@@ -62,9 +66,21 @@ interface ToolbarProps {
   editor: Editor | null
   onToggleSearch?: () => void
   isSearchActive?: boolean
+  onExport?: (format: 'pdf' | 'docx', filename?: string, documentIds?: string[]) => void
+  documents?: Document[]
+  projectName?: string
+  documentTitle?: string
 }
 
-export default function Toolbar({ editor, onToggleSearch, isSearchActive = false }: ToolbarProps) {
+export default function Toolbar({ 
+  editor, 
+  onToggleSearch, 
+  isSearchActive = false,
+  onExport,
+  documents = [],
+  projectName = 'LEMONA',
+  documentTitle
+}: ToolbarProps) {
   const { theme, toggleTheme } = useTheme()
   const [fontSize, setFontSize] = useState(14)
   const [showStyleMenu, setShowStyleMenu] = useState(false)
@@ -76,6 +92,8 @@ export default function Toolbar({ editor, onToggleSearch, isSearchActive = false
   const [showSpacingMenu, setShowSpacingMenu] = useState(false)
   const [, forceUpdate] = useState({})
   const toolbarRef = useRef<HTMLDivElement>(null)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const shareButtonRef = useRef<HTMLButtonElement>(null)
   const styleMenuRef = useRef<HTMLDivElement>(null)
   const fontMenuRef = useRef<HTMLDivElement>(null)
   const colorMenuRef = useRef<HTMLDivElement>(null)
@@ -1420,6 +1438,35 @@ export default function Toolbar({ editor, onToggleSearch, isSearchActive = false
       </button>
 
       <div style={{ flex: 1 }} />
+
+      {/* Share Button */}
+      {onExport && (
+        <>
+          <button
+            ref={shareButtonRef}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setShowExportModal((prev: boolean) => !prev)
+            }}
+            style={buttonStyle}
+            title="Share / Export"
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+            <ShareIcon style={{ fontSize: '20px' }} />
+          </button>
+          <ExportModal
+            isOpen={showExportModal}
+            onClose={() => setShowExportModal(false)}
+            onExport={onExport}
+            documents={documents}
+            projectName={projectName}
+            documentTitle={documentTitle}
+            triggerRef={shareButtonRef}
+          />
+        </>
+      )}
     </div>
   )
 }

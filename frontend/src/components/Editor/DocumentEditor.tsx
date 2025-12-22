@@ -60,16 +60,8 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
     }
   }
 
-  // Load scroll position from localStorage
-  const loadScrollPosition = (documentId: string): number | null => {
-    try {
-      const saved = localStorage.getItem(`documentScroll_${documentId}`)
-      return saved ? parseFloat(saved) : null
-    } catch (error) {
-      console.error('Failed to load scroll position:', error)
-      return null
-    }
-  }
+  // Note: loadScrollPosition is now handled in Layout.tsx to restore scroll position
+  // immediately after setContent, preventing any scrolling animation
 
   const handleNewDocument = async () => {
     try {
@@ -213,20 +205,22 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
     }
   }, [editor, showRephrasePopup, selectedRange])
 
-  // Restore scroll position when document changes
-  useEffect(() => {
-    if (!document?.id || !scrollContainerRef.current) return
+  // Note: Scroll position restoration is now handled in Layout.tsx immediately after setContent
+  // to avoid any scrolling animation. This useEffect is kept as a fallback for edge cases.
+  // The Layout component restores scroll position using requestAnimationFrame for instant positioning.
+  // useEffect(() => {
+  //   if (!document?.id || !scrollContainerRef.current) return
 
-    const savedScrollTop = loadScrollPosition(document.id)
-    if (savedScrollTop !== null) {
-      // Small delay to ensure content is rendered
-      setTimeout(() => {
-        if (scrollContainerRef.current) {
-          scrollContainerRef.current.scrollTop = savedScrollTop
-        }
-      }, 100)
-    }
-  }, [document?.id])
+  //   const savedScrollTop = loadScrollPosition(document.id)
+  //   if (savedScrollTop !== null) {
+  //     // Small delay to ensure content is rendered
+  //     setTimeout(() => {
+  //       if (scrollContainerRef.current) {
+  //         scrollContainerRef.current.scrollTop = savedScrollTop
+  //       }
+  //     }, 100)
+  //   }
+  // }, [document?.id])
 
   // Add scroll detection and edge detection to show scrollbar
   useEffect(() => {
@@ -497,10 +491,7 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
           const viewportHeight = container.clientHeight
           const targetY = matchY - viewportHeight * 0.3 // Position at 30% from top
           
-          container.scrollTo({
-            top: Math.max(0, targetY),
-            behavior: 'smooth'
-          })
+          container.scrollTop = Math.max(0, targetY)
         }
       }, 50)
     } catch (error) {

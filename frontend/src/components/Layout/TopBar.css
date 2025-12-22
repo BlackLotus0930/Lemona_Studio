@@ -1,29 +1,29 @@
 .topbar {
   width: 100%;
-  height: 32px;
+  height: 36px;
   display: flex;
-  align-items: center;
+  align-items: stretch; /* Stretch to fill full height */
   user-select: none;
   -webkit-app-region: drag; /* Allow window dragging on macOS */
-  border-bottom: 1px solid;
+  border-bottom: none; /* Separator line is handled in Layout.tsx */
   transition: background-color 0.2s, border-color 0.2s;
+  background-color: transparent;
 }
 
 .topbar-light {
-  background-color: #ffffff;
   border-bottom-color: #dadce0;
 }
 
 .topbar-dark {
-  background-color: #141414;
   border-bottom-color: #232323;
 }
+
 
 .topbar-content {
   width: 100%;
   height: 100%;
   display: flex;
-  align-items: center;
+  align-items: center; /* Center items vertically */
   padding: 0 8px;
   gap: 16px;
 }
@@ -83,12 +83,12 @@
 }
 
 .topbar-right {
-  flex: 1;
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
   -webkit-app-region: no-drag;
+  flex-shrink: 0; /* Don't shrink, only take necessary space */
 }
 
 .window-controls {
