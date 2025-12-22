@@ -12,6 +12,7 @@ export interface PDFViewerSearchHandle {
   openSearch: () => void
   closeSearch: () => void
   toggleSearch: () => void
+  clearSearch: () => void // Clear search highlights and state
 }
 
 const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewerProps>(
@@ -33,6 +34,15 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     const containerRef = useRef<HTMLDivElement>(null)
     const [rightOffset, setRightOffset] = useState(20)
     
+    // Clear search state (used when switching tabs)
+    const clearSearchState = () => {
+      setShowInlineSearch(false)
+      setSearchQuery('')
+      setMatches([])
+      setCurrentMatchIndex(-1)
+      setActiveSearchQuery('')
+    }
+
     // Expose search API to parent (Layout)
     useImperativeHandle(ref, () => ({
       openSearch: () => {
@@ -43,19 +53,11 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
         }, 50)
       },
       closeSearch: () => {
-        setShowInlineSearch(false)
-        setSearchQuery('')
-        setMatches([])
-        setCurrentMatchIndex(-1)
-        setActiveSearchQuery('')
+        clearSearchState()
       },
       toggleSearch: () => {
         if (showInlineSearch) {
-          setShowInlineSearch(false)
-          setSearchQuery('')
-          setMatches([])
-          setCurrentMatchIndex(-1)
-          setActiveSearchQuery('')
+          clearSearchState()
         } else {
           setShowInlineSearch(true)
           setTimeout(() => {
@@ -63,6 +65,9 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
             inlineSearchInputRef.current?.select()
           }, 50)
         }
+      },
+      clearSearch: () => {
+        clearSearchState()
       },
     }))
 

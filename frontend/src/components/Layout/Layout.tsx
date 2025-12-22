@@ -206,12 +206,29 @@ export default function Layout() {
       // When switching documents, keep the UI visible for smooth transition
       // Only set loading state if we're switching to a different document
       if (!document || document.id !== id) {
+        // Clear search state in current editor before switching tabs
+        const isPDF = document?.title.toLowerCase().endsWith('.pdf')
+        if (isPDF && pdfViewerRef.current) {
+          pdfViewerRef.current.clearSearch()
+        } else if (!isPDF && documentEditorRef.current) {
+          documentEditorRef.current.clearSearch()
+        }
+        
         setIsLoadingDocument(true)
         loadDocument(id)
       }
       // Update active tab when route changes
       setActiveTabId(id)
     } else {
+      // Clear search state when closing all tabs
+      if (document) {
+        const isPDF = document.title.toLowerCase().endsWith('.pdf')
+        if (isPDF && pdfViewerRef.current) {
+          pdfViewerRef.current.clearSearch()
+        } else if (!isPDF && documentEditorRef.current) {
+          documentEditorRef.current.clearSearch()
+        }
+      }
       setDocument(null)
       setIsLoadingDocument(false)
       setActiveTabId(null)
@@ -1590,6 +1607,12 @@ export default function Layout() {
             // Set content
             editor.commands.setContent(content)
             lastContentRef.current = docContent
+            
+            // Clear search highlights after setting content (in case they were preserved)
+            // This ensures that when switching back to a document, old highlights are cleared
+            if (documentEditorRef.current) {
+              documentEditorRef.current.clearSearch()
+            }
             
             // Restore scroll position again immediately after content is set to ensure it stays correct
             // Use requestAnimationFrame to ensure DOM is updated, then immediately set scroll

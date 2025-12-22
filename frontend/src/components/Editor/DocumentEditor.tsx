@@ -22,6 +22,7 @@ export interface DocumentEditorSearchHandle {
   openSearch: () => void
   closeSearch: () => void
   toggleSearch: () => void
+  clearSearch: () => void // Clear search highlights and state
 }
 
 const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProps>(
@@ -65,23 +66,23 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       }, 50)
     },
     closeSearch: () => {
-      setShowInlineSearch(false)
-      setSearchQuery('')
-      setReplaceQuery('')
       clearInlineSearchHighlights()
       setMatches([])
       setCurrentMatchIndex(-1)
       setActiveSearchQuery('')
+      setSearchQuery('')
+      setReplaceQuery('')
+      setShowInlineSearch(false)
     },
     toggleSearch: () => {
       if (showInlineSearch) {
-        setShowInlineSearch(false)
-        setSearchQuery('')
-        setReplaceQuery('')
         clearInlineSearchHighlights()
         setMatches([])
         setCurrentMatchIndex(-1)
         setActiveSearchQuery('')
+        setSearchQuery('')
+        setReplaceQuery('')
+        setShowInlineSearch(false)
       } else {
         setShowInlineSearch(true)
         setTimeout(() => {
@@ -89,6 +90,15 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           inlineSearchInputRef.current?.select()
         }, 50)
       }
+    },
+    clearSearch: () => {
+      clearInlineSearchHighlights()
+      setMatches([])
+      setCurrentMatchIndex(-1)
+      setActiveSearchQuery('')
+      setSearchQuery('')
+      setReplaceQuery('')
+      setShowInlineSearch(false)
     },
   }))
   
@@ -645,6 +655,30 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       setReplaceQuery('')
     }
   }, [showInlineSearch, editor])
+
+  // Clear search highlights when document or editor changes
+  const prevDocumentIdRef = useRef<string | undefined>(undefined)
+  const prevEditorRef = useRef<Editor | null>(null)
+  useEffect(() => {
+    // Clear if document changed OR editor instance changed
+    const documentChanged = prevDocumentIdRef.current !== undefined && prevDocumentIdRef.current !== document?.id
+    const editorChanged = prevEditorRef.current !== null && prevEditorRef.current !== editor
+    
+    if (documentChanged || editorChanged) {
+      // Clear highlights and search state when switching documents or editor changes
+      clearInlineSearchHighlights()
+      setMatches([])
+      setCurrentMatchIndex(-1)
+      setActiveSearchQuery('')
+      setSearchQuery('')
+      setReplaceQuery('')
+      setShowInlineSearch(false)
+    }
+    
+    // Update the refs to track current document ID and editor
+    prevDocumentIdRef.current = document?.id
+    prevEditorRef.current = editor
+  }, [document?.id, editor])
 
   // Handle replace current match
   const handleReplace = () => {
