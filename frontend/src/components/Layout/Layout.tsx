@@ -12,7 +12,7 @@ import { ResizableImage } from '../Editor/ResizableImage'
 import Highlight from '@tiptap/extension-highlight'
 import { MathExtension } from '../Editor/MathExtension'
 import { PDFViewerExtension } from '../Editor/PDFViewer'
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import DocumentEditor, { DocumentEditorSearchHandle } from '../Editor/DocumentEditor'
 import Toolbar from '../Editor/Toolbar'
 import AIPanel from '../AIPanel/AIPanel'
@@ -76,7 +76,18 @@ export default function Layout() {
   const [isLoadingDocument, setIsLoadingDocument] = useState(true)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const documentEditorRef = useRef<DocumentEditorSearchHandle>(null)
-  const pdfViewerRef = useRef<PDFViewerSearchHandle>(null)
+  // Use a mutable ref object for PDF viewer to allow reassignment
+  const pdfViewerRef = useRef<PDFViewerSearchHandle | null>(null) as React.MutableRefObject<PDFViewerSearchHandle | null>
+  // Map to store PDF Viewer refs for each PDF document (keep them mounted)
+  const pdfViewerRefsMap = useRef<Map<string, React.MutableRefObject<PDFViewerSearchHandle | null>>>(new Map())
+  
+  // Helper to get or create a ref for a PDF document
+  const getPdfViewerRef = (docId: string): React.MutableRefObject<PDFViewerSearchHandle | null> => {
+    if (!pdfViewerRefsMap.current.has(docId)) {
+      pdfViewerRefsMap.current.set(docId, { current: null })
+    }
+    return pdfViewerRefsMap.current.get(docId)!
+  }
   const [isAIPanelOpen, setIsAIPanelOpen] = useState(() => {
     const savedState = loadAIPanelState()
     return savedState.isOpen
@@ -608,9 +619,13 @@ export default function Layout() {
       // This ensures that when the file is reopened, it shows at the top instead of the previous position
       try {
         localStorage.removeItem(`documentScroll_${docId}`)
+        localStorage.removeItem(`pdfPage_${docId}`)
       } catch (error) {
         console.error('Failed to clear scroll position:', error)
       }
+      
+      // Remove PDF Viewer ref when tab is closed
+      pdfViewerRefsMap.current.delete(docId)
       
       // If closing the active tab, switch to another tab or navigate away
       if (activeTabId === docId) {
@@ -679,6 +694,21 @@ export default function Layout() {
       console.error('Failed to save activeTabId to localStorage:', error)
     }
   }, [activeTabId])
+
+  // Update the active PDF viewer ref for backward compatibility when document changes
+  useEffect(() => {
+    if (document && document.title.toLowerCase().endsWith('.pdf')) {
+      const activeRef = pdfViewerRefsMap.current.get(document.id)
+      if (activeRef && activeRef.current) {
+        // Update the ref to point to the active PDF viewer
+        pdfViewerRef.current = activeRef.current
+      } else {
+        pdfViewerRef.current = null
+      }
+    } else {
+      pdfViewerRef.current = null
+    }
+  }, [document?.id])
 
   // Restore tabs and navigate to active tab on mount if tabs were saved
   const hasRestoredTabsRef = useRef(false)
@@ -2250,25 +2280,55 @@ export default function Layout() {
             }}>
               <div>Loading...</div>
             </div>
-          ) : document && document.title.toLowerCase().endsWith('.pdf') ? (
-            // PDF file - show full screen PDF viewer
-            <FullScreenPDFViewer 
-              ref={pdfViewerRef} 
-              document={document}
-              isAIPanelOpen={isAIPanelOpen}
-              aiPanelWidth={aiPanelWidth}
-            />
           ) : (
-            // Regular document - show document editor
-            <DocumentEditor 
-              ref={documentEditorRef}
-              document={document}
-              editor={editor}
-              onDocumentChange={setDocument}
-              showToolbarOnly={false}
-              isAIPanelOpen={isAIPanelOpen}
-              aiPanelWidth={aiPanelWidth}
-            />
+            <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+              {/* Render all PDF Viewers for open PDF tabs, but only show the active one */}
+              {openTabs
+                .filter(tab => tab.title.toLowerCase().endsWith('.pdf'))
+                .map(tab => {
+                  const tabPdfViewerRef = getPdfViewerRef(tab.id)
+                  
+                  // Find the document for this tab (use current document if it's the active one)
+                  const tabDocument = document?.id === tab.id ? document : (documents.find(doc => doc.id === tab.id) || tab)
+                  const isActive = document?.id === tab.id
+                  
+                  return (
+                    <div
+                      key={tab.id}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        display: isActive ? 'block' : 'none', // Hide inactive PDF viewers
+                        pointerEvents: isActive ? 'auto' : 'none', // Disable pointer events for hidden viewers
+                      }}
+                    >
+                      <FullScreenPDFViewer 
+                        ref={tabPdfViewerRef} 
+                        document={tabDocument}
+                        isAIPanelOpen={isAIPanelOpen}
+                        aiPanelWidth={aiPanelWidth}
+                      />
+                    </div>
+                  )
+                })}
+              
+              {/* Render DocumentEditor for non-PDF documents */}
+              {document && !document.title.toLowerCase().endsWith('.pdf') && (
+                <DocumentEditor 
+                  ref={documentEditorRef}
+                  document={document}
+                  editor={editor}
+                  onDocumentChange={setDocument}
+                  showToolbarOnly={false}
+                  isAIPanelOpen={isAIPanelOpen}
+                  aiPanelWidth={aiPanelWidth}
+                />
+              )}
+              
+            </div>
           )}
         </Panel>
         {isAIPanelOpen && (

@@ -23,6 +23,10 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     const [error, setError] = useState(false)
     const iframeRef = useRef<HTMLIFrameElement>(null)
     const [iframeKey, setIframeKey] = useState(0) // Force iframe reload by changing key
+    const currentPageRef = useRef<number | null>(null) // Track current PDF page
+    const previousDocIdRef = useRef<string | null>(null) // Track previous document ID to detect changes
+    const previousBaseSrcRef = useRef<string | null>(null) // Track previous base src to detect changes
+    const isRestoringPageRef = useRef(false) // Track if we're restoring page position
     
     // Inline search state
     const [showInlineSearch, setShowInlineSearch] = useState(false)
@@ -124,10 +128,36 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     return `${beforeMatch}[${matchText}]${afterMatch}`
   }
   
+  // Save PDF page position to localStorage
+  const savePagePosition = (docId: string, pageNumber: number) => {
+    try {
+      localStorage.setItem(`pdfPage_${docId}`, pageNumber.toString())
+      currentPageRef.current = pageNumber
+    } catch (error) {
+      console.error('Failed to save PDF page position:', error)
+    }
+  }
+  
+  // Load PDF page position from localStorage
+  const loadPagePosition = (docId: string): number | null => {
+    try {
+      const saved = localStorage.getItem(`pdfPage_${docId}`)
+      return saved ? parseInt(saved, 10) : null
+    } catch (error) {
+      console.error('Failed to load PDF page position:', error)
+      return null
+    }
+  }
+  
   // Navigate to a specific page in the PDF and try to highlight text
-  const navigateToPage = (pageNumber: number, match?: { pageNumber: number; from: number; to: number }) => {
+  const navigateToPage = (pageNumber: number, match?: { pageNumber: number; from: number; to: number }, skipReload = false) => {
     if (!basePdfSrc) {
       return
+    }
+    
+    // Save page position
+    if (document?.id) {
+      savePagePosition(document.id, pageNumber)
     }
     
     // Append page anchor to PDF URL
@@ -147,8 +177,11 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
       ? basePdfSrc.replace(/#.*$/, pageAnchor) 
       : basePdfSrc + pageAnchor
     
-    // Force iframe reload by updating key
-    setIframeKey(prev => prev + 1)
+    // Only reload iframe if skipReload is false (e.g., when user navigates, not when restoring)
+    if (!skipReload) {
+      // Force iframe reload by updating key
+      setIframeKey(prev => prev + 1)
+    }
     
     // Set the new src
     setPdfSrc(newSrc)
@@ -186,7 +219,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
           // Ignore errors
         }
       }
-    }, 100) // Small delay to ensure iframe has reloaded
+    }, skipReload ? 100 : 500) // Longer delay if reloading iframe
   }
   
   // Perform search
@@ -237,6 +270,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     if (!document) {
       setPdfSrc(null)
       setError(false)
+      previousDocIdRef.current = null
       return
     }
 
@@ -246,9 +280,13 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     if (!isPDF) {
       setPdfSrc(null)
       setError(false)
+      previousDocIdRef.current = null
       return
     }
 
+    // Check if this is the same document (switching tabs back to same PDF)
+    const isSameDocument = previousDocIdRef.current === document.id
+    
     // Parse document content to extract PDF data URL
     try {
       const content = JSON.parse(document.content)
@@ -271,16 +309,75 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
       if (src) {
         // Store base URL without page anchor
         const baseSrc = src.split('#')[0]
+        const isSameBaseSrc = previousBaseSrcRef.current === baseSrc
+        
+        // If same document AND same base src, just restore page position without reloading
+        if (isSameDocument && isSameBaseSrc && basePdfSrc === baseSrc) {
+          // Same document and same PDF source, restore page position without reloading iframe
+          const savedPage = loadPagePosition(document.id)
+          if (savedPage !== null && savedPage > 0) {
+            isRestoringPageRef.current = true
+            // Update src with saved page - this will update iframe src without reloading
+            const restoredSrc = baseSrc + `#page=${savedPage}`
+            setPdfSrc(restoredSrc)
+            currentPageRef.current = savedPage
+            
+            // Also update iframe src directly to avoid any delay
+            if (iframeRef.current) {
+              iframeRef.current.src = restoredSrc
+            }
+            
+            // Try to navigate to saved page in iframe without reload
+            setTimeout(() => {
+              if (iframeRef.current?.contentWindow) {
+                try {
+                  iframeRef.current.contentWindow.postMessage({
+                    type: 'goToPage',
+                    page: savedPage
+                  }, '*')
+                } catch (e) {
+                  // Ignore errors
+                }
+              }
+              isRestoringPageRef.current = false
+            }, 100)
+          } else {
+            // No saved page, but still update src to ensure iframe is correct
+            setPdfSrc(src)
+          }
+          // Don't update basePdfSrc or reload iframe - keep current state
+          return
+        }
+        
+        // Different document or different PDF source - need to reload
         setBasePdfSrc(baseSrc)
-        setPdfSrc(src) // Keep original src with any existing anchor
+        previousBaseSrcRef.current = baseSrc
+        
+        // Check for saved page position
+        const savedPage = loadPagePosition(document.id)
+        if (savedPage !== null && savedPage > 0) {
+          // Restore saved page position
+          const restoredSrc = baseSrc + `#page=${savedPage}`
+          setPdfSrc(restoredSrc)
+          currentPageRef.current = savedPage
+        } else {
+          // Use original src with any existing anchor
+          setPdfSrc(src)
+        }
+        
         setError(false)
+        previousDocIdRef.current = document.id
       } else {
         setError(true)
+        previousDocIdRef.current = null
+        previousBaseSrcRef.current = null
       }
     } catch (e) {
       setError(true)
+      previousDocIdRef.current = null
+      previousBaseSrcRef.current = null
     }
-  }, [document])
+  }, [document?.id, document?.content])
   
   // Handle Escape key to close search (when search is open)
   useEffect(() => {
@@ -367,6 +464,75 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
       clearTimeout(timeoutId)
     }
   }, [searchQuery, document])
+
+  // Monitor PDF page changes and save position
+  useEffect(() => {
+    if (!document?.id || !iframeRef.current) return
+    
+    // Check iframe URL periodically to detect page changes
+    // This works for PDF viewers that update the hash in the URL
+    const checkPageChange = () => {
+      try {
+        // Try to access iframe's location (may fail due to CORS)
+        const iframe = iframeRef.current
+        if (!iframe || !iframe.contentWindow) return
+        
+        // Try to get iframe URL (may be blocked by CORS)
+        let iframeUrl: string | null = null
+        try {
+          iframeUrl = iframe.contentWindow.location.href
+        } catch (e) {
+          // CORS blocked, try alternative method
+          // Check if src has changed
+          if (iframe.src && iframe.src.includes('#page=')) {
+            const match = iframe.src.match(/#page=(\d+)/)
+            if (match) {
+              const pageNum = parseInt(match[1], 10)
+              if (pageNum !== currentPageRef.current && pageNum > 0) {
+                savePagePosition(document.id, pageNum)
+                currentPageRef.current = pageNum
+              }
+            }
+          }
+          return
+        }
+        
+        // Extract page number from iframe URL
+        if (iframeUrl && iframeUrl.includes('#page=')) {
+          const match = iframeUrl.match(/#page=(\d+)/)
+          if (match) {
+            const pageNum = parseInt(match[1], 10)
+            if (pageNum !== currentPageRef.current && pageNum > 0) {
+              savePagePosition(document.id, pageNum)
+              currentPageRef.current = pageNum
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore errors (CORS, etc.)
+      }
+    }
+    
+    // Check periodically (every 1 second)
+    const intervalId = setInterval(checkPageChange, 1000)
+    
+    // Also check when iframe src changes
+    const observer = new MutationObserver(() => {
+      checkPageChange()
+    })
+    
+    if (iframeRef.current) {
+      observer.observe(iframeRef.current, {
+        attributes: true,
+        attributeFilter: ['src']
+      })
+    }
+    
+    return () => {
+      clearInterval(intervalId)
+      observer.disconnect()
+    }
+  }, [document?.id])
 
   // Calculate right offset based on AI panel state
   useEffect(() => {
@@ -481,6 +647,13 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
               const pageMatch = pdfSrc.match(/#page=(\d+)/)
               if (pageMatch && iframeRef.current?.contentWindow) {
                 const pageNum = parseInt(pageMatch[1], 10)
+                currentPageRef.current = pageNum
+                
+                // Save page position
+                if (document?.id) {
+                  savePagePosition(document.id, pageNum)
+                }
+                
                 setTimeout(() => {
                   try {
                     iframeRef.current?.contentWindow?.postMessage({
@@ -488,8 +661,32 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                       page: pageNum
                     }, '*')
                   } catch (e) {
+                    // Ignore errors
                   }
                 }, 500)
+              }
+            }
+            
+            // Listen for page changes from iframe (if PDF viewer supports postMessage)
+            if (iframeRef.current?.contentWindow) {
+              const handleMessage = (event: MessageEvent) => {
+                // Listen for page change events from PDF viewer
+                if (event.data && typeof event.data === 'object') {
+                  if (event.data.type === 'pagechange' && event.data.page && document?.id) {
+                    const pageNum = parseInt(event.data.page, 10)
+                    if (!isNaN(pageNum) && pageNum > 0) {
+                      savePagePosition(document.id, pageNum)
+                      currentPageRef.current = pageNum
+                    }
+                  }
+                }
+              }
+              
+              window.addEventListener('message', handleMessage)
+              
+              // Cleanup listener when iframe unloads
+              return () => {
+                window.removeEventListener('message', handleMessage)
               }
             }
           }}
