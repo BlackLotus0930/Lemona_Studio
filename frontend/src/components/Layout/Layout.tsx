@@ -273,9 +273,21 @@ export default function Layout({}: LayoutProps) {
     }
   }
 
+  // Track previous projectId to detect changes
+  const previousProjectIdRef = useRef<string | undefined>(undefined)
+  
   // Load all documents for FileExplorer and TopBar
   useEffect(() => {
-    loadDocuments()
+    const currentProjectId = document?.projectId
+    
+    // Only clear and reload if projectId actually changed
+    if (previousProjectIdRef.current !== currentProjectId) {
+      // Clear documents immediately when project changes to prevent showing stale data
+      setDocuments([])
+      setIsLoadingDocuments(true)
+      previousProjectIdRef.current = currentProjectId
+      loadDocuments()
+    }
   }, [document?.projectId]) // Reload when project changes
 
   // Keyboard shortcuts: Ctrl+Shift+E to toggle FileExplorer, Ctrl+Shift+F to toggle search
@@ -345,6 +357,10 @@ export default function Layout({}: LayoutProps) {
   }, [searchQuery])
 
   const loadDocuments = async () => {
+    // Note: documents are already cleared in useEffect when projectId changes
+    // Set loading state
+    setIsLoadingDocuments(true)
+    
     try {
       // If document has projectId, load project's documents
       if (document?.projectId) {

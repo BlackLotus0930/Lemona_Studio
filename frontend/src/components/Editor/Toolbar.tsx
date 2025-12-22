@@ -476,7 +476,7 @@ export default function Toolbar({
           }
         }}
       >
-        <SearchIcon style={{ fontSize: '20px' }} />
+        <SearchIcon style={{ fontSize: '19px' }} />
       </button>
 
       {/* Undo/Redo */}

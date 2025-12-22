@@ -68,7 +68,7 @@ export default function TopBar({
         
         {/* Tab Bar - extends to near window controls */}
         <div className="topbar-menu" style={{
-          display: 'flex',
+                display: 'flex',
           alignItems: 'center', // Center tabs vertically
           gap: 0,
           flex: 1, // Take up remaining space
@@ -77,9 +77,9 @@ export default function TopBar({
           marginRight: '8px' // Add some space before window controls
         }}>
           {/* Tabs Container - Scrollable */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
             gap: 0,
             width: '100%',
             overflowX: 'auto',
@@ -102,14 +102,14 @@ export default function TopBar({
                 canClose={openTabs.length > 1} // Can only close if more than one tab
               />
             ))}
-          </div>
-        </div>
-        
+              </div>
+                </div>
+
         {/* Right side - Window controls */}
         <div className="topbar-right" style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
           flexShrink: 0 // Don't shrink, only take necessary space
         }}>
           {/* Window controls on Windows/Linux */}
