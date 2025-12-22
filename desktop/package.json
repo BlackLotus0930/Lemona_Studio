@@ -18,9 +18,11 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "axios": "^1.13.2",
+    "canvas": "^3.2.0",
     "docx": "^9.5.1",
     "dotenv": "^17.2.3",
     "electron": "^28.0.0",
+    "pdfjs-dist": "^3.11.174",
     "pdfkit": "^0.17.2",
     "puppeteer": "^24.34.0"
   },

@@ -12,11 +12,21 @@ interface TabProps {
   isFirst?: boolean
   isLast?: boolean
   canClose?: boolean // Whether this tab can be closed (false if it's the only tab)
+  onDragStart?: (e: React.DragEvent) => void
+  onDragOver?: (e: React.DragEvent) => void
+  onDragLeave?: () => void
+  onDrop?: (e: React.DragEvent) => void
+  onDragEnd?: (e: React.DragEvent) => void
+  showDropIndicator?: boolean
+  dropPosition?: 'left' | 'right' | null
+  indicatorColor?: string
 }
 
-export default function Tab({ title, isActive, onClick, onClose, isLast = false, canClose = true }: TabProps) {
+export default function Tab({ documentId, title, isActive, onClick, onClose, isLast = false, canClose = true, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd, showDropIndicator = false, dropPosition = null, indicatorColor = '#1976d2' }: TabProps) {
   const { theme } = useTheme()
   const [isHovered, setIsHovered] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
 
   const tabBg = isActive 
     ? (theme === 'dark' ? '#1e1e1e' : '#ffffff')
@@ -29,18 +39,77 @@ export default function Tab({ title, isActive, onClick, onClose, isLast = false,
   const separatorColor = '#1E1E1E' // Fixed color for separator lines
   const showCloseButton = canClose && (isActive || isHovered)
 
+  const handleDragStart = (e: React.DragEvent) => {
+    setIsDragging(true)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', documentId)
+    if (onDragStart) {
+      onDragStart(e)
+    }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    setIsDragOver(true)
+    if (onDragOver) {
+      onDragOver(e)
+    }
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+    if (onDragLeave) {
+      onDragLeave()
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+    if (onDrop) {
+      onDrop(e)
+    }
+  }
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    setIsDragging(false)
+    setIsDragOver(false)
+    if (onDragEnd) {
+      onDragEnd(e)
+    }
+  }
+
+  const currentBg = isDragOver 
+    ? (theme === 'dark' ? '#2a2a2a' : '#e8e8e8')
+    : (isDragging 
+      ? (theme === 'dark' ? '#252525' : '#f0f0f0')
+      : tabBg)
+
   return (
     <div
+      draggable
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      onDragEnd={handleDragEnd}
       onClick={onClick}
       onMouseEnter={(e) => {
-        setIsHovered(true)
-        if (!isActive) {
-          e.currentTarget.style.backgroundColor = tabHoverBg
+        if (!isDragging) {
+          setIsHovered(true)
+          if (!isActive) {
+            e.currentTarget.style.backgroundColor = tabHoverBg
+          }
         }
       }}
       onMouseLeave={(e) => {
         setIsHovered(false)
-        if (!isActive) {
+        if (!isActive && !isDragging && !isDragOver) {
           e.currentTarget.style.backgroundColor = tabBg
         }
       }}
@@ -50,9 +119,9 @@ export default function Tab({ title, isActive, onClick, onClose, isLast = false,
         gap: '8px',
         padding: '0 12px 0 18px', // Left padding slightly reduced
         height: '36px', // Match topbar height exactly
-        backgroundColor: tabBg,
+        backgroundColor: currentBg,
         color: tabTextColor,
-        cursor: 'pointer',
+        cursor: isDragging ? 'grabbing' : 'grab',
         borderTop: 'none', // Remove blue indicator
         borderLeft: 'none', // Remove left border - will use pseudo-element for shorter separator
         borderRight: 'none', // Remove right border - will use pseudo-element for shorter separator
@@ -62,11 +131,27 @@ export default function Tab({ title, isActive, onClick, onClose, isLast = false,
         minWidth: '120px',
         maxWidth: '240px',
         position: 'relative',
-        transition: 'background-color 0.15s',
+        transition: isDragging ? 'none' : 'background-color 0.15s',
         userSelect: 'none',
+        opacity: isDragging ? 0.5 : 1,
         ...({ WebkitAppRegion: 'no-drag' } as any)
       }}
     >
+      {/* Drop indicator line on the left */}
+      {showDropIndicator && dropPosition === 'left' && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: '2px',
+            backgroundColor: indicatorColor,
+            zIndex: 1000,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
       {/* Tab Title */}
       <span style={{
         overflow: 'hidden',
@@ -120,8 +205,24 @@ export default function Tab({ title, isActive, onClick, onClose, isLast = false,
         <CloseIcon style={{ fontSize: '14px' }} />
       </button>
       
+      {/* Drop indicator line on the right */}
+      {showDropIndicator && dropPosition === 'right' && (
+        <div
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: '2px',
+            backgroundColor: indicatorColor,
+            zIndex: 1000,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+      
       {/* Right separator line - height 20px (not shown for last tab) */}
-      {!isLast && (
+      {!isLast && !(showDropIndicator && dropPosition === 'right') && (
         <div style={{
           position: 'absolute',
           right: 0,

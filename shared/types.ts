@@ -21,6 +21,20 @@ export interface Document {
   dependencies?: string[]; // Optional: Array of document IDs this document depends on
   order?: number; // Optional: Order within project (for sorting)
   folder?: 'library' | 'project'; // Optional: Folder this document belongs to ('library' or 'project')
+  // PDF text extraction
+  pdfText?: PDFTextContent; // Optional: Extracted text from PDF files, organized by page/paragraph
+}
+
+export interface PDFTextContent {
+  pages: PDFPageText[]; // Text content per page
+  fullText: string; // Full concatenated text for quick search
+  extractedAt?: string; // Timestamp when text was extracted
+}
+
+export interface PDFPageText {
+  pageNumber: number; // 1-indexed page number
+  paragraphs: string[]; // Text paragraphs on this page
+  fullText: string; // Full text of the page
 }
 
 export interface Section {

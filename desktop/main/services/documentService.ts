@@ -3,6 +3,7 @@ import { Document } from '../../../shared/types.js'
 import { app } from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
+import { extractPDFTextAsync } from './pdfTextExtractor.js'
 
 // Use Electron's userData directory for documents
 const DOCUMENTS_DIR = path.join(app.getPath('userData'), 'documents')
@@ -295,6 +296,28 @@ export const documentService = {
     // Save document metadata
     const docPath = getDocumentPath(id)
     await fs.writeFile(docPath, JSON.stringify(document, null, 2))
+    
+    // If PDF, extract text asynchronously in the background
+    if (ext === 'pdf') {
+      // Start PDF text extraction in background (non-blocking)
+      extractPDFTextAsync(targetFilePath, id, async (pdfText) => {
+        try {
+          // Update document with extracted text
+          const updatedDoc = await this.getById(id)
+          if (updatedDoc) {
+            updatedDoc.pdfText = pdfText
+            updatedDoc.updatedAt = new Date().toISOString()
+            await fs.writeFile(docPath, JSON.stringify(updatedDoc, null, 2))
+            console.log(`[PDF Text Extraction] Completed for document ${id}`)
+          }
+        } catch (error) {
+          console.error(`[PDF Text Extraction] Failed to update document ${id}:`, error)
+        }
+      }).catch((error) => {
+        console.error(`[PDF Text Extraction] Failed for document ${id}:`, error)
+        // Don't throw - extraction failure shouldn't break upload
+      })
+    }
     
     return document
   },

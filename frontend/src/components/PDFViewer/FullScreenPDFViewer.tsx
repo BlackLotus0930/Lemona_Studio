@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import { Document } from '@shared/types'
 
@@ -6,10 +6,220 @@ interface FullScreenPDFViewerProps {
   document: Document | null
 }
 
-export default function FullScreenPDFViewer({ document }: FullScreenPDFViewerProps) {
-  const { theme } = useTheme()
-  const [pdfSrc, setPdfSrc] = useState<string | null>(null)
-  const [error, setError] = useState(false)
+export interface PDFViewerSearchHandle {
+  openSearch: () => void
+  closeSearch: () => void
+  toggleSearch: () => void
+}
+
+const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewerProps>(
+  ({ document }, ref) => {
+    const { theme } = useTheme()
+    const [pdfSrc, setPdfSrc] = useState<string | null>(null)
+    const [basePdfSrc, setBasePdfSrc] = useState<string | null>(null) // Store base URL without page anchor
+    const [error, setError] = useState(false)
+    const iframeRef = useRef<HTMLIFrameElement>(null)
+    const [iframeKey, setIframeKey] = useState(0) // Force iframe reload by changing key
+    
+    // Inline search state
+    const [showInlineSearch, setShowInlineSearch] = useState(false)
+    const [searchQuery, setSearchQuery] = useState('')
+    const [matches, setMatches] = useState<Array<{ pageNumber: number; from: number; to: number }>>([])
+    const [currentMatchIndex, setCurrentMatchIndex] = useState(-1)
+    const inlineSearchInputRef = useRef<HTMLInputElement>(null)
+    const containerRef = useRef<HTMLDivElement>(null)
+    const rightOffset = 20 // Fixed offset for search modal
+    
+    // Expose search API to parent (Layout)
+    useImperativeHandle(ref, () => ({
+      openSearch: () => {
+        setShowInlineSearch(true)
+        setTimeout(() => {
+          inlineSearchInputRef.current?.focus()
+          inlineSearchInputRef.current?.select()
+        }, 50)
+      },
+      closeSearch: () => {
+        setShowInlineSearch(false)
+        setSearchQuery('')
+        setMatches([])
+        setCurrentMatchIndex(-1)
+      },
+      toggleSearch: () => {
+        if (showInlineSearch) {
+          setShowInlineSearch(false)
+          setSearchQuery('')
+          setMatches([])
+          setCurrentMatchIndex(-1)
+        } else {
+          setShowInlineSearch(true)
+          setTimeout(() => {
+            inlineSearchInputRef.current?.focus()
+            inlineSearchInputRef.current?.select()
+          }, 50)
+        }
+      },
+    }))
+
+  // Find matches in PDF text
+  const findMatches = (query: string): Array<{ pageNumber: number; from: number; to: number }> => {
+    if (!query.trim()) {
+      return []
+    }
+    
+    if (!document?.pdfText) {
+      return []
+    }
+    
+    const matches: Array<{ pageNumber: number; from: number; to: number }> = []
+    const searchText = query.toLowerCase()
+    
+    document.pdfText.pages.forEach((page) => {
+      const pageText = page.fullText.toLowerCase()
+      let searchIndex = 0
+      
+      while (true) {
+        const index = pageText.indexOf(searchText, searchIndex)
+        if (index === -1) break
+        
+        matches.push({
+          pageNumber: page.pageNumber,
+          from: index,
+          to: index + query.length,
+        })
+        searchIndex = index + 1
+      }
+    })
+    
+    return matches
+  }
+  
+  // Get context text around a match for display
+  const getMatchContext = (match: { pageNumber: number; from: number; to: number }, contextLength: number = 50): string => {
+    if (!document?.pdfText) return ''
+    
+    const page = document.pdfText.pages.find(p => p.pageNumber === match.pageNumber)
+    if (!page) return ''
+    
+    const pageText = page.fullText
+    const start = Math.max(0, match.from - contextLength)
+    const end = Math.min(pageText.length, match.to + contextLength)
+    const context = pageText.substring(start, end)
+    
+    // Highlight the match in the context
+    const matchText = pageText.substring(match.from, match.to)
+    const beforeMatch = context.substring(0, match.from - start)
+    const afterMatch = context.substring(match.to - start)
+    
+    return `${beforeMatch}[${matchText}]${afterMatch}`
+  }
+  
+  // Navigate to a specific page in the PDF and try to highlight text
+  const navigateToPage = (pageNumber: number, match?: { pageNumber: number; from: number; to: number }) => {
+    if (!basePdfSrc) {
+      return
+    }
+    
+    // Append page anchor to PDF URL
+    // Most PDF viewers support #page=N format
+    let pageAnchor = `#page=${pageNumber}`
+    
+    // Try to add text search parameter if match is provided
+    // Some PDF viewers support #search=text or #text=search
+    if (match && searchQuery.trim()) {
+      // Try different formats for text highlighting
+      pageAnchor += `&search=${encodeURIComponent(searchQuery)}`
+      // Also try alternative formats
+      // pageAnchor += `&text=${encodeURIComponent(searchQuery)}`
+    }
+    
+    const newSrc = basePdfSrc.includes('#') 
+      ? basePdfSrc.replace(/#.*$/, pageAnchor) 
+      : basePdfSrc + pageAnchor
+    
+    // Force iframe reload by updating key
+    setIframeKey(prev => prev + 1)
+    
+    // Set the new src
+    setPdfSrc(newSrc)
+    
+    // Also try to communicate with iframe if it's a PDF.js viewer
+    // This is a fallback for PDF.js-based viewers
+    setTimeout(() => {
+      if (iframeRef.current?.contentWindow) {
+        try {
+          // Try multiple postMessage formats that different PDF viewers might use
+          const messages: any[] = [
+            { type: 'goToPage', page: pageNumber },
+            { type: 'navigate', page: pageNumber },
+            { type: 'page', page: pageNumber },
+            { action: 'goToPage', page: pageNumber },
+          ]
+          
+          // If we have a match, try to highlight the text
+          if (match && searchQuery.trim()) {
+            messages.push(
+              { type: 'highlight', page: pageNumber, text: searchQuery },
+              { type: 'search', page: pageNumber, query: searchQuery },
+              { action: 'highlight', page: pageNumber, text: searchQuery },
+            )
+          }
+          
+          messages.forEach((msg) => {
+            try {
+              iframeRef.current?.contentWindow?.postMessage(msg, '*')
+            } catch (e) {
+              // Ignore errors
+            }
+          })
+        } catch (e) {
+          // Ignore errors
+        }
+      }
+    }, 100) // Small delay to ensure iframe has reloaded
+  }
+  
+  // Perform search
+  const performSearch = () => {
+    if (!searchQuery.trim()) {
+      setMatches([])
+      setCurrentMatchIndex(-1)
+      return
+    }
+    
+    const foundMatches = findMatches(searchQuery)
+    setMatches(foundMatches)
+    
+    if (foundMatches.length > 0) {
+      setCurrentMatchIndex(0)
+      const firstMatch = foundMatches[0]
+      navigateToPage(firstMatch.pageNumber, firstMatch)
+    } else {
+      setCurrentMatchIndex(-1)
+    }
+  }
+  
+  // Navigate to previous match
+  const navigateToPrevious = () => {
+    if (matches.length === 0) return
+    const prevIndex = currentMatchIndex <= 0 ? matches.length - 1 : currentMatchIndex - 1
+    setCurrentMatchIndex(prevIndex)
+    const match = matches[prevIndex]
+    if (match && match.pageNumber) {
+      navigateToPage(match.pageNumber)
+    }
+  }
+  
+  // Navigate to next match
+  const navigateToNext = () => {
+    if (matches.length === 0) return
+    const nextIndex = (currentMatchIndex + 1) % matches.length
+    setCurrentMatchIndex(nextIndex)
+    const match = matches[nextIndex]
+    if (match && match.pageNumber) {
+      navigateToPage(match.pageNumber, match)
+    }
+  }
 
   useEffect(() => {
     if (!document) {
@@ -47,17 +257,114 @@ export default function FullScreenPDFViewer({ document }: FullScreenPDFViewerPro
 
       const src = findPDFSrc(content)
       if (src) {
-        setPdfSrc(src)
+        // Store base URL without page anchor
+        const baseSrc = src.split('#')[0]
+        setBasePdfSrc(baseSrc)
+        setPdfSrc(src) // Keep original src with any existing anchor
         setError(false)
       } else {
         setError(true)
       }
     } catch (e) {
-      console.error('Failed to parse document content:', e)
       setError(true)
     }
   }, [document])
+  
+  // Handle search input keydown - Enter 确认导航
+  useEffect(() => {
+    if (!showInlineSearch) return
+    
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          // Enter 确认导航：跳转到当前匹配的页面
+          if (!searchQuery.trim()) {
+            setMatches([])
+            setCurrentMatchIndex(-1)
+            return
+          }
+          
+          // 如果已经有匹配结果，导航到当前匹配
+          if (matches.length > 0 && currentMatchIndex >= 0) {
+            const targetMatch = matches[currentMatchIndex]
+            navigateToPage(targetMatch.pageNumber)
+          } else {
+            // 如果没有匹配结果，重新搜索一次
+            const foundMatches = findMatches(searchQuery)
+            setMatches(foundMatches)
+            if (foundMatches.length > 0) {
+              setCurrentMatchIndex(0)
+              const firstMatch = foundMatches[0]
+              navigateToPage(firstMatch.pageNumber, firstMatch)
+            } else {
+              setCurrentMatchIndex(-1)
+            }
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault()
+          setShowInlineSearch(false)
+          setSearchQuery('')
+          setMatches([])
+          setCurrentMatchIndex(-1)
+        }
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showInlineSearch, searchQuery, document, matches, currentMatchIndex])
+  
+  // Focus search input when opening
+  useEffect(() => {
+    if (showInlineSearch && inlineSearchInputRef.current) {
+      setTimeout(() => {
+        inlineSearchInputRef.current?.focus()
+        inlineSearchInputRef.current?.select()
+      }, 50)
+    }
+  }, [showInlineSearch])
+  
+  // Perform search when query changes (debounced) - 混合模式：实时高亮，不自动导航
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setMatches([])
+      setCurrentMatchIndex(-1)
+      return
+    }
+    
+    const timeoutId = setTimeout(() => {
+      if (!searchQuery.trim()) {
+        setMatches([])
+        setCurrentMatchIndex(-1)
+        return
+      }
+      
+      if (!document?.pdfText) {
+        setMatches([])
+        setCurrentMatchIndex(-1)
+        return
+      }
+      
+      const foundMatches = findMatches(searchQuery)
+      
+      // 实时高亮：更新匹配结果，但不自动导航
+      setMatches(foundMatches)
+      
+      if (foundMatches.length > 0) {
+        // 设置当前匹配索引为0（用于显示 "1/N"），但不导航
+        setCurrentMatchIndex(0)
+      } else {
+        setCurrentMatchIndex(-1)
+      }
+    }, 300) // 300ms 防抖延迟
+    
+    return () => {
+      clearTimeout(timeoutId)
+    }
+  }, [searchQuery, document])
 
+  // Early returns AFTER all hooks
   if (!document) {
     return null
   }
@@ -91,15 +398,45 @@ export default function FullScreenPDFViewer({ document }: FullScreenPDFViewerPro
 
   return (
     <div
+      ref={containerRef}
       style={{
         width: '100%',
         height: '100%',
         backgroundColor: bgColor,
         overflow: 'hidden',
+        position: 'relative',
       }}
+      onKeyDown={(e) => {
+        // Handle Ctrl+F on the container div
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && !e.shiftKey) {
+          e.preventDefault()
+          e.stopPropagation()
+          if (showInlineSearch) {
+            setShowInlineSearch(false)
+            setSearchQuery('')
+            setMatches([])
+            setCurrentMatchIndex(-1)
+          } else {
+            setShowInlineSearch(true)
+            setTimeout(() => {
+              inlineSearchInputRef.current?.focus()
+              inlineSearchInputRef.current?.select()
+            }, 50)
+          }
+        }
+      }}
+      onClick={(e) => {
+        // If clicking on the container (not the iframe), focus it so keyboard events work
+        if (e.target === containerRef.current) {
+          containerRef.current?.focus()
+        }
+      }}
+      tabIndex={-1}
     >
       {!error ? (
         <iframe
+          key={iframeKey}
+          ref={iframeRef}
           src={pdfSrc ?? undefined}
           style={{
             width: '100%',
@@ -109,6 +446,24 @@ export default function FullScreenPDFViewer({ document }: FullScreenPDFViewerPro
             backgroundColor: bgColor,
           }}
           onError={() => setError(true)}
+          onLoad={() => {
+            // Try postMessage again after iframe loads
+            if (pdfSrc && pdfSrc.includes('#page=')) {
+              const pageMatch = pdfSrc.match(/#page=(\d+)/)
+              if (pageMatch && iframeRef.current?.contentWindow) {
+                const pageNum = parseInt(pageMatch[1], 10)
+                setTimeout(() => {
+                  try {
+                    iframeRef.current?.contentWindow?.postMessage({
+                      type: 'goToPage',
+                      page: pageNum
+                    }, '*')
+                  } catch (e) {
+                  }
+                }, 500)
+              }
+            }
+          }}
           title={document.title}
         />
       ) : (
@@ -131,7 +486,255 @@ export default function FullScreenPDFViewer({ document }: FullScreenPDFViewerPro
           </p>
         </div>
       )}
+      
+      {/* Inline Search Bar for PDF */}
+      {showInlineSearch && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '92px',
+            right: `${rightOffset}px`,
+            backgroundColor: '#1e1e1e',
+            borderRadius: '8px',
+            padding: '12px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)',
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            minWidth: '280px',
+            maxWidth: '300px',
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            fontWeight: '300',
+            transition: 'right 0.3s ease',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Show message if PDF text is not available */}
+          {!document?.pdfText && (
+            <div style={{
+              padding: '8px 12px',
+              backgroundColor: '#2a2a2a',
+              borderRadius: '4px',
+              fontSize: '12px',
+              color: '#999',
+              marginBottom: '8px',
+            }}>
+              PDF text is being extracted... Search will be available shortly.
+            </div>
+          )}
+          {/* Close button */}
+          <button
+            onClick={() => {
+              setShowInlineSearch(false)
+              setSearchQuery('')
+              setMatches([])
+              setCurrentMatchIndex(-1)
+            }}
+            style={{
+              position: 'absolute',
+              top: '8px',
+              right: '8px',
+              padding: '2px',
+              backgroundColor: 'transparent',
+              border: 'none',
+              color: '#999',
+              cursor: 'pointer',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '4px',
+              width: '18px',
+              height: '18px',
+              fontWeight: '300',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#2a2a2a'
+              e.currentTarget.style.color = '#fff'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.color = '#999'
+            }}
+            title="Close (Esc)"
+          >
+            ✕
+          </button>
+
+          {/* Find section */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: '300', width: '100%' }}>
+            <label style={{
+              fontSize: '11px',
+              fontWeight: '300',
+              color: '#e0e0e0',
+              margin: 0,
+            }}>
+              Find in PDF
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%' }}>
+              <input
+                ref={inlineSearchInputRef}
+                data-search-input="true"
+                type="text"
+                placeholder=""
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  padding: '6px 10px',
+                  border: '1px solid #333',
+                  borderRadius: '4px',
+                  backgroundColor: '#252525',
+                  color: '#e0e0e0',
+                  fontSize: '13px',
+                  outline: 'none',
+                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                  fontWeight: '300',
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    // Enter 确认导航：跳转到当前匹配的页面
+                    if (matches.length > 0 && currentMatchIndex >= 0) {
+                      const targetMatch = matches[currentMatchIndex]
+                      navigateToPage(targetMatch.pageNumber, targetMatch)
+                    } else if (matches.length > 0) {
+                      // 如果有匹配但索引无效，导航到第一个
+                      setCurrentMatchIndex(0)
+                      navigateToPage(matches[0].pageNumber, matches[0])
+                    } else {
+                      // 没有匹配，重新搜索
+                      performSearch()
+                    }
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setShowInlineSearch(false)
+                    setSearchQuery('')
+                    setMatches([])
+                    setCurrentMatchIndex(-1)
+                  }
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#555'
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = '#333'
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+              />
+              {matches.length > 0 && (
+                <>
+                  <div style={{
+                    fontSize: '11px',
+                    color: '#999',
+                    minWidth: '35px',
+                    textAlign: 'center',
+                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                    fontWeight: '300',
+                  }}>
+                    {currentMatchIndex + 1}/{matches.length}
+                  </div>
+                  {/* Show match context and page info */}
+                  {currentMatchIndex >= 0 && matches[currentMatchIndex] && (
+                    <div 
+                      style={{
+                        fontSize: '10px',
+                        color: '#666',
+                        padding: '2px 6px',
+                        backgroundColor: '#2a2a2a',
+                        borderRadius: '3px',
+                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                        fontWeight: '300',
+                        maxWidth: '120px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title={`Page ${matches[currentMatchIndex].pageNumber}: ${getMatchContext(matches[currentMatchIndex], 30)}`}
+                    >
+                      Page {matches[currentMatchIndex].pageNumber}
+                    </div>
+                  )}
+                  <button
+                    onClick={navigateToPrevious}
+                    disabled={matches.length === 0}
+                    style={{
+                      padding: '4px 6px',
+                      backgroundColor: 'transparent',
+                      border: '1px solid #333',
+                      borderRadius: '4px',
+                      color: matches.length > 0 ? '#e0e0e0' : '#666',
+                      cursor: matches.length > 0 ? 'pointer' : 'not-allowed',
+                      fontSize: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minWidth: '24px',
+                      height: '24px',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (matches.length > 0) {
+                        e.currentTarget.style.backgroundColor = '#333'
+                        e.currentTarget.style.borderColor = '#444'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (matches.length > 0) {
+                        e.currentTarget.style.backgroundColor = 'transparent'
+                        e.currentTarget.style.borderColor = '#333'
+                      }
+                    }}
+                    title="Previous match"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    onClick={navigateToNext}
+                    disabled={matches.length === 0}
+                    style={{
+                      padding: '4px 6px',
+                      backgroundColor: 'transparent',
+                      border: '1px solid #333',
+                      borderRadius: '4px',
+                      color: matches.length > 0 ? '#e0e0e0' : '#666',
+                      cursor: matches.length > 0 ? 'pointer' : 'not-allowed',
+                      fontSize: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minWidth: '24px',
+                      height: '24px',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (matches.length > 0) {
+                        e.currentTarget.style.backgroundColor = '#333'
+                        e.currentTarget.style.borderColor = '#444'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (matches.length > 0) {
+                        e.currentTarget.style.backgroundColor = 'transparent'
+                        e.currentTarget.style.borderColor = '#333'
+                      }
+                    }}
+                    title="Next match"
+                  >
+                    ›
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
-}
+})
+
+FullScreenPDFViewer.displayName = 'FullScreenPDFViewer'
+
+export default FullScreenPDFViewer
 

@@ -23,6 +23,7 @@ export const documentApi = {
   list: () => invokeOrFetch('document:getAll'),
   uploadFile: (filePath: string, fileName: string, folder: 'library' | 'project') => 
     invokeOrFetch('document:uploadFile', filePath, fileName, folder),
+  extractPDFText: (documentId: string) => invokeOrFetch('pdf:extractText', documentId),
 }
 
 export const aiApi = {

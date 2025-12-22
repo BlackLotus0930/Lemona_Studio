@@ -66,6 +66,9 @@ function FileExplorer({
   const [dragOverItemId, setDragOverItemId] = useState<string | null>(null)
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null) // Track which folder is being dragged over
   const [dragOverFileItemId, setDragOverFileItemId] = useState<string | null>(null) // Track which file item is being dragged over for external files
+  const [dragOverEndZone, setDragOverEndZone] = useState<boolean>(false) // Track if dragging over the end drop zone of project folder
+  const [dropPosition, setDropPosition] = useState<'above' | 'below' | null>(null) // Track drop position relative to item
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null) // Track which item we're dropping relative to
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['library', 'project'])) // Default both folders expanded
   
   // Search state
@@ -147,7 +150,17 @@ function FileExplorer({
       for (const doc of documents) {
         try {
           let textContent = ''
-          if (doc.content) {
+          const isPDF = doc.title.toLowerCase().endsWith('.pdf')
+          
+          // For PDFs, search PDF text if available
+          if (isPDF && doc.pdfText) {
+            textContent = doc.pdfText.fullText || ''
+            // Also search per-page if needed for better context
+            if (!textContent && doc.pdfText.pages) {
+              textContent = doc.pdfText.pages.map(p => p.fullText).join('\n\n')
+            }
+          } else if (doc.content) {
+            // Regular document - extract text from TipTap content
             try {
               const content = JSON.parse(doc.content)
               textContent = extractTextFromTipTap(content)
@@ -158,42 +171,90 @@ function FileExplorer({
           
           if (textContent.toLowerCase().includes(query)) {
             const lines = textContent.split('\n')
-            const matches: Array<{ line: string; index: number; charPosition: number }> = []
+            const matches: Array<{ line: string; index: number; charPosition: number; pageNumber?: number }> = []
             let charOffset = 0 // Track character position in full text
             
-            lines.forEach((line, lineIndex) => {
-              const lineLower = line.toLowerCase()
-              
-              // Find ALL occurrences of the query in this line (not just the first one)
-              let searchStart = 0
-              while (true) {
-                const matchIndex = lineLower.indexOf(query, searchStart)
-                if (matchIndex === -1) break // No more matches in this line
+            // For PDFs, track which page each line belongs to
+            if (isPDF && doc.pdfText) {
+              // Map lines to pages
+              let pageCharOffset = 0
+              doc.pdfText.pages.forEach((page) => {
+                const pageLines = page.fullText.split('\n')
+                pageLines.forEach((line, lineIndex) => {
+                  const lineLower = line.toLowerCase()
+                  
+                  // Find ALL occurrences of the query in this line
+                  let searchStart = 0
+                  while (true) {
+                    const matchIndex = lineLower.indexOf(query, searchStart)
+                    if (matchIndex === -1) break
+                    
+                    const charPosition = pageCharOffset + matchIndex
+                    
+                    // Truncate line if too long
+                    let displayLine = line
+                    if (line.length > 50) {
+                      const contextBefore = 9
+                      const contextAfter = 15
+                      const start = Math.max(0, matchIndex - contextBefore)
+                      const end = Math.min(line.length, matchIndex + query.length + contextAfter)
+                      displayLine = (start > 0 ? '...' : '') + line.substring(start, end) + (end < line.length ? '...' : '')
+                    }
+                    
+                    // Add page number prefix for PDFs
+                    const displayLineWithPage = isPDF 
+                      ? `[Page ${page.pageNumber}] ${displayLine}`
+                      : displayLine
+                    
+                    matches.push({ 
+                      line: displayLineWithPage, 
+                      index: lineIndex, 
+                      charPosition,
+                      pageNumber: page.pageNumber
+                    })
+                    
+                    searchStart = matchIndex + 1
+                  }
+                  
+                  pageCharOffset += line.length + 1
+                })
+              })
+            } else {
+              // Regular document search
+              lines.forEach((line, lineIndex) => {
+                const lineLower = line.toLowerCase()
                 
-                const charPosition = charOffset + matchIndex
-                
-                // Truncate line if too long (show context around each match)
-                // Show more context before the match so it appears earlier in narrow panels
-                let displayLine = line
-                if (line.length > 50) {
-                  // Show more context before match (30 chars) and less after (10 chars)
-                  // This ensures the search word appears early in the displayed text
-                  const contextBefore = 9
-                  const contextAfter = 15
-                  const start = Math.max(0, matchIndex - contextBefore)
-                  const end = Math.min(line.length, matchIndex + query.length + contextAfter)
-                  displayLine = (start > 0 ? '...' : '') + line.substring(start, end) + (end < line.length ? '...' : '')
+                // Find ALL occurrences of the query in this line (not just the first one)
+                let searchStart = 0
+                while (true) {
+                  const matchIndex = lineLower.indexOf(query, searchStart)
+                  if (matchIndex === -1) break // No more matches in this line
+                  
+                  const charPosition = charOffset + matchIndex
+                  
+                  // Truncate line if too long (show context around each match)
+                  // Show more context before the match so it appears earlier in narrow panels
+                  let displayLine = line
+                  if (line.length > 50) {
+                    // Show more context before match (30 chars) and less after (10 chars)
+                    // This ensures the search word appears early in the displayed text
+                    const contextBefore = 9
+                    const contextAfter = 15
+                    const start = Math.max(0, matchIndex - contextBefore)
+                    const end = Math.min(line.length, matchIndex + query.length + contextAfter)
+                    displayLine = (start > 0 ? '...' : '') + line.substring(start, end) + (end < line.length ? '...' : '')
+                  }
+                  
+                  matches.push({ line: displayLine, index: lineIndex, charPosition })
+                  
+                  // Move search start position to find next occurrence
+                  searchStart = matchIndex + 1
                 }
                 
-                matches.push({ line: displayLine, index: lineIndex, charPosition })
-                
-                // Move search start position to find next occurrence
-                searchStart = matchIndex + 1
-              }
-              
-              // Add line length + 1 for newline character
-              charOffset += line.length + 1
-            })
+                // Add line length + 1 for newline character
+                charOffset += line.length + 1
+              })
+            }
             
             if (matches.length > 0) {
               results.push({
@@ -376,6 +437,7 @@ function FileExplorer({
   const hoverBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
   const selectedBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
   const textColor = theme === 'dark' ? '#cccccc' : '#202124'
+  const indicatorColor = theme === 'dark' ? '#4fc3f7' : '#1976d2' // Blue color for drop indicator
   
   // Dropdown menu colors (matching Toolbar.tsx)
   const dropdownBg = theme === 'dark' ? '#141414' : '#ffffff'
@@ -603,16 +665,46 @@ function FileExplorer({
     const paddingLeft = isFolder ? 12 : 32
     // File items have different text color (#818181), folders keep original color
     const itemTextColor = isFolder ? textColor : '#818181'
+    
+    // Determine if we should show drop indicator above or below this item
+    const showIndicatorAbove = !isFolder && draggedItemId && dropTargetId === item.id && dropPosition === 'above'
+    const showIndicatorBelow = !isFolder && draggedItemId && dropTargetId === item.id && dropPosition === 'below'
 
     return (
       <div key={item.id} style={{ position: 'relative', width: '100%', boxSizing: 'border-box', margin: 0, padding: 0 }}>
+        {/* Drop indicator line above */}
+        {showIndicatorAbove && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '2px',
+              backgroundColor: indicatorColor,
+              zIndex: 1000,
+              pointerEvents: 'none',
+            }}
+          />
+        )}
         <div
           draggable={!isFolder}
           onDragStart={(e) => {
             if (!isFolder) {
               setDraggedItemId(item.id)
+              setDragOverEndZone(false)
+              setDropTargetId(null)
+              setDropPosition(null)
               e.dataTransfer.effectAllowed = 'move'
             }
+          }}
+          onDragEnd={() => {
+            // Clear all drag states when drag ends
+            setDraggedItemId(null)
+            setDragOverItemId(null)
+            setDropTargetId(null)
+            setDropPosition(null)
+            setDragOverEndZone(false)
           }}
           onDragOver={(e) => {
             if (isFolder) {
@@ -629,9 +721,22 @@ function FileExplorer({
               } else if (draggedItemId) {
                 // Handle internal item drag over file
                 e.preventDefault()
+                e.stopPropagation()
                 e.dataTransfer.dropEffect = 'move'
                 if (item.id !== draggedItemId) {
                   setDragOverItemId(item.id)
+                  
+                  // Calculate if cursor is in top or bottom half of the item
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const y = e.clientY - rect.top
+                  const height = rect.height
+                  const isTopHalf = y < height / 2
+                  
+                  setDropTargetId(item.id)
+                  setDropPosition(isTopHalf ? 'above' : 'below')
+                } else {
+                  setDropTargetId(null)
+                  setDropPosition(null)
                 }
               }
             }
@@ -645,6 +750,9 @@ function FileExplorer({
               if (!e.currentTarget.contains(relatedTarget)) {
                 setDragOverItemId(null)
                 setDragOverFileItemId(null)
+                setDragOverEndZone(false)
+                setDropTargetId(null)
+                setDropPosition(null)
               }
             }
           }}
@@ -695,6 +803,8 @@ function FileExplorer({
             }
             setDraggedItemId(null)
             setDragOverItemId(null)
+            setDropTargetId(null)
+            setDropPosition(null)
           }}
           style={{
             display: 'flex',
@@ -812,10 +922,107 @@ function FileExplorer({
           )}
         </div>
         
+        {/* Drop indicator line below */}
+        {showIndicatorBelow && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: isFolder && isExpanded ? 'auto' : 0,
+              top: isFolder && isExpanded ? '100%' : 'auto',
+              left: 0,
+              right: 0,
+              height: '2px',
+              backgroundColor: indicatorColor,
+              zIndex: 1000,
+              pointerEvents: 'none',
+            }}
+          />
+        )}
+        
         {/* Render children if folder is expanded */}
         {isFolder && isExpanded && item.children && (
           <div>
             {item.children.map(child => renderFileItem(child, indentLevel + 1))}
+            
+            {/* End drop zone for project folder only - allows dropping at the end */}
+            {item.id === 'project' && (
+              <div
+                onDragOver={(e) => {
+                  if (draggedItemId) {
+                    // Check if dragged item is from project folder
+                    const projectFolder = fileTree.find(f => f.id === 'project')
+                    const isFromProjectFolder = projectFolder?.children?.some(child => child.id === draggedItemId)
+                    
+                    if (isFromProjectFolder) {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      e.dataTransfer.dropEffect = 'move'
+                      setDragOverEndZone(true)
+                    }
+                  }
+                }}
+                onDragLeave={(e) => {
+                  const relatedTarget = e.relatedTarget as Node | null
+                  if (!e.currentTarget.contains(relatedTarget)) {
+                    setDragOverEndZone(false)
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setDragOverEndZone(false)
+                  
+                  if (draggedItemId && onReorderDocuments) {
+                    // Handle internal item reorder - move to end
+                    // Get all files from the project folder
+                    const projectFolder = fileTree.find(f => f.id === 'project')
+                    if (projectFolder && projectFolder.children) {
+                      const projectFiles = [...projectFolder.children]
+                      const draggedIndex = projectFiles.findIndex(f => f.id === draggedItemId)
+                      
+                      if (draggedIndex !== -1) {
+                        // Remove from current position and add to end
+                        const newOrder = [...projectFiles]
+                        const [draggedItem] = newOrder.splice(draggedIndex, 1)
+                        newOrder.push(draggedItem)
+                        
+                        const documentIds = newOrder.map(f => f.id).filter(id => {
+                          const fileItem = projectFiles.find(f => f.id === id)
+                          return fileItem?.document
+                        })
+                        
+                        onReorderDocuments(documentIds)
+                      }
+                    }
+                  }
+                  
+                  setDraggedItemId(null)
+                }}
+                style={{
+                  position: 'relative',
+                  minHeight: '40px',
+                  paddingLeft: '32px',
+                  backgroundColor: dragOverEndZone ? hoverBg : 'transparent',
+                  transition: 'background-color 0.15s',
+                }}
+              >
+                {/* Drop indicator line at the top of end zone */}
+                {dragOverEndZone && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: '2px',
+                      backgroundColor: indicatorColor,
+                      zIndex: 1000,
+                      pointerEvents: 'none',
+                    }}
+                  />
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

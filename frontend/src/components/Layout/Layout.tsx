@@ -13,11 +13,11 @@ import Highlight from '@tiptap/extension-highlight'
 import { MathExtension } from '../Editor/MathExtension'
 import { PDFViewerExtension } from '../Editor/PDFViewer'
 import { useEffect, useRef, useState } from 'react'
-import DocumentEditor from '../Editor/DocumentEditor'
+import DocumentEditor, { DocumentEditorSearchHandle } from '../Editor/DocumentEditor'
 import Toolbar from '../Editor/Toolbar'
 import AIPanel from '../AIPanel/AIPanel'
 import FileExplorer from '../FileExplorer/FileExplorer'
-import FullScreenPDFViewer from '../PDFViewer/FullScreenPDFViewer'
+import FullScreenPDFViewer, { PDFViewerSearchHandle } from '../PDFViewer/FullScreenPDFViewer'
 import { Document } from '@shared/types'
 import { documentApi, exportApi, projectApi } from '../../services/api'
 import { FontSize } from '../Editor/FontSize'
@@ -81,6 +81,8 @@ export default function Layout({}: LayoutProps) {
   const [document, setDocument] = useState<Document | null>(null)
   const [isLoadingDocument, setIsLoadingDocument] = useState(true)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const documentEditorRef = useRef<DocumentEditorSearchHandle>(null)
+  const pdfViewerRef = useRef<PDFViewerSearchHandle>(null)
   const [isAIPanelOpen, setIsAIPanelOpen] = useState(() => {
     const savedState = loadAIPanelState()
     return savedState.isOpen
@@ -244,10 +246,41 @@ export default function Layout({}: LayoutProps) {
         navigate('/documents')
         return
       }
-      // Only update document if this is still the current route
-      // This prevents race conditions when rapidly switching files
-      if (id === docId) {
-        setDocument(doc)
+      
+      // Check if PDF needs text extraction
+      const isPDF = doc.title.toLowerCase().endsWith('.pdf')
+      if (isPDF && !doc.pdfText) {
+        console.log('[PDF] PDF text not available, triggering extraction for:', doc.title)
+        // Set document first so PDF viewer can render
+        if (id === docId) {
+          setDocument(doc)
+        }
+        
+        try {
+          // Trigger PDF text extraction (this will update the document file)
+          const pdfText = await documentApi.extractPDFText(docId)
+          console.log('[PDF] PDF text extraction completed, pdfText:', pdfText ? 'available' : 'missing')
+          
+          // Reload document to get updated version with pdfText
+          // Wait a moment for file write to complete
+          await new Promise(resolve => setTimeout(resolve, 200))
+          const updatedDoc = await documentApi.get(docId)
+          
+          if (updatedDoc && id === docId) {
+            console.log('[PDF] Reloaded document with pdfText:', updatedDoc.pdfText ? 'available' : 'missing')
+            setDocument(updatedDoc)
+          }
+        } catch (extractionError) {
+          console.error('[PDF] Failed to extract PDF text:', extractionError)
+          // Document is already set, extraction will retry on next load if needed
+        }
+      } else {
+        // Not a PDF or PDF text already available
+        // Only update document if this is still the current route
+        // This prevents race conditions when rapidly switching files
+        if (id === docId) {
+          setDocument(doc)
+        }
       }
       
       // Save last opened document ID per project
@@ -310,16 +343,44 @@ export default function Layout({}: LayoutProps) {
     }
   }, [document?.projectId, activeTabId]) // Reload when project changes
 
-  // Keyboard shortcuts: Ctrl+Shift+E to toggle FileExplorer, Ctrl+Shift+F to toggle search
+  // Keyboard shortcuts: Ctrl+F for inline search, Ctrl+Shift+F for global search, Ctrl+Shift+E to toggle FileExplorer
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't prevent default if typing in an input field or textarea
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        // Allow Ctrl+F in input fields for browser's native find
+      // Check if Ctrl+F (or Cmd+F on Mac) - toggle inline search in active surface
+      // Handle this even when input is focused (to allow closing search with Ctrl+F)
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && !e.shiftKey) {
+        // Check if target is a search input - if so, allow closing with Ctrl+F
+        const target = e.target as HTMLElement
+        const isSearchInput = target.closest('[data-search-input]') !== null
+        
+        // Check if event is from an iframe (PDF viewer) - handle it
+        const isFromIframe = target.tagName === 'IFRAME' || target.closest('iframe') !== null
+        // Also check if active element is an iframe (when iframe content has focus)
+        // Use window.document to access the DOM document (not the component's document state)
+        const activeElementIsIframe = window.document.activeElement?.tagName === 'IFRAME'
+        
+        // Only handle Ctrl+F if it's the search input, from iframe, active element is iframe, or not an input field
+        if (isSearchInput || isFromIframe || activeElementIsIframe || !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+          e.preventDefault()
+          e.stopPropagation()
+          
+          // Determine active surface and delegate
+          const isPDF = document && document.title.toLowerCase().endsWith('.pdf')
+          if (isPDF && pdfViewerRef.current) {
+            pdfViewerRef.current.toggleSearch()
+          } else if (!isPDF && documentEditorRef.current) {
+            documentEditorRef.current.toggleSearch()
+          }
+        }
         return
       }
       
-      // Check if Ctrl+Shift+F (or Cmd+Shift+F on Mac) - activate search mode
+      // Don't prevent default for other shortcuts if typing in an input field or textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return
+      }
+      
+      // Check if Ctrl+Shift+F (or Cmd+Shift+F on Mac) - activate global search mode
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault()
         e.stopPropagation()
@@ -374,7 +435,7 @@ export default function Layout({}: LayoutProps) {
     // Use capture phase to catch events before they reach the editor
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [searchQuery])
+  }, [searchQuery, document])
 
   const loadDocuments = async () => {
     // Note: documents are already cleared in useEffect when projectId changes
@@ -555,6 +616,32 @@ export default function Layout({}: LayoutProps) {
           navigate('/documents')
         }
       }
+      
+      return newTabs
+    })
+  }
+
+  // Handle tab reorder (drag and drop)
+  const handleTabReorder = (draggedId: string, targetId: string, position: 'left' | 'right') => {
+    setOpenTabs(prevTabs => {
+      const draggedIndex = prevTabs.findIndex(tab => tab.id === draggedId)
+      const targetIndex = prevTabs.findIndex(tab => tab.id === targetId)
+      
+      if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) {
+        return prevTabs
+      }
+      
+      const newTabs = [...prevTabs]
+      const [draggedTab] = newTabs.splice(draggedIndex, 1)
+      
+      // Calculate insertion index based on position
+      // If position is 'left', insert before target
+      // If position is 'right', insert after target
+      const insertIndex = position === 'left' ? targetIndex : targetIndex + 1
+      // Adjust for the fact that we already removed the dragged item
+      const adjustedIndex = draggedIndex < targetIndex ? insertIndex - 1 : insertIndex
+      
+      newTabs.splice(adjustedIndex, 0, draggedTab)
       
       return newTabs
     })
@@ -869,6 +956,16 @@ export default function Layout({}: LayoutProps) {
         }
       }
       
+      // Remove document from tabs if it's open
+      setOpenTabs(prevTabs => prevTabs.filter(tab => tab.id !== docId))
+      
+      // Clear scroll position for the deleted document
+      try {
+        localStorage.removeItem(`documentScroll_${docId}`)
+      } catch (error) {
+        console.error('Failed to clear scroll position:', error)
+      }
+      
       // If current document was deleted, find next file to navigate to
       if (document?.id === docId) {
         // Helper function to get documents in file explorer order:
@@ -905,36 +1002,123 @@ export default function Layout({}: LayoutProps) {
         const deletedIndex = orderedDocuments.findIndex(doc => doc.id === docId)
         const updatedDocuments = documents.filter(doc => doc.id !== docId)
         
-        // Clear the current document reference first
-        // This prevents stale state issues during navigation
-        setDocument(null)
+        // Update documents list first (without clearing document state to avoid triggering project change detection)
+        setDocuments(updatedDocuments)
+        
+        // Clear refs to prevent stale state
         lastContentRef.current = ''
         currentDocIdRef.current = null
-        
-        setDocuments(updatedDocuments)
         
         if (updatedDocuments.length > 0) {
           // Get updated documents in file explorer order
           const updatedOrderedDocuments = getDocumentsInFileExplorerOrder(updatedDocuments)
           
-          // Find the file that appears above the deleted one
-          // If deleting the first file, navigate to the new first file
-          const targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
+          // Determine which folder the deleted file belongs to (using original documents)
+          const deletedDoc = orderedDocuments[deletedIndex]
+          const deletedFolder = deletedDoc?.folder || 'project'
           
-          if (targetIndex < updatedOrderedDocuments.length) {
+          // Get folder boundaries in the ORIGINAL ordered list to determine position
+          const originalReadmeDoc = documents.find(doc => doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md')
+          const originalLibraryDocs = documents.filter(doc => doc.folder === 'library' && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
+          
+          const sortDocuments = (docsToSort: Document[]) => {
+            return [...docsToSort].sort((a, b) => {
+              if (a.order !== undefined && b.order !== undefined) {
+                return a.order - b.order
+              }
+              return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            })
+          }
+          
+          const originalSortedLibraryDocs = sortDocuments(originalLibraryDocs)
+          
+          // Calculate folder start indices in the ORIGINAL ordered list
+          const originalLibraryStartIndex = originalReadmeDoc ? 1 : 0
+          const originalProjectStartIndex = originalLibraryStartIndex + originalSortedLibraryDocs.length
+          
+          // Get folder boundaries in the UPDATED ordered list
+          const updatedReadmeDoc = updatedDocuments.find(doc => doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md')
+          const updatedLibraryDocs = updatedDocuments.filter(doc => doc.folder === 'library' && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
+          const updatedProjectDocs = updatedDocuments.filter(doc => (!doc.folder || doc.folder === 'project') && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
+          
+          const updatedSortedLibraryDocs = sortDocuments(updatedLibraryDocs)
+          const updatedSortedProjectDocs = sortDocuments(updatedProjectDocs)
+          
+          const updatedLibraryStartIndex = updatedReadmeDoc ? 1 : 0
+          const updatedProjectStartIndex = updatedLibraryStartIndex + updatedSortedLibraryDocs.length
+          
+          let targetIndex: number
+          
+          if (deletedFolder === 'library') {
+            // Check if this was the first file in the library folder (in original list)
+            const isFirstInLibrary = deletedIndex === originalLibraryStartIndex
+            
+            if (isFirstInLibrary) {
+              // If there's another file in the library folder after deletion, go to it
+              if (updatedSortedLibraryDocs.length > 0) {
+                // Go to the first library file in the updated list
+                targetIndex = updatedLibraryStartIndex
+              } else {
+                // No more files in library, go to the file above (README)
+                targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
+              }
+            } else {
+              // Not the first file, go to the file above
+              targetIndex = deletedIndex - 1
+            }
+          } else {
+            // Project folder
+            // Check if this was the first file in the project folder (in original list)
+            const isFirstInProject = deletedIndex === originalProjectStartIndex
+            
+            if (isFirstInProject) {
+              // If there's another file in the project folder after deletion, go to it
+              if (updatedSortedProjectDocs.length > 0) {
+                // Go to the first project file in the updated list
+                targetIndex = updatedProjectStartIndex
+              } else {
+                // No more files in project, go to the file above (last library file or README)
+                targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
+              }
+            } else {
+              // Not the first file, go to the file above
+              targetIndex = deletedIndex - 1
+            }
+          }
+          
+          // Ensure targetIndex is valid
+          if (targetIndex < 0) {
+            targetIndex = 0
+          }
+          if (targetIndex >= updatedOrderedDocuments.length) {
+            targetIndex = updatedOrderedDocuments.length - 1
+          }
+          
+          if (targetIndex >= 0 && targetIndex < updatedOrderedDocuments.length) {
+            // Navigate directly - this will trigger loadDocument which will set the new document
+            // Don't call setDocument(null) here to avoid triggering project change detection
+            setActiveTabId(updatedOrderedDocuments[targetIndex].id)
             navigate(`/document/${updatedOrderedDocuments[targetIndex].id}`)
           } else {
             // Fallback: navigate to first file if index is out of bounds
+            setActiveTabId(updatedOrderedDocuments[0].id)
             navigate(`/document/${updatedOrderedDocuments[0].id}`)
           }
         } else {
           // No more documents in project, go to home
           setDocuments([])
+          setActiveTabId(null)
+          // Only clear document state when navigating away from project
+          setDocument(null)
           navigate('/documents')
         }
       } else {
         // Just update the documents list
         setDocuments(docs => docs.filter(doc => doc.id !== docId))
+        // Also update activeTabId if the deleted document was the active tab
+        if (activeTabId === docId) {
+          setActiveTabId(null)
+        }
       }
     } catch (error) {
       console.error('Failed to delete document:', error)
@@ -945,12 +1129,51 @@ export default function Layout({}: LayoutProps) {
   const handleReorderDocuments = async (documentIds: string[]) => {
     if (!document?.projectId) return
     
+    // Create a map of documents by ID for quick lookup
+    const documentsMap = new Map(documents.map(doc => [doc.id, doc]))
+    
+    // Find the minimum order value among documents being reordered to preserve relative ordering
+    const documentsBeingReordered = documentIds.map(id => documentsMap.get(id)).filter(Boolean) as Document[]
+    const minOrder = documentsBeingReordered.length > 0 
+      ? Math.min(...documentsBeingReordered.map(doc => doc.order ?? 0))
+      : 0
+    
+    // Reorder documents according to the new order and update their order property
+    const reorderedDocuments: Document[] = []
+    const processedIds = new Set<string>()
+    
+    // Add documents in the new order with updated order property
+    documentIds.forEach((docId, index) => {
+      const doc = documentsMap.get(docId)
+      if (doc) {
+        // Update order property based on position in the new order
+        reorderedDocuments.push({
+          ...doc,
+          order: minOrder + index
+        })
+        processedIds.add(docId)
+      }
+    })
+    
+    // Add any remaining documents that weren't in the reorder list (preserve their original order)
+    documents.forEach(doc => {
+      if (!processedIds.has(doc.id)) {
+        reorderedDocuments.push(doc)
+      }
+    })
+    
+    // Optimistically update the documents list immediately for smooth UI
+    // This avoids the loading state that causes glitching
+    setDocuments(reorderedDocuments)
+    
     try {
       await projectApi.reorderDocuments(document.projectId, documentIds)
-      // Reload documents to reflect new order
-      await loadDocuments()
+      // Don't reload - we've already updated the UI optimistically
+      // The backend will update the order property, but our optimistic update is sufficient
     } catch (error) {
       console.error('Failed to reorder documents:', error)
+      // On error, reload to get the correct state from server
+      await loadDocuments()
       alert('Failed to reorder documents. Please try again.')
     }
   }
@@ -1794,6 +2017,7 @@ export default function Layout({}: LayoutProps) {
         activeTabId={activeTabId}
         onTabClick={handleTabClick}
         onTabClose={handleTabClose}
+        onTabReorder={handleTabReorder}
       />
       
       {/* Separator line between topbar and toolbar */}
@@ -1803,69 +2027,65 @@ export default function Layout({}: LayoutProps) {
         backgroundColor: borderColor
       }} />
       
-      {/* Toolbar - Independent, full width - Hide for PDF files */}
-      {!(document && document.title.toLowerCase().endsWith('.pdf')) && (
-        <>
-          <div style={{ 
-            width: '100%',
-            backgroundColor: bgColor,
-            padding: '8px 16px',
-            zIndex: 10003,
-            position: 'relative',
-            overflow: 'visible'
-          }}>
-            <Toolbar 
-              editor={editor}
-              onExport={handleExport}
-              documents={documents}
-              projectName={projectName}
-              documentTitle={document?.title}
-              onToggleSearch={() => {
-                setIsSearchMode((prev) => {
-                  const newValue = !prev
-                  // Persist search mode state
-                  try {
-                    if (newValue) {
-                      sessionStorage.setItem('isSearchMode', 'true')
-                      // Keep existing search query if there is one
-                      if (searchQuery) {
-                        sessionStorage.setItem('searchQuery', searchQuery)
-                      }
-                    } else {
-                      // User explicitly turned off search mode - clear everything
-                      sessionStorage.setItem('isSearchMode', 'false')
-                      sessionStorage.removeItem('searchQuery')
-                      setSearchQuery('') // Clear the query state
-                      // Clear highlights immediately when search mode is turned off
-                      if (editor && !editor.isDestroyed) {
-                        clearSearchHighlights(editor)
-                      }
-                    }
-                  } catch (e) {
-                    console.warn('Failed to persist search mode:', e)
+      {/* Toolbar - Independent, full width - Always visible */}
+      <div style={{ 
+        width: '100%',
+        backgroundColor: bgColor,
+        padding: '8px 16px',
+        zIndex: 10003,
+        position: 'relative',
+        overflow: 'visible'
+      }}>
+        <Toolbar 
+          editor={editor}
+          onExport={handleExport}
+          documents={documents}
+          projectName={projectName}
+          documentTitle={document?.title}
+          onToggleSearch={() => {
+            setIsSearchMode((prev) => {
+              const newValue = !prev
+              // Persist search mode state
+              try {
+                if (newValue) {
+                  sessionStorage.setItem('isSearchMode', 'true')
+                  // Keep existing search query if there is one
+                  if (searchQuery) {
+                    sessionStorage.setItem('searchQuery', searchQuery)
                   }
-                  // Ensure FileExplorer is visible when entering search mode
-                  if (newValue && fileExplorerPanelRef.current) {
-                    const currentSize = fileExplorerPanelRef.current.getSize()
-                    if (currentSize === 0) {
-                      fileExplorerPanelRef.current.resize(14)
-                    }
+                } else {
+                  // User explicitly turned off search mode - clear everything
+                  sessionStorage.setItem('isSearchMode', 'false')
+                  sessionStorage.removeItem('searchQuery')
+                  setSearchQuery('') // Clear the query state
+                  // Clear highlights immediately when search mode is turned off
+                  if (editor && !editor.isDestroyed) {
+                    clearSearchHighlights(editor)
                   }
-                  return newValue
-                })
-              }}
-              isSearchActive={isSearchMode}
-            />
-          </div>
-          
-          {/* Separator line between toolbar and editor */}
-          <div style={{
-            width: '100%',
-            height: '1px',
-            backgroundColor: borderColor
-          }} />
-        </>
-      )}
+                }
+              } catch (e) {
+                console.warn('Failed to persist search mode:', e)
+              }
+              // Ensure FileExplorer is visible when entering search mode
+              if (newValue && fileExplorerPanelRef.current) {
+                const currentSize = fileExplorerPanelRef.current.getSize()
+                if (currentSize === 0) {
+                  fileExplorerPanelRef.current.resize(14)
+                }
+              }
+              return newValue
+            })
+          }}
+          isSearchActive={isSearchMode}
+        />
+      </div>
+      
+      {/* Separator line between toolbar and editor */}
+      <div style={{
+        width: '100%',
+        height: '1px',
+        backgroundColor: borderColor
+      }} />
       
       {/* Content Area - Horizontal split with FileExplorer sidebar */}
       <PanelGroup 
@@ -1971,6 +2191,8 @@ export default function Layout({}: LayoutProps) {
                       await projectApi.addDocument(document.projectId, newDoc.id, documents.length)
                       await loadDocuments()
                     }
+                    // Navigate to the newly uploaded file
+                    navigate(`/document/${newDoc.id}`)
                   }}
                 />
               )}
@@ -2009,10 +2231,11 @@ export default function Layout({}: LayoutProps) {
             </div>
           ) : document && document.title.toLowerCase().endsWith('.pdf') ? (
             // PDF file - show full screen PDF viewer
-            <FullScreenPDFViewer document={document} />
+            <FullScreenPDFViewer ref={pdfViewerRef} document={document} />
           ) : (
             // Regular document - show document editor
             <DocumentEditor 
+              ref={documentEditorRef}
               document={document}
               editor={editor}
               onDocumentChange={setDocument}

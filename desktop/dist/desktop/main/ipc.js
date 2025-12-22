@@ -5,6 +5,9 @@ import { chatHistoryService } from './services/chatHistoryService.js';
 import { geminiService } from './services/geminiService.js';
 import { projectService } from './services/projectService.js';
 import { exportService } from './services/export.js';
+import { extractPDFTextAsync } from './services/pdfTextExtractor.js';
+import path from 'path';
+import { app } from 'electron';
 export function setupIPC() {
     // Document operations
     ipcMain.handle('document:getAll', async () => {
@@ -447,6 +450,43 @@ Rephrased text:`;
         }
         catch (error) {
             console.error('IPC export:exportMultiple error:', error);
+            throw error;
+        }
+    });
+    // PDF text extraction handler
+    ipcMain.handle('pdf:extractText', async (_, documentId) => {
+        try {
+            const document = await documentService.getById(documentId);
+            if (!document) {
+                throw new Error(`Document ${documentId} not found`);
+            }
+            // Check if document is a PDF
+            if (!document.title.toLowerCase().endsWith('.pdf')) {
+                throw new Error('Document is not a PDF');
+            }
+            // Get file path
+            const FILES_DIR = path.join(app.getPath('userData'), 'files');
+            const fileName = document.title;
+            const filePath = path.join(FILES_DIR, `${documentId}_${fileName}`);
+            // Extract text and wait for document update to complete
+            const pdfText = await extractPDFTextAsync(filePath, documentId, async (extractedText) => {
+                // Update document with extracted text
+                const updatedDoc = await documentService.getById(documentId);
+                if (updatedDoc) {
+                    updatedDoc.pdfText = extractedText;
+                    updatedDoc.updatedAt = new Date().toISOString();
+                    const docPath = path.join(app.getPath('userData'), 'documents', `${documentId}.json`);
+                    const fs = await import('fs/promises');
+                    await fs.writeFile(docPath, JSON.stringify(updatedDoc, null, 2));
+                    console.log(`[IPC pdf:extractText] Document ${documentId} updated with PDF text`);
+                }
+            });
+            // Wait a bit to ensure file write is complete
+            await new Promise(resolve => setTimeout(resolve, 100));
+            return pdfText;
+        }
+        catch (error) {
+            console.error('IPC pdf:extractText error:', error);
             throw error;
         }
     });

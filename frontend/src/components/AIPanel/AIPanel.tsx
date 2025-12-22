@@ -23,13 +23,46 @@ interface Chat {
   messages: any[]
 }
 
+// Helper functions to persist active chat ID per project/document
+function getActiveChatIdKey(document: Document | null): string | null {
+  if (!document) return null
+  // Use projectId if available, otherwise fall back to documentId
+  return document.projectId ? `activeChatId_${document.projectId}` : `activeChatId_doc_${document.id}`
+}
+
+function loadActiveChatId(document: Document | null): string | null {
+  const key = getActiveChatIdKey(document)
+  if (!key) return null
+  try {
+    return localStorage.getItem(key)
+  } catch (error) {
+    console.error('Failed to load active chat ID:', error)
+    return null
+  }
+}
+
+function saveActiveChatId(document: Document | null, chatId: string): void {
+  const key = getActiveChatIdKey(document)
+  if (!key) return
+  try {
+    localStorage.setItem(key, chatId)
+  } catch (error) {
+    console.error('Failed to save active chat ID:', error)
+  }
+}
+
 export default function AIPanel({ document, onClose }: AIPanelProps) {
   const { theme } = useTheme()
   const [chats, setChats] = useState<Chat[]>([
     { id: 'chat_default', name: 'Chat 1', messages: [] }
   ])
-  const [activeChatId, setActiveChatId] = useState<string>('chat_default')
-  const previousActiveChatIdRef = useRef<string>('chat_default') // Track previous activeChatId to maintain across file switches
+  // Initialize activeChatId from localStorage if available
+  const [activeChatId, setActiveChatId] = useState<string>(() => {
+    const saved = loadActiveChatId(document)
+    return saved || 'chat_default'
+  })
+  const savedActiveChatId = loadActiveChatId(document)
+  const previousActiveChatIdRef = useRef<string>(savedActiveChatId || 'chat_default') // Track previous activeChatId to maintain across file switches
   const chatsRef = useRef<Chat[]>([]) // Track current chats to preserve new chats when switching files
   const [isStreaming, setIsStreaming] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
@@ -65,6 +98,13 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     chatsRef.current = chats
   }, [chats])
 
+  // Persist active chat ID whenever it changes
+  useEffect(() => {
+    if (document && activeChatId) {
+      saveActiveChatId(document, activeChatId)
+    }
+  }, [document?.id, activeChatId])
+
   // Load chat history when document changes
   useEffect(() => {
     if (!document?.id) {
@@ -80,9 +120,11 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
 
     const loadChatHistory = async () => {
       try {
-        // Capture current chats and activeChatId before async operation
-        const currentChatsSnapshot = chatsRef.current
-        const currentChatId = (previousActiveChatIdRef && previousActiveChatIdRef.current) || activeChatId
+        // Load saved active chat ID from localStorage for this project/document
+        const savedActiveChatId = loadActiveChatId(document)
+        
+        // Prefer saved active chat ID, then ref, then current state
+        const currentChatId = savedActiveChatId || (previousActiveChatIdRef && previousActiveChatIdRef.current) || activeChatId
         
         // IPC returns data directly, not wrapped in { data: ... }
         const chatHistory = await chatApi.getChatHistory(document.id) || {}
@@ -97,6 +139,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
           setChats([{ id: chatIdToUse, name: 'Chat 1', messages: [] }])
           setActiveChatId(chatIdToUse)
           previousActiveChatIdRef.current = chatIdToUse
+          saveActiveChatId(document, chatIdToUse)
         } else {
           // Load existing chats
           const loadedChats: Chat[] = chatEntries.map(([chatId, messages], index) => {
@@ -120,26 +163,25 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
           // Check if current chat exists in loaded chats
           const chatExists = loadedChats.some(chat => chat.id === currentChatId)
           
-          // If current chat doesn't exist in new file, add it to preserve it
-          if (!chatExists && currentChatId) {
-            // Find the chat name from current chats snapshot
-            const existingChat = currentChatsSnapshot.find(c => c.id === currentChatId)
-            const chatName = existingChat?.name || `Chat ${loadedChats.length + 1}`
-            
-            // Add the current chat to loaded chats to preserve it
-            loadedChats.push({
-              id: currentChatId,
-              name: chatName,
-              messages: []
-            })
+          // If current chat doesn't exist in loaded chats, try to restore it or use first available
+          let chatIdToUse = currentChatId
+          if (!chatExists) {
+            // If saved chat doesn't exist, use first chat from loaded chats
+            if (loadedChats.length > 0) {
+              chatIdToUse = loadedChats[0].id
+            } else {
+              // Fallback to default if no chats loaded (shouldn't happen)
+              chatIdToUse = 'chat_default'
+            }
           }
           
           setChats(loadedChats)
           
-          // Keep the same chat ID when switching files, regardless of whether it exists in new file
-          setActiveChatId(currentChatId)
+          // Restore the saved active chat ID (or first chat if saved one doesn't exist)
+          setActiveChatId(chatIdToUse)
           // Keep ref in sync
-          previousActiveChatIdRef.current = currentChatId
+          previousActiveChatIdRef.current = chatIdToUse
+          saveActiveChatId(document, chatIdToUse)
         }
       } catch (error) {
         console.error('Failed to load chat history:', error)
@@ -148,6 +190,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         setChats([{ id: defaultChatId, name: 'Chat 1', messages: [] }])
         setActiveChatId(defaultChatId)
         previousActiveChatIdRef.current = defaultChatId
+        saveActiveChatId(document, defaultChatId)
       }
     }
 
@@ -273,6 +316,9 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         const newActiveChatId = newChats[newActiveIndex]?.id || newChats[0]?.id
         setActiveChatId(newActiveChatId)
         previousActiveChatIdRef.current = newActiveChatId
+        if (document) {
+          saveActiveChatId(document, newActiveChatId) // Persist when switching after closing
+        }
       }
       
       // Delete from backend
@@ -320,6 +366,9 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     const defaultChatId = 'chat_default'
     setActiveChatId(defaultChatId)
     previousActiveChatIdRef.current = defaultChatId
+    if (document) {
+      saveActiveChatId(document, defaultChatId) // Persist when clearing all chats
+    }
     setShowMenu(false)
   }
 
@@ -380,6 +429,9 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               onClick={() => {
                 setActiveChatId(chat.id)
                 previousActiveChatIdRef.current = chat.id
+                if (document) {
+                  saveActiveChatId(document, chat.id) // Persist when switching chats
+                }
               }}
               onMouseEnter={() => setHoveredChatId(chat.id)}
               onMouseLeave={() => setHoveredChatId(null)}

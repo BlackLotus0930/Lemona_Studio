@@ -1,7 +1,7 @@
 import { Editor } from '@tiptap/react'
 import { EditorContent } from '@tiptap/react'
 import { useNavigate } from 'react-router-dom'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react'
 import { Document } from '@shared/types'
 import Autocomplete from '../Autocomplete/Autocomplete'
 import TextRephrasePopup from './TextRephrasePopup'
@@ -18,7 +18,14 @@ interface DocumentEditorProps {
   aiPanelWidth?: number // Percentage width of AI panel
 }
 
-export default function DocumentEditor({ document, editor, isAIPanelOpen = false, aiPanelWidth = 20 }: DocumentEditorProps) {
+export interface DocumentEditorSearchHandle {
+  openSearch: () => void
+  closeSearch: () => void
+  toggleSearch: () => void
+}
+
+const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProps>(
+  ({ document, editor, isAIPanelOpen = false, aiPanelWidth = 20 }, ref) => {
   const { theme } = useTheme()
   const navigate = useNavigate()
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -39,7 +46,7 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
   const [showInlineSearch, setShowInlineSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [replaceQuery, setReplaceQuery] = useState('')
-  const [matches, setMatches] = useState<Array<{ from: number; to: number }>>([])
+  const [matches, setMatches] = useState<Array<{ from: number; to: number; pageNumber?: number }>>([])
   const [currentMatchIndex, setCurrentMatchIndex] = useState(-1)
   const [activeSearchQuery, setActiveSearchQuery] = useState('') // The query that was actually searched
   const inlineSearchInputRef = useRef<HTMLInputElement>(null)
@@ -47,6 +54,43 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
   const isSearchInputFocusedRef = useRef(false)
   const isReplaceInputFocusedRef = useRef(false)
   const [rightOffset, setRightOffset] = useState(20)
+  
+  // Expose search API to parent (Layout)
+  useImperativeHandle(ref, () => ({
+    openSearch: () => {
+      setShowInlineSearch(true)
+      setTimeout(() => {
+        inlineSearchInputRef.current?.focus()
+        inlineSearchInputRef.current?.select()
+      }, 50)
+    },
+    closeSearch: () => {
+      setShowInlineSearch(false)
+      setSearchQuery('')
+      setReplaceQuery('')
+      clearInlineSearchHighlights()
+      setMatches([])
+      setCurrentMatchIndex(-1)
+      setActiveSearchQuery('')
+    },
+    toggleSearch: () => {
+      if (showInlineSearch) {
+        setShowInlineSearch(false)
+        setSearchQuery('')
+        setReplaceQuery('')
+        clearInlineSearchHighlights()
+        setMatches([])
+        setCurrentMatchIndex(-1)
+        setActiveSearchQuery('')
+      } else {
+        setShowInlineSearch(true)
+        setTimeout(() => {
+          inlineSearchInputRef.current?.focus()
+          inlineSearchInputRef.current?.select()
+        }, 50)
+      }
+    },
+  }))
   
   const bgColor = theme === 'dark' ? '#181818' : '#ffffff'
   const textColor = theme === 'dark' ? '#FFFFFF' : '#202124'
@@ -329,33 +373,65 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
     }
   }
 
-  // Find all matches in the document
-  const findMatches = (query: string, caseSensitive: boolean = false): Array<{ from: number; to: number }> => {
-    if (!editor || !query.trim()) return []
+  // Check if document is a PDF
+  const isPDF = document && document.title.toLowerCase().endsWith('.pdf')
+
+  // Find all matches in the document (supports both regular documents and PDFs)
+  const findMatches = (query: string, caseSensitive: boolean = false): Array<{ from: number; to: number; pageNumber?: number }> => {
+    if (!query.trim()) return []
     
-    const matches: Array<{ from: number; to: number }> = []
+    const matches: Array<{ from: number; to: number; pageNumber?: number }> = []
     const searchText = caseSensitive ? query : query.toLowerCase()
     
-    try {
-      editor.state.doc.descendants((node: any, pos: number) => {
-        if (node.isText) {
-          const text = node.text || ''
-          const textToSearch = caseSensitive ? text : text.toLowerCase()
+    // If PDF, search PDF text
+    if (isPDF && document?.pdfText) {
+      try {
+        const pdfText = document.pdfText
+        // Search through all pages
+        pdfText.pages.forEach((page) => {
+          const pageText = caseSensitive ? page.fullText : page.fullText.toLowerCase()
           let searchIndex = 0
           
           while (true) {
-            const index = textToSearch.indexOf(searchText, searchIndex)
+            const index = pageText.indexOf(searchText, searchIndex)
             if (index === -1) break
             
-            const from = pos + index
-            const to = from + query.length
-            matches.push({ from, to })
+            // For PDFs, we use character positions within the page
+            // Store page number for navigation
+            matches.push({
+              from: index,
+              to: index + query.length,
+              pageNumber: page.pageNumber,
+            })
             searchIndex = index + 1
           }
-        }
-      })
-    } catch (error) {
-      console.error('Error finding matches:', error)
+        })
+      } catch (error) {
+        console.error('Error finding matches in PDF:', error)
+      }
+    } else if (editor) {
+      // Regular document - search editor content
+      try {
+        editor.state.doc.descendants((node: any, pos: number) => {
+          if (node.isText) {
+            const text = node.text || ''
+            const textToSearch = caseSensitive ? text : text.toLowerCase()
+            let searchIndex = 0
+            
+            while (true) {
+              const index = textToSearch.indexOf(searchText, searchIndex)
+              if (index === -1) break
+              
+              const from = pos + index
+              const to = from + query.length
+              matches.push({ from, to })
+              searchIndex = index + 1
+            }
+          }
+        })
+      } catch (error) {
+        console.error('Error finding matches:', error)
+      }
     }
     
     return matches
@@ -363,7 +439,7 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
 
   // Perform search manually (called on Enter)
   const performSearch = () => {
-    if (!editor || !searchQuery.trim()) {
+    if (!searchQuery.trim()) {
       clearInlineSearchHighlights()
       setMatches([])
       setCurrentMatchIndex(-1)
@@ -371,8 +447,10 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
       return
     }
     
-    // Clear previous highlights before new search
-    clearInlineSearchHighlights()
+    // For non-PDF documents, clear previous highlights
+    if (!isPDF && editor) {
+      clearInlineSearchHighlights()
+    }
     
     const foundMatches = findMatches(searchQuery, false) // Always case-insensitive now
     setMatches(foundMatches)
@@ -380,12 +458,34 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
     
     if (foundMatches.length > 0) {
       setCurrentMatchIndex(0)
-      // Highlight all matches with current match highlighted differently
-      highlightMatches(foundMatches, 0)
-      navigateToMatch(0, foundMatches)
+      // Highlight all matches (only for non-PDF documents)
+      if (!isPDF && editor) {
+        highlightMatches(foundMatches, 0)
+        navigateToMatch(0, foundMatches)
+      } else if (isPDF) {
+        // For PDFs, just navigate to the first match page
+        navigateToPDFMatch(0, foundMatches)
+      }
     } else {
       setCurrentMatchIndex(-1)
-      highlightMatches(foundMatches, -1)
+      if (!isPDF && editor) {
+        highlightMatches(foundMatches, -1)
+      }
+    }
+  }
+
+  // Navigate to PDF match (scroll to page in PDF viewer)
+  const navigateToPDFMatch = (index: number, matchesToUse?: Array<{ from: number; to: number; pageNumber?: number }>) => {
+    const matchesList = matchesToUse || matches
+    if (matchesList.length === 0 || index < 0 || index >= matchesList.length) return
+    
+    const match = matchesList[index]
+    if (match && match.pageNumber) {
+      // TODO: Implement PDF page navigation
+      // For now, we can show a message or try to communicate with the PDF iframe
+      // This would require using pdfjs-dist to render PDFs instead of iframe
+      console.log(`Navigate to PDF page ${match.pageNumber}, match at position ${match.from}`)
+      // In the future, we can integrate with pdfjs-dist to highlight and navigate
     }
   }
 
@@ -394,8 +494,13 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
     if (matches.length === 0) return
     const prevIndex = currentMatchIndex <= 0 ? matches.length - 1 : currentMatchIndex - 1
     setCurrentMatchIndex(prevIndex)
-    updateCurrentMatchHighlight(prevIndex)
-    navigateToMatch(prevIndex)
+    
+    if (isPDF) {
+      navigateToPDFMatch(prevIndex)
+    } else if (editor) {
+      updateCurrentMatchHighlight(prevIndex)
+      navigateToMatch(prevIndex)
+    }
   }
 
   // Navigate to next match
@@ -403,8 +508,13 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
     if (matches.length === 0) return
     const nextIndex = (currentMatchIndex + 1) % matches.length
     setCurrentMatchIndex(nextIndex)
-    updateCurrentMatchHighlight(nextIndex)
-    navigateToMatch(nextIndex)
+    
+    if (isPDF) {
+      navigateToPDFMatch(nextIndex)
+    } else if (editor) {
+      updateCurrentMatchHighlight(nextIndex)
+      navigateToMatch(nextIndex)
+    }
   }
 
   // Highlight all matches (temporary highlights) - all matches get the same color
@@ -605,7 +715,7 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
     }
   }
 
-  // Keyboard shortcuts for inline search
+  // Handle Escape key to close search (when search is open)
   useEffect(() => {
     if (!showInlineSearch) return
     
@@ -630,55 +740,15 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
         return
       }
       
-      // Ctrl+F to toggle (only when not in input)
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && !e.shiftKey) {
-        e.preventDefault()
-        setShowInlineSearch(false)
-        setSearchQuery('')
-        setReplaceQuery('')
-        clearInlineSearchHighlights()
-        editor?.chain().focus().run()
-        return
-      }
+      // Note: Ctrl+F handling is done in Layout.tsx to avoid conflicts
     }
     
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [showInlineSearch, editor, searchQuery, performSearch])
 
-  // Keyboard shortcut to open inline search (Ctrl+F)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't prevent default if typing in an input field or textarea
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return
-      }
-      
-      // Ctrl+F (or Cmd+F on Mac) - toggle inline search
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && !e.shiftKey) {
-        e.preventDefault()
-        e.stopPropagation()
-        setShowInlineSearch((prev) => {
-          if (!prev) {
-            // Opening search - focus input after a short delay
-            setTimeout(() => {
-              inlineSearchInputRef.current?.focus()
-            }, 50)
-          } else {
-            // Closing search
-            clearInlineSearchHighlights()
-            setSearchQuery('')
-            setReplaceQuery('')
-          }
-          return !prev
-        })
-        return
-      }
-    }
-    
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  // Note: Ctrl+F handling is now done in Layout.tsx to avoid conflicts
+  // Layout delegates to the active surface (DocumentEditor or PDFViewer)
 
   // Focus search input when opening
   useEffect(() => {
@@ -1354,6 +1424,7 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%' }}>
                   <input
                     ref={inlineSearchInputRef}
+                    data-search-input="true"
                     type="text"
                     placeholder=""
                     value={searchQuery}
@@ -1674,5 +1745,9 @@ export default function DocumentEditor({ document, editor, isAIPanelOpen = false
       )}
     </div>
   )
-}
+})
+
+DocumentEditor.displayName = 'DocumentEditor'
+
+export default DocumentEditor
 
