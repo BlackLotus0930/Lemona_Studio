@@ -179,7 +179,8 @@ function TopBar({
                           display: 'flex',
                           alignItems: 'center',
                           gap: '8px',
-          flexShrink: 0 // Don't shrink, only take necessary space
+          flexShrink: 0, // Don't shrink, only take necessary space
+          marginRight: '0px' // Move closer to right border
         }}>
           {/* Window controls on Windows/Linux */}
           {isElectron && window.electron && window.electron.platform !== 'darwin' && (
@@ -190,7 +191,7 @@ function TopBar({
                 title="Minimize"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12">
-                  <rect x="0" y="5" width="12" height="1" fill="currentColor" />
+                  <rect x="0" y="5" width="12" height="0.75" fill="currentColor" />
                 </svg>
               </button>
               <button 
@@ -199,7 +200,7 @@ function TopBar({
                 title="Maximize / Restore"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12">
-                  <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1" />
+                  <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="0.75" />
                 </svg>
               </button>
               <button 
@@ -208,7 +209,7 @@ function TopBar({
                 title="Close"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12">
-                  <path d="M1 1 L11 11 M11 1 L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M1 1 L11 11 M11 1 L1 11" stroke="currentColor" strokeWidth="0.75" strokeLinecap="round" />
                 </svg>
               </button>
             </div>

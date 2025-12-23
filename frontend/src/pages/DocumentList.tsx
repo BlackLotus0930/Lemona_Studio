@@ -277,7 +277,9 @@ function DocumentList() {
               fontSize: '13px', 
               color: theme === 'dark' ? '#9E9E9E' : '#5f6368', 
               fontWeight: 500, 
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+              transform: 'translateY(-1px)',
+              display: 'inline-block'
             }}>Lemona</span>
           </button>
 
@@ -339,7 +341,7 @@ function DocumentList() {
         {/* @ts-ignore */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0', WebkitAppRegion: 'no-drag' }}>
           {typeof window !== 'undefined' && window.electron && window.electron.platform !== 'darwin' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0', marginRight: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0', marginRight: '-8px' }}>
               <button
                 onClick={() => {
                   if (window.electron) {
@@ -369,7 +371,7 @@ function DocumentList() {
                 title="Minimize"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12">
-                  <rect x="0" y="5" width="12" height="1" fill="currentColor" />
+                  <rect x="0" y="5" width="12" height="0.75" fill="currentColor" />
                 </svg>
               </button>
               <button
@@ -401,7 +403,7 @@ function DocumentList() {
                 title="Maximize / Restore"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12">
-                  <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1" />
+                  <rect x="1" y="1" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="0.75" />
                 </svg>
               </button>
               <button
@@ -433,7 +435,7 @@ function DocumentList() {
                 title="Close"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12">
-                  <path d="M1 1 L11 11 M11 1 L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  <path d="M1 1 L11 11 M11 1 L1 11" stroke="currentColor" strokeWidth="0.75" strokeLinecap="round" />
                 </svg>
               </button>
             </div>

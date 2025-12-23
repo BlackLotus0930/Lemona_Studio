@@ -117,7 +117,7 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
         display: 'flex',
         alignItems: 'center',
         gap: '8px',
-        padding: '0 12px 0 18px', // Left padding slightly reduced
+        padding: '0 8px 0 18px', // Consistent padding for all tabs
         height: '36px', // Match topbar height exactly
         backgroundColor: currentBg,
         color: tabTextColor,

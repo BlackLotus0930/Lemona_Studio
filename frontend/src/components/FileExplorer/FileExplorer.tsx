@@ -522,11 +522,12 @@ function FileExplorer({
       }
     } else if (item.document) {
       setSelectedId(item.id)
-      // Don't clear folder selection when selecting a file - keep it for creating new files
-      // setSelectedFolderId(null) // Keep folder selection
-      // if (onSelectedFolderChange) {
-      //   onSelectedFolderChange(null)
-      // }
+      // Determine which folder this file belongs to and set it as selected folder
+      const fileFolderId = item.document.folder === 'library' ? 'library' : 'project'
+      setSelectedFolderId(fileFolderId)
+      if (onSelectedFolderChange) {
+        onSelectedFolderChange(fileFolderId)
+      }
       onDocumentClick(item.document.id)
     }
   }
@@ -665,6 +666,8 @@ function FileExplorer({
     const paddingLeft = isFolder ? 12 : 32
     // File items have different text color (#818181), folders keep original color
     const itemTextColor = isFolder ? textColor : '#818181'
+    // Check if this item has the context menu open
+    const hasContextMenu = contextMenuPos && contextMenuPos.item.id === item.id
     
     // Determine if we should show drop indicator above or below this item
     const showIndicatorAbove = !isFolder && draggedItemId && dropTargetId === item.id && dropPosition === 'above'
@@ -680,7 +683,7 @@ function FileExplorer({
               top: 0,
               left: 0,
               right: 0,
-              height: '1.5px',
+              height: '2px',
               backgroundColor: indicatorColor,
               zIndex: 1000,
               pointerEvents: 'none',
@@ -830,6 +833,7 @@ function FileExplorer({
             marginRight: '0',
             marginBottom: '0',
             opacity: draggedItemId === item.id ? 0.5 : 1,
+            border: hasContextMenu ? `1px solid ${theme === 'dark' ? '#444444' : '#909090'}` : '1px solid transparent',
           }}
           onClick={() => handleItemClick(item)}
           onDoubleClick={() => handleDoubleClick(item)}
@@ -931,7 +935,7 @@ function FileExplorer({
               top: isFolder && isExpanded ? '100%' : 'auto',
               left: 0,
               right: 0,
-              height: '1px',
+              height: '2px',
               backgroundColor: indicatorColor,
               zIndex: 1000,
               pointerEvents: 'none',
@@ -1014,7 +1018,7 @@ function FileExplorer({
                       top: 0,
                       left: 0,
                       right: 0,
-                      height: '1px',
+                      height: '2px',
                       backgroundColor: indicatorColor,
                       zIndex: 1000,
                       pointerEvents: 'none',
@@ -1049,6 +1053,7 @@ function FileExplorer({
     
     const isSelected = selectedId === readmeDoc.id
     const isRenaming = renamingId === readmeDoc.id
+    const hasContextMenu = contextMenuPos && contextMenuPos.item.id === readmeDoc.id
     
     return (
       <div key={readmeDoc.id} style={{ position: 'relative', width: '100%', boxSizing: 'border-box', margin: 0, padding: 0 }}>
@@ -1073,6 +1078,7 @@ function FileExplorer({
             marginLeft: '0',
             marginRight: '0',
             marginBottom: '0',
+            border: hasContextMenu ? `1px solid ${theme === 'dark' ? '#555555' : '#909090'}` : '1px solid transparent',
           }}
           onClick={() => {
             setSelectedId(readmeDoc.id)

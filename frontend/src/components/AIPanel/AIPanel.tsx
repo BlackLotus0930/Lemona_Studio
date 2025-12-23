@@ -88,7 +88,8 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
   const borderColor = theme === 'dark' ? '#232323' : '#dadce0'
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const activeChatBg = theme === 'dark' ? '#212121' : '#f0f0f0'
-  const hoverBg = theme === 'dark' ? '#181818' : '#f1f3f4'
+  const hoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5' // Brighter for chat tabs
+  const buttonHoverBg = theme === 'dark' ? '#252525' : '#f8f8f8' // Even brighter for buttons
   const iconColor = theme === 'dark' ? '#858585' : '#5f6368'
 
   const documentContent = document?.content || undefined
@@ -400,7 +401,10 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
       <div 
         ref={headerScrollRef}
         style={{
-          padding: '8px 12px',
+          paddingTop: '6px',
+          paddingBottom: '6px',
+          paddingLeft: '12px',
+          paddingRight: '12px',
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
@@ -436,17 +440,21 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               onMouseEnter={() => setHoveredChatId(chat.id)}
               onMouseLeave={() => setHoveredChatId(null)}
               style={{
-                padding: '6px 12px',
-                paddingRight: '12px',
-                borderRadius: activeChatId === chat.id ? '6px' : '12px',
-                backgroundColor: activeChatId === chat.id ? activeChatBg : 'transparent',
+                paddingTop: '4px',
+                paddingBottom: '6px',
+                paddingLeft: '8px',
+                paddingRight: '8px',
+                borderRadius: (activeChatId === chat.id || hoveredChatId === chat.id) ? '6px' : '12px',
+                backgroundColor: activeChatId === chat.id 
+                  ? activeChatBg 
+                  : (hoveredChatId === chat.id ? hoverBg : 'transparent'),
                 border: 'none',
                 display: 'flex',
                 alignItems: 'center',
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
                 minWidth: '60px',
-                maxWidth: '200px',
+                maxWidth: '160px',
                 flexShrink: 0, // Don't shrink, allow horizontal scroll instead
                 flexGrow: 0,
                 position: 'relative'
@@ -455,12 +463,13 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               <span style={{
                 fontSize: '13px',
                 fontWeight: 500,
-                color: textColor,
+                color: activeChatId === chat.id ? textColor : '#6b6b6b',
                 overflow: 'hidden',
-                textOverflow: 'ellipsis',
+                textOverflow: 'clip',
                 whiteSpace: 'nowrap',
-                width: '100%',
-                display: 'block'
+                width: hoveredChatId === chat.id ? 'calc(100% - 24px)' : '100%',
+                display: 'block',
+                paddingRight: hoveredChatId === chat.id ? '4px' : '0'
               }}>
                 {chat.name}
               </span>
@@ -504,11 +513,12 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         </div>
         
         {/* Action Buttons - Always visible on the right */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1px', flexShrink: 0, marginRight: '0px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1px' }}>
           <button
             onClick={handleNewChat}
             style={{
-              padding: '4px 8px',
+              padding: '4px 6px',
               border: 'none',
               borderRadius: '4px',
               backgroundColor: 'transparent',
@@ -518,13 +528,15 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'background-color 0.15s'
+              transition: 'background-color 0.15s',
+              minWidth: '28px',
+              minHeight: '28px'
             }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = hoverBg}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = buttonHoverBg}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             title="New chat"
           >
-            <AddIcon style={{ fontSize: '18px' }} />
+            <AddIcon style={{ fontSize: '19px' }} />
           </button>
           
           <button
@@ -532,7 +544,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               // Show history
             }}
             style={{
-              padding: '4px 8px',
+              padding: '4px 8px 4px 6px',
               border: 'none',
               borderRadius: '4px',
               backgroundColor: 'transparent',
@@ -542,19 +554,22 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'background-color 0.15s'
+              transition: 'background-color 0.15s',
+              minWidth: '28px',
+              minHeight: '28px'
             }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = hoverBg}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = buttonHoverBg}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             title="History"
           >
-            <HistoryIcon style={{ fontSize: '18px' }} />
+            <HistoryIcon style={{ fontSize: '16px' }} />
           </button>
           
+          </div>
           <button
             onClick={onClose}
             style={{
-              padding: '4px 8px',
+              padding: '4px 6px',
               border: 'none',
               borderRadius: '4px',
               backgroundColor: 'transparent',
@@ -564,13 +579,17 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'background-color 0.15s'
+              transition: 'background-color 0.15s',
+              transform: 'translateY(0.5px)',
+              marginLeft: '0px',
+              minWidth: '28px',
+              minHeight: '28px'
             }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = hoverBg}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = buttonHoverBg}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             title="Close AI Panel"
           >
-            <CloseIcon style={{ fontSize: '18px' }} />
+            <CloseIcon style={{ fontSize: '19px', fontWeight: 200 }} />
           </button>
           
           <div ref={menuRef} style={{ position: 'relative', display: 'none' }}>

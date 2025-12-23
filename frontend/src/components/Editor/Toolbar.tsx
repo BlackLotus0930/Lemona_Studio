@@ -516,7 +516,7 @@ export default function Toolbar({
           }
         }}
       >
-        <SearchIcon style={{ fontSize: '19px' }} />
+        <SearchIcon style={{ fontSize: '19px', transform: 'translateY(1px)' }} />
       </button>
 
       {/* Undo/Redo */}
@@ -1494,7 +1494,7 @@ export default function Toolbar({
             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            <ShareIcon style={{ fontSize: '20px' }} />
+            <ShareIcon style={{ fontSize: '20px', color: theme === 'dark' ? '#B5B5B5' : '#4d4d4d' }} />
           </button>
           <ExportModal
             isOpen={showExportModal}

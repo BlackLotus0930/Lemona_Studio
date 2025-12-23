@@ -365,6 +365,16 @@ export default function Layout() {
     }
   }, [document?.projectId, activeTabId]) // Reload when project changes
 
+  // Set selected folder based on current document's folder
+  useEffect(() => {
+    if (document?.folder === 'library') {
+      setSelectedFolder('library')
+    } else if (document && (!document.folder || document.folder === 'project')) {
+      setSelectedFolder('project')
+    }
+    // Don't clear selectedFolder if document is null - keep it for creating new files
+  }, [document?.folder])
+
   // Keyboard shortcuts: Ctrl+F for inline search, Ctrl+Shift+F for global search, Ctrl+Shift+E to toggle FileExplorer
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1221,21 +1231,36 @@ export default function Layout() {
 
   const handleCreateDocument = async () => {
     try {
-      // Generate "Section 1", "Section 2", etc. based on existing documents in project
-      const existingTitles = documents.map(doc => doc.title)
-      let sectionNumber = 1
-      while (existingTitles.includes(`Section ${sectionNumber}`)) {
-        sectionNumber++
-      }
-      const newTitle = `Section ${sectionNumber}`
-      
       // Use selected folder if available, otherwise default to 'project'
       const folder = selectedFolder || 'project'
+      
+      // Generate name based on folder: "Section X" for workspace, "Doc X" for library
+      const namePrefix = folder === 'library' ? 'Doc' : 'Section'
+      const folderDocs = documents.filter(doc => 
+        (folder === 'library' && doc.folder === 'library') ||
+        (folder === 'project' && (!doc.folder || doc.folder === 'project'))
+      )
+      const existingTitles = folderDocs.map(doc => doc.title)
+      let number = 1
+      while (existingTitles.includes(`${namePrefix} ${number}`)) {
+        number++
+      }
+      const newTitle = `${namePrefix} ${number}`
+      
       const newDoc = await documentApi.create(newTitle, folder)
       
       // If current document has projectId, add new doc to same project
       if (document?.projectId) {
-        await projectApi.addDocument(document.projectId, newDoc.id, documents.length)
+        // Calculate order based on documents in the same folder
+        const folderDocs = documents.filter(doc => 
+          (folder === 'library' && doc.folder === 'library') ||
+          (folder === 'project' && (!doc.folder || doc.folder === 'project'))
+        )
+        // Find the maximum order in the folder, or use folderDocs.length as fallback
+        const maxOrder = folderDocs.length > 0
+          ? Math.max(...folderDocs.map(doc => doc.order ?? 0), -1) + 1
+          : 0
+        await projectApi.addDocument(document.projectId, newDoc.id, maxOrder)
         // Reload documents to ensure folder is correctly set and document appears in right folder
         await loadDocuments()
       } else {
@@ -2254,7 +2279,17 @@ export default function Layout() {
                     await loadDocuments()
                     // If current document has projectId, add new doc to same project
                     if (document?.projectId) {
-                      await projectApi.addDocument(document.projectId, newDoc.id, documents.length)
+                      // Calculate order based on documents in the same folder
+                      const folder = newDoc.folder || 'project'
+                      const folderDocs = documents.filter(doc => 
+                        (folder === 'library' && doc.folder === 'library') ||
+                        (folder === 'project' && (!doc.folder || doc.folder === 'project'))
+                      )
+                      // Find the maximum order in the folder, or use folderDocs.length as fallback
+                      const maxOrder = folderDocs.length > 0
+                        ? Math.max(...folderDocs.map(doc => doc.order ?? 0), -1) + 1
+                        : 0
+                      await projectApi.addDocument(document.projectId, newDoc.id, maxOrder)
                       await loadDocuments()
                     }
                     // Navigate to the newly uploaded file
