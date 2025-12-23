@@ -29,7 +29,7 @@ interface TopBarProps {
   shareButtonRef?: React.RefObject<HTMLButtonElement>
 }
 
-export default function TopBar({ 
+function TopBar({ 
   openTabs = [],
   activeTabId,
   onTabClick,
@@ -41,7 +41,7 @@ export default function TopBar({
   const [dropTargetId, setDropTargetId] = React.useState<string | null>(null)
   const [dropPosition, setDropPosition] = React.useState<'left' | 'right' | null>(null)
 
-  const indicatorColor = theme === 'dark' ? '#4fc3f7' : '#1976d2' // Blue color for drop indicator
+  const indicatorColor = theme === 'dark' ? '#999999' : '#c0c0c0' // Light grey color for drop indicator
 
   const handleDragStart = (_e: React.DragEvent, documentId: string) => {
     setDraggedTabId(documentId)
@@ -218,3 +218,5 @@ export default function TopBar({
     </div>
   )
 }
+
+export default TopBar

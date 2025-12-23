@@ -57,12 +57,12 @@ export default function ExportModal({
     }
   }, [projectName])
 
-  // Update filename when modal opens
+  // Reset filename to projectName when modal opens
   useEffect(() => {
-    if (isOpen && documentTitle) {
-      setDownloadFilename(documentTitle)
+    if (isOpen && projectName) {
+      setDownloadFilename(projectName)
     }
-  }, [isOpen, documentTitle])
+  }, [isOpen, projectName])
 
   // Close menu when clicking outside
   useEffect(() => {

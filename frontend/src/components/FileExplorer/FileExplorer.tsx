@@ -437,7 +437,7 @@ function FileExplorer({
   const hoverBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
   const selectedBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
   const textColor = theme === 'dark' ? '#cccccc' : '#202124'
-  const indicatorColor = theme === 'dark' ? '#4fc3f7' : '#1976d2' // Blue color for drop indicator
+  const indicatorColor = theme === 'dark' ? '#999999' : '#c0c0c0' // Light grey color for drop indicator
   
   // Dropdown menu colors (matching Toolbar.tsx)
   const dropdownBg = theme === 'dark' ? '#141414' : '#ffffff'
@@ -680,7 +680,7 @@ function FileExplorer({
               top: 0,
               left: 0,
               right: 0,
-              height: '2px',
+              height: '1.5px',
               backgroundColor: indicatorColor,
               zIndex: 1000,
               pointerEvents: 'none',
@@ -931,7 +931,7 @@ function FileExplorer({
               top: isFolder && isExpanded ? '100%' : 'auto',
               left: 0,
               right: 0,
-              height: '2px',
+              height: '1px',
               backgroundColor: indicatorColor,
               zIndex: 1000,
               pointerEvents: 'none',
@@ -1014,7 +1014,7 @@ function FileExplorer({
                       top: 0,
                       left: 0,
                       right: 0,
-                      height: '2px',
+                      height: '1px',
                       backgroundColor: indicatorColor,
                       zIndex: 1000,
                       pointerEvents: 'none',

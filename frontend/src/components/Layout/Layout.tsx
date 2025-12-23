@@ -470,7 +470,7 @@ export default function Layout() {
         // Load project to get its name
         const project = await projectApi.getById(document.projectId)
         if (project) {
-          setProjectName(project.title.toUpperCase())
+          setProjectName(project.title) // Store original case for exports
         } else {
           setProjectName('LEMONA')
         }
@@ -1992,7 +1992,7 @@ export default function Layout() {
     }
     
     try {
-      const exportFilename = filename || document?.title || 'document'
+      const exportFilename = filename || projectName || 'document'
       
       // Use exportMultiple for multiple documents (merges into one file)
       // Use export for single document
@@ -2190,7 +2190,7 @@ export default function Layout() {
               alignItems: 'center',
               justifyContent: 'space-between'
             }}>
-              <span>{isSearchMode ? 'SEARCH' : projectName}</span>
+              <span>{isSearchMode ? 'SEARCH' : projectName.toUpperCase()}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <button
                   onClick={handleCreateDocument}
