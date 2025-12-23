@@ -8,14 +8,35 @@
     <!-- In production, unsafe-eval and unsafe-inline are blocked for better security -->
     <!-- frame-ancestors is ignored in meta tags, only works in HTTP headers (set via Electron session API) -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com; frame-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
+    <!-- Theme initialization - must load synchronously before any rendering -->
+    <!-- This runs before React loads to prevent white flash on startup -->
+    <script src="/theme-init.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Open+Sans:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&icon_names=ink_highlighter,language" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
     <title>Lemona</title>
+    <!-- Prevent white flash - set dark theme background before CSS loads -->
+    <style>
+      html {
+        background-color: #141414;
+      }
+      body, #root {
+        background-color: #141414;
+        color: #D6D6DD;
+      }
+      html:not(.dark-theme) {
+        background-color: #ffffff;
+      }
+      html:not(.dark-theme) body,
+      html:not(.dark-theme) #root {
+        background-color: #ffffff;
+        color: #202124;
+      }
+    </style>
   </head>
-  <body class="dark-theme">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

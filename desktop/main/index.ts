@@ -123,6 +123,7 @@ function createWindow() {
     icon: iconPath, // Set window icon (Windows/Linux)
     frame: false, // Remove default frame completely - we use custom title bar
     titleBarStyle: 'hidden', // Hide default title bar (macOS)
+    backgroundColor: '#141414', // Set dark background to prevent white flash
     // Note: titleBarOverlay only works on macOS, removed for Windows compatibility
     webPreferences: {
       nodeIntegration: false,

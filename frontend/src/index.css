@@ -102,9 +102,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
   height: 100vh;
   overflow: hidden;
+  /* Default to dark theme to prevent white flash */
+  background-color: #141414;
+  color: #D6D6DD;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+body:not(.dark-theme) {
   background-color: #ffffff;
   color: #202124;
-  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 body.dark-theme {
@@ -115,8 +121,14 @@ body.dark-theme {
 #root {
   height: 100vh;
   width: 100vw;
-  background-color: #ffffff;
+  /* Default to dark theme to prevent white flash */
+  background-color: #141414;
   transition: background-color 0.2s ease;
+}
+
+/* Light theme override */
+body:not(.dark-theme) #root {
+  background-color: #ffffff;
 }
 
 #root.dark-theme,
