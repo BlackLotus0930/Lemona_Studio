@@ -260,8 +260,10 @@ function tipTapToHTML(content: any): string {
     if (node.type === 'tableBlock') {
       const html = node.attrs?.html || ''
       if (html) {
-        // Return the stored HTML directly (it's already sanitized when stored)
-        return `<div style="margin: 1em 0;">${html}</div>`
+        // Clean HTML to remove highlight/selection styles
+        const cleanedHTML = cleanTableHTML(html)
+        // Add page-break-inside: avoid to prevent table from being split across pages
+        return `<div style="margin: 1em 0; page-break-inside: avoid; break-inside: avoid;">${cleanedHTML}</div>`
       }
       return ''
     }
@@ -288,6 +290,96 @@ function escapeHTML(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
+}
+
+// Clean table HTML to remove highlight/selection styles and normalize for PDF
+function cleanTableHTML(html: string): string {
+  if (!html) return html
+  
+  // Normalize table styles for PDF export (light theme, proper borders, consistent padding)
+  let cleaned = html
+    // Replace dark theme border colors with light theme colors
+    .replace(/border:\s*0\.5px\s+solid\s+#555/gi, 'border: 1px solid #ddd')
+    .replace(/border:\s*0\.5px\s+solid\s+#ddd/gi, 'border: 1px solid #ddd')
+    .replace(/border:\s*1px\s+solid\s+#555/gi, 'border: 1px solid #ddd')
+    // Normalize border styles to be consistent and visible
+    .replace(/border:\s*([^;]+);/gi, (match: string) => {
+      // Ensure borders are at least 1px for visibility in PDF
+      if (match.includes('0.5px')) {
+        return match.replace(/0\.5px/g, '1px')
+      }
+      return match
+    })
+  
+  // Clean up style attributes - remove highlights and normalize colors
+  cleaned = cleaned.replace(/style="([^"]*)"/gi, (match: string, styleContent: string) => {
+    let cleanedStyle = styleContent
+    
+    // Remove dark background-color values (highlights/selections)
+    cleanedStyle = cleanedStyle.replace(/background-color:\s*[^;]+;?/gi, (bgMatch: string) => {
+      const color = bgMatch.toLowerCase()
+      // Keep transparent, white, or very light gray backgrounds
+      if (color.includes('transparent') || 
+          color.includes('#fff') || 
+          color.includes('#ffffff') ||
+          color.includes('rgb(255') ||
+          color.includes('rgba(255, 255, 255') ||
+          color.includes('#f5f5f5') ||
+          color.includes('#f8f9fa')) {
+        return bgMatch
+      }
+      // Remove dark backgrounds (highlights/selections)
+      return ''
+    })
+    
+    // Normalize border colors to light theme
+    cleanedStyle = cleanedStyle.replace(/border[^:]*:\s*[^;]*#555[^;]*;?/gi, (borderMatch: string) => {
+      return borderMatch.replace(/#555/g, '#ddd')
+    })
+    
+    // Ensure borders are visible (at least 1px)
+    cleanedStyle = cleanedStyle.replace(/border[^:]*:\s*0\.5px/gi, (borderMatch: string) => {
+      return borderMatch.replace(/0\.5px/g, '1px')
+    })
+    
+    // Normalize padding for better appearance
+    cleanedStyle = cleanedStyle.replace(/padding:\s*8px\s+4px\s+8px\s+8px/gi, 'padding: 10px 12px')
+    
+    // Clean up empty style attributes or trailing semicolons
+    const finalStyle = cleanedStyle.trim().replace(/;\s*;/g, ';').replace(/;\s*$/, '').trim()
+    
+    // If style is empty, remove the entire style attribute
+    if (!finalStyle) {
+      return ''
+    }
+    
+    return `style="${finalStyle}"`
+  })
+  
+  // Normalize table element styles
+  cleaned = cleaned.replace(/<table\s+style="([^"]*)"/gi, (match: string, styleContent: string) => {
+    // Ensure table has proper border-collapse and spacing
+    let tableStyle = styleContent
+    if (!tableStyle.includes('border-collapse')) {
+      tableStyle += '; border-collapse: collapse'
+    }
+    if (!tableStyle.includes('width')) {
+      tableStyle += '; width: 100%'
+    }
+    // Normalize margin
+    tableStyle = tableStyle.replace(/margin:\s*[^;]+/gi, 'margin: 16px 0')
+    return `<table style="${tableStyle}"`
+  })
+  
+  // Remove any selection-related classes or data attributes
+  cleaned = cleaned.replace(/\s*class="[^"]*selected[^"]*"/gi, '')
+  cleaned = cleaned.replace(/\s*data-selected="[^"]*"/gi, '')
+  cleaned = cleaned.replace(/\s*data-highlight="[^"]*"/gi, '')
+  
+  // Clean up any double spaces
+  cleaned = cleaned.replace(/\s{2,}/g, ' ')
+  
+  return cleaned
 }
 
 // Render chart as SVG (similar to ChartExtension's renderChartSVG)
@@ -466,8 +558,12 @@ function generateHTMLDocument(bodyHTML: string): string {
       font-size: 14px;
       line-height: 1.7;
       color: #202124;
-      padding: 50px;
+      padding: 0 50px 50px 50px;
       background: white;
+    }
+    
+    body > *:first-child {
+      margin-top: 0 !important;
     }
     
     h1, h2, h3, h4, h5, h6 {
@@ -505,6 +601,44 @@ function generateHTMLDocument(bodyHTML: string): string {
     
     .page-break {
       page-break-after: always;
+    }
+    
+    /* Table styling for PDF export */
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      page-break-inside: avoid;
+      break-inside: avoid;
+      font-size: 14px;
+    }
+    
+    table th {
+      border: 1px solid #ddd;
+      padding: 10px 12px;
+      text-align: left;
+      background-color: transparent;
+      font-weight: 600;
+    }
+    
+    table td {
+      border: 1px solid #ddd;
+      padding: 10px 12px;
+      text-align: left;
+    }
+    
+    table thead {
+      background-color: transparent;
+    }
+    
+    table tbody tr {
+      background-color: transparent;
+    }
+    
+    div[data-table-block],
+    div:has(table) {
+      page-break-inside: avoid;
+      break-inside: avoid;
     }
   </style>
 </head>
@@ -628,7 +762,7 @@ export const exportService = {
         format: 'A4',
         printBackground: true,
         margin: {
-          top: '50px',
+          top: '70px',
           right: '50px',
           bottom: '50px',
           left: '50px'
@@ -716,7 +850,7 @@ export const exportService = {
         format: 'A4',
         printBackground: true,
         margin: {
-          top: '50px',
+          top: '70px',
           right: '50px',
           bottom: '50px',
           left: '50px'
