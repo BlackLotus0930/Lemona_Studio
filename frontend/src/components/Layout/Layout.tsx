@@ -12,6 +12,8 @@ import { ResizableImage } from '../Editor/ResizableImage'
 import Highlight from '@tiptap/extension-highlight'
 import { MathExtension } from '../Editor/MathExtension'
 import { PDFViewerExtension } from '../Editor/PDFViewer'
+import { TableExtension } from '../Editor/TableExtension'
+import { ChartExtension } from '../Editor/ChartExtension'
 import React, { useEffect, useRef, useState } from 'react'
 import DocumentEditor, { DocumentEditorSearchHandle } from '../Editor/DocumentEditor'
 import Toolbar from '../Editor/Toolbar'
@@ -1260,9 +1262,17 @@ export default function Layout() {
         const maxOrder = folderDocs.length > 0
           ? Math.max(...folderDocs.map(doc => doc.order ?? 0), -1) + 1
           : 0
-        await projectApi.addDocument(document.projectId, newDoc.id, maxOrder)
-        // Reload documents to ensure folder is correctly set and document appears in right folder
-        await loadDocuments()
+        
+        // Optimistically update documents state to prevent flash
+        const newDocWithOrder = { ...newDoc, order: maxOrder, projectId: document.projectId }
+        setDocuments(prev => [...prev, newDocWithOrder])
+        
+        // Add document to project in the background (don't await to prevent blocking)
+        projectApi.addDocument(document.projectId, newDoc.id, maxOrder).catch(error => {
+          console.error('Failed to add document to project:', error)
+          // On error, reload to sync with backend
+          loadDocuments()
+        })
       } else {
         // Update documents state immediately so FileExplorer shows it
         setDocuments(prev => [...prev, newDoc])
@@ -1412,6 +1422,8 @@ export default function Layout() {
       }),
       MathExtension,
       PDFViewerExtension,
+      TableExtension,
+      ChartExtension,
     ],
     content: '', // Initialize with empty content, set it asynchronously after mount
     editorProps: {

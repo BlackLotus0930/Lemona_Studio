@@ -61,6 +61,16 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf'
 import DescriptionIcon from '@mui/icons-material/Description'
 // @ts-ignore
 import FormatLineSpacingIcon from '@mui/icons-material/FormatLineSpacing'
+// @ts-ignore
+import BarChartIcon from '@mui/icons-material/BarChart'
+// @ts-ignore
+import TableChartIcon from '@mui/icons-material/TableChart'
+// @ts-ignore
+import ShowChartIcon from '@mui/icons-material/ShowChart'
+// @ts-ignore
+import PieChartIcon from '@mui/icons-material/PieChart'
+// @ts-ignore
+import TimelineIcon from '@mui/icons-material/Timeline'
 
 interface ToolbarProps {
   editor: Editor | null
@@ -84,12 +94,235 @@ export default function Toolbar({
   const { theme, toggleTheme } = useTheme()
   const [fontSize, setFontSize] = useState(14)
   const [showStyleMenu, setShowStyleMenu] = useState(false)
+  const storedSelectionRef = useRef<{ range: Range; cell: HTMLElement } | null>(null)
+  
+  // Store selection when it's in a table cell
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const selection = window.getSelection()
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0)
+        let node: Node | null = range.commonAncestorContainer
+        
+        // Walk up the DOM tree to find a table cell
+        while (node) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const element = node as HTMLElement
+            if (element.hasAttribute && element.hasAttribute('data-table-cell')) {
+              // Store the selection
+              storedSelectionRef.current = {
+                range: range.cloneRange(),
+                cell: element
+              }
+              return
+            }
+          }
+          node = node.parentNode
+        }
+      }
+      // Clear stored selection if not in table cell
+      storedSelectionRef.current = null
+    }
+    
+    document.addEventListener('selectionchange', handleSelectionChange)
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange)
+    }
+  }, [])
+  
+  // Helper function to check if table node is selected
+  const isTableNodeSelected = () => {
+    if (!editor) return false
+    const { selection } = editor.state
+    if (selection.empty) return false
+    
+    // Check if it's a NodeSelection and the node is a tableBlock
+    if (selection.constructor.name === 'NodeSelection' || (selection as any).node) {
+      const selectedNode = (selection as any).node
+      if (selectedNode && selectedNode.type && selectedNode.type.name === 'tableBlock') {
+        return true
+      }
+    }
+    
+    // Check if selection spans a table block
+    const { from, to } = selection
+    let foundTable = false
+    editor.state.doc.nodesBetween(from, to, (node) => {
+      if (node.type.name === 'tableBlock') {
+        foundTable = true
+        return false // Stop traversing
+      }
+    })
+    return foundTable
+  }
+  
+  // Helper function to get all table cells from selected table
+  const getAllTableCells = () => {
+    if (!editor) return []
+    const { selection } = editor.state
+    const cells: HTMLElement[] = []
+    
+    if (selection.constructor.name === 'NodeSelection' || (selection as any).node) {
+      const selectedNode = (selection as any).node
+      if (selectedNode && selectedNode.type && selectedNode.type.name === 'tableBlock') {
+        // Find the table element in the DOM
+        const allTableWrappers = document.querySelectorAll('[data-table-block]')
+        
+        // Get cells from all table wrappers
+        allTableWrappers.forEach((wrapper) => {
+          const tableElement = wrapper.querySelector('table')
+          if (tableElement) {
+            const allCells = tableElement.querySelectorAll('[data-table-cell]')
+            allCells.forEach(cell => cells.push(cell as HTMLElement))
+          }
+        })
+      }
+    }
+    
+    return cells
+  }
+  
+  // Helper function to get the applyFormattingToAllCells function from the selected table
+  const getTableFormattingFunction = () => {
+    if (!editor) return null
+    const { selection } = editor.state
+    
+    if (selection.constructor.name === 'NodeSelection' || (selection as any).node) {
+      const selectedNode = (selection as any).node
+      if (selectedNode && selectedNode.type && selectedNode.type.name === 'tableBlock') {
+        // Find the table element
+        const tableElement = document.querySelector('[data-table-block] table')
+        if (tableElement && (tableElement as any).__applyFormattingToAllCells) {
+          return (tableElement as any).__applyFormattingToAllCells
+        }
+      }
+    }
+    return null
+  }
+  
+  // Helper function to check if selection is within a table cell
+  const isSelectionInTableCell = () => {
+    // First check stored selection
+    if (storedSelectionRef.current) {
+      return storedSelectionRef.current.cell
+    }
+    
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) return false
+    
+    const range = selection.getRangeAt(0)
+    let node: Node | null = range.commonAncestorContainer
+    
+    // Walk up the DOM tree to find a table cell
+    while (node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = node as HTMLElement
+        if (element.hasAttribute && element.hasAttribute('data-table-cell')) {
+          return element
+        }
+      }
+      node = node.parentNode
+    }
+    return false
+  }
+  
+  // Helper function to apply formatting to table cell using document.execCommand
+  const applyTableCellFormatting = (command: string, value?: string) => {
+    // Check if entire table is selected
+    if (isTableNodeSelected()) {
+      const formatFn = getTableFormattingFunction()
+      if (formatFn) {
+        // Use the table's formatting function which will update HTML
+        formatFn((cell: HTMLElement) => {
+          const range = document.createRange()
+          range.selectNodeContents(cell)
+          const selection = window.getSelection()
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          cell.focus()
+          requestAnimationFrame(() => {
+            document.execCommand(command, false, value)
+          })
+        })
+        return true
+      }
+      
+      // Fallback: apply to all cells directly
+      const allCells = getAllTableCells()
+      if (allCells.length > 0) {
+        allCells.forEach(cell => {
+          const range = document.createRange()
+          range.selectNodeContents(cell)
+          const selection = window.getSelection()
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          cell.focus()
+          requestAnimationFrame(() => {
+            document.execCommand(command, false, value)
+            // Trigger blur to save changes
+            cell.blur()
+            cell.focus()
+            cell.blur()
+          })
+        })
+        return true
+      }
+    }
+    
+    // Otherwise, apply to single cell
+    const tableCell = isSelectionInTableCell()
+    if (tableCell) {
+      const cellElement = tableCell as HTMLElement
+      const selection = window.getSelection()
+      
+      // Restore stored selection if available
+      if (storedSelectionRef.current) {
+        const stored = storedSelectionRef.current
+        selection?.removeAllRanges()
+        selection?.addRange(stored.range)
+        cellElement.focus()
+      }
+      
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0)
+        // Ensure the range is within the table cell
+        if (cellElement.contains(range.commonAncestorContainer)) {
+          // Restore focus to the table cell to maintain selection
+          cellElement.focus()
+          // Use requestAnimationFrame to ensure focus is restored before execCommand
+          requestAnimationFrame(() => {
+            document.execCommand(command, false, value)
+            // Update stored selection after formatting
+            if (selection.rangeCount > 0) {
+              storedSelectionRef.current = {
+                range: selection.getRangeAt(0).cloneRange(),
+                cell: cellElement
+              }
+            }
+          })
+          return true
+        }
+      }
+      // If no selection, select all in the cell
+      const range = document.createRange()
+      range.selectNodeContents(cellElement)
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      cellElement.focus()
+      requestAnimationFrame(() => {
+        document.execCommand(command, false, value)
+      })
+      return true
+    }
+    return false
+  }
   const [showFontMenu, setShowFontMenu] = useState(false)
   const [showFontSizeMenu, setShowFontSizeMenu] = useState(false)
   const [showColorMenu, setShowColorMenu] = useState(false)
   const [showHighlightMenu, setShowHighlightMenu] = useState(false)
   const [showAlignMenu, setShowAlignMenu] = useState(false)
   const [showSpacingMenu, setShowSpacingMenu] = useState(false)
+  const [showGraphMenu, setShowGraphMenu] = useState(false)
   const [, forceUpdate] = useState({})
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [showExportModal, setShowExportModal] = useState(false)
@@ -106,8 +339,18 @@ export default function Toolbar({
   const highlightMenuRef = useRef<HTMLDivElement>(null)
   const alignMenuRef = useRef<HTMLDivElement>(null)
   const spacingMenuRef = useRef<HTMLDivElement>(null)
+  const graphMenuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fontSizeMenuRef = useRef<HTMLDivElement>(null)
+  // Refs for dropdown menu divs (not buttons)
+  const styleDropdownRef = useRef<HTMLDivElement>(null)
+  const fontDropdownRef = useRef<HTMLDivElement>(null)
+  const fontSizeDropdownRef = useRef<HTMLDivElement>(null)
+  const colorDropdownRef = useRef<HTMLDivElement>(null)
+  const highlightDropdownRef = useRef<HTMLDivElement>(null)
+  const alignDropdownRef = useRef<HTMLDivElement>(null)
+  const spacingDropdownRef = useRef<HTMLDivElement>(null)
+  const graphDropdownRef = useRef<HTMLDivElement>(null)
 
   // Function to close all menus except the one specified
   const closeAllMenusExcept = (except: string | null) => {
@@ -118,6 +361,7 @@ export default function Toolbar({
     if (except !== 'highlight') setShowHighlightMenu(false)
     if (except !== 'align') setShowAlignMenu(false)
     if (except !== 'spacing') setShowSpacingMenu(false)
+    if (except !== 'graph') setShowGraphMenu(false)
   }
 
   // Update toolbar when editor selection changes
@@ -237,7 +481,23 @@ export default function Toolbar({
   // Close menus when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (toolbarRef.current && !toolbarRef.current.contains(event.target as Node)) {
+      const target = event.target as Node
+      
+      // Check if click is inside toolbar or any dropdown menu
+      const isInsideToolbar = toolbarRef.current?.contains(target)
+      const isInsideStyleMenu = styleMenuRef.current?.contains(target) || styleDropdownRef.current?.contains(target)
+      const isInsideFontMenu = fontMenuRef.current?.contains(target) || fontDropdownRef.current?.contains(target)
+      const isInsideFontSizeMenu = fontSizeMenuRef.current?.contains(target) || fontSizeDropdownRef.current?.contains(target)
+      const isInsideColorMenu = colorMenuRef.current?.contains(target) || colorDropdownRef.current?.contains(target)
+      const isInsideHighlightMenu = highlightMenuRef.current?.contains(target) || highlightDropdownRef.current?.contains(target)
+      const isInsideAlignMenu = alignMenuRef.current?.contains(target) || alignDropdownRef.current?.contains(target)
+      const isInsideSpacingMenu = spacingMenuRef.current?.contains(target) || spacingDropdownRef.current?.contains(target)
+      const isInsideGraphMenu = graphMenuRef.current?.contains(target) || graphDropdownRef.current?.contains(target)
+      
+      // Close menus if click is outside all menus and toolbar
+      if (!isInsideToolbar && !isInsideStyleMenu && !isInsideFontMenu && 
+          !isInsideFontSizeMenu && !isInsideColorMenu && !isInsideHighlightMenu &&
+          !isInsideAlignMenu && !isInsideSpacingMenu && !isInsideGraphMenu) {
         closeAllMenusExcept(null)
       }
     }
@@ -302,21 +562,144 @@ export default function Toolbar({
 
   const styleDropdownStyle: React.CSSProperties = {
     ...dropdownStyle,
-    minWidth: '140px',
-    maxWidth: '140px',
+    minWidth: '120px',
+    maxWidth: '120px',
     justifyContent: 'space-between'
   }
 
   const fontDropdownStyle: React.CSSProperties = {
     ...dropdownStyle,
-    minWidth: '120px',
-    maxWidth: '120px',
+    minWidth: '130px',
+    maxWidth: '130px',
     justifyContent: 'space-between'
   }
 
   const handleFontSizeSelect = (size: number) => {
     const newSize = Math.max(8, Math.min(400, size))
     setFontSize(newSize)
+    
+    // Check if entire table is selected
+    if (isTableNodeSelected()) {
+      const formatFn = getTableFormattingFunction()
+      if (formatFn) {
+        // Use the table's formatting function which will update HTML
+        formatFn((cell: HTMLElement) => {
+          const range = document.createRange()
+          range.selectNodeContents(cell)
+          const selection = window.getSelection()
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          cell.focus()
+          requestAnimationFrame(() => {
+            try {
+              const span = document.createElement('span')
+              span.style.fontSize = `${newSize}px`
+              const textContent = cell.textContent || ''
+              if (textContent) {
+                span.textContent = textContent
+                range.deleteContents()
+                range.insertNode(span)
+              } else {
+                cell.style.fontSize = `${newSize}px`
+              }
+            } catch {
+              cell.style.fontSize = `${newSize}px`
+            }
+          })
+        })
+        setShowFontSizeMenu(false)
+        return
+      }
+      
+      // Fallback
+      const allCells = getAllTableCells()
+      if (allCells.length > 0) {
+        allCells.forEach(cell => {
+          const range = document.createRange()
+          range.selectNodeContents(cell)
+          const selection = window.getSelection()
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          cell.focus()
+          requestAnimationFrame(() => {
+            try {
+              const span = document.createElement('span')
+              span.style.fontSize = `${newSize}px`
+              const textContent = cell.textContent || ''
+              if (textContent) {
+                span.textContent = textContent
+                range.deleteContents()
+                range.insertNode(span)
+              } else {
+                cell.style.fontSize = `${newSize}px`
+              }
+              // Trigger update by blurring and refocusing
+              setTimeout(() => {
+                cell.blur()
+                cell.focus()
+                cell.blur()
+              }, 50)
+            } catch {
+              cell.style.fontSize = `${newSize}px`
+              setTimeout(() => {
+                cell.blur()
+                cell.focus()
+                cell.blur()
+              }, 50)
+            }
+          })
+        })
+        setShowFontSizeMenu(false)
+        return
+      }
+    }
+    
+    // Check if we're in a table cell
+    const tableCell = isSelectionInTableCell()
+    if (tableCell) {
+      const cellElement = tableCell as HTMLElement
+      const selection = window.getSelection()
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0)
+        if (cellElement.contains(range.commonAncestorContainer)) {
+          // Restore focus and selection
+          cellElement.focus()
+          // Apply font size using inline style
+          if (selection.toString()) {
+            // Text is selected, wrap in span
+            try {
+              const span = document.createElement('span')
+              span.style.fontSize = `${newSize}px`
+              span.textContent = selection.toString()
+              range.deleteContents()
+              range.insertNode(span)
+              // Move cursor after the span
+              range.setStartAfter(span)
+              range.collapse(true)
+              selection.removeAllRanges()
+              selection.addRange(range)
+            } catch (e) {
+              // Fallback: use execCommand
+              cellElement.focus()
+              setTimeout(() => {
+                document.execCommand('fontSize', false, '7')
+                const fontElements = cellElement.querySelectorAll('font[size="7"]')
+                fontElements.forEach(el => {
+                  const span = document.createElement('span')
+                  span.style.fontSize = `${newSize}px`
+                  el.replaceWith(span)
+                })
+              }, 0)
+            }
+          } else {
+            // No selection, apply to cell
+            cellElement.style.fontSize = `${newSize}px`
+          }
+          setShowFontSizeMenu(false)
+          return
+        }
+      }
+    }
     // Apply font size to selected text
     editor.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
     setShowFontSizeMenu(false)
@@ -325,6 +708,115 @@ export default function Toolbar({
   const handleFontSizeChange = (delta: number) => {
     const newSize = Math.max(8, Math.min(400, fontSize + delta))
     setFontSize(newSize)
+    
+    // Check if entire table is selected
+    if (isTableNodeSelected()) {
+      const formatFn = getTableFormattingFunction()
+      if (formatFn) {
+        formatFn((cell: HTMLElement) => {
+          const range = document.createRange()
+          range.selectNodeContents(cell)
+          const selection = window.getSelection()
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          cell.focus()
+          requestAnimationFrame(() => {
+            try {
+              const span = document.createElement('span')
+              span.style.fontSize = `${newSize}px`
+              const textContent = cell.textContent || ''
+              if (textContent) {
+                span.textContent = textContent
+                range.deleteContents()
+                range.insertNode(span)
+              } else {
+                cell.style.fontSize = `${newSize}px`
+              }
+            } catch {
+              cell.style.fontSize = `${newSize}px`
+            }
+          })
+        })
+        return
+      }
+      
+      // Fallback
+      const allCells = getAllTableCells()
+      if (allCells.length > 0) {
+        allCells.forEach(cell => {
+          const range = document.createRange()
+          range.selectNodeContents(cell)
+          const selection = window.getSelection()
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          cell.focus()
+          requestAnimationFrame(() => {
+            try {
+              const span = document.createElement('span')
+              span.style.fontSize = `${newSize}px`
+              const textContent = cell.textContent || ''
+              if (textContent) {
+                span.textContent = textContent
+                range.deleteContents()
+                range.insertNode(span)
+              } else {
+                cell.style.fontSize = `${newSize}px`
+              }
+              setTimeout(() => {
+                cell.blur()
+                cell.focus()
+                cell.blur()
+              }, 50)
+            } catch {
+              cell.style.fontSize = `${newSize}px`
+              setTimeout(() => {
+                cell.blur()
+                cell.focus()
+                cell.blur()
+              }, 50)
+            }
+          })
+        })
+        return
+      }
+    }
+    
+    // Check if we're in a table cell
+    const tableCell = isSelectionInTableCell()
+    if (tableCell) {
+      const cellElement = tableCell as HTMLElement
+      const selection = window.getSelection()
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0)
+        if (cellElement.contains(range.commonAncestorContainer) && selection.toString()) {
+          cellElement.focus()
+          setTimeout(() => {
+            try {
+              const span = document.createElement('span')
+              span.style.fontSize = `${newSize}px`
+              span.textContent = selection.toString()
+              range.deleteContents()
+              range.insertNode(span)
+              range.setStartAfter(span)
+              range.collapse(true)
+              selection.removeAllRanges()
+              selection.addRange(range)
+            } catch {
+              document.execCommand('fontSize', false, '7')
+              const fontElements = cellElement.querySelectorAll('font[size="7"]')
+              fontElements.forEach(el => {
+                const span = document.createElement('span')
+                span.style.fontSize = `${newSize}px`
+                el.replaceWith(span)
+              })
+            }
+          }, 0)
+          return
+        }
+      }
+      cellElement.style.fontSize = `${newSize}px`
+      return
+    }
     // Apply font size to selected text using TextStyle extension
     editor.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
   }
@@ -336,9 +828,27 @@ export default function Toolbar({
 
   const handleLinkSubmit = (): void => {
     if (!editor) return
-    if (linkUrl.trim()) {
-      editor.chain().focus().extendMarkRange('link').setLink({ href: linkUrl.trim() }).run()
+    if (!linkUrl.trim()) {
+      setShowLinkDialog(false)
+      setLinkUrl('')
+      return
     }
+    
+    const url = linkUrl.trim()
+    const { from, to } = editor.state.selection
+    
+    // If text is selected, apply link to selected text
+    if (from !== to) {
+      editor.chain().focus().setLink({ href: url }).run()
+    } else {
+      // No text selected - insert URL as clickable link
+      // Use insertContent with HTML to create a link directly
+      editor.chain()
+        .focus()
+        .insertContent(`<a href="${url}">${url}</a>`)
+        .run()
+    }
+    
     setShowLinkDialog(false)
     setLinkUrl('')
   }
@@ -351,6 +861,51 @@ export default function Toolbar({
   const handleInsertImage = () => {
     fileInputRef.current?.click()
   }
+
+  const handleInsertGraph = (graphType: 'table' | 'column' | 'line' | 'pie') => {
+    if (!editor) return
+    
+    if (graphType === 'table') {
+      // Insert a 3x3 table using TableExtension
+      const tableHtml = `<table style="border-collapse: collapse; width: 100%; margin: 16px 0;">
+        <thead>
+          <tr>
+            <th style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px; text-align: left; background-color: ${theme === 'dark' ? '#2a2a2a' : '#f5f5f5'};">Header 1</th>
+            <th style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px; text-align: left; background-color: ${theme === 'dark' ? '#2a2a2a' : '#f5f5f5'};">Header 2</th>
+            <th style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px; text-align: left; background-color: ${theme === 'dark' ? '#2a2a2a' : '#f5f5f5'};">Header 3</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px;">Cell 1</td>
+            <td style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px;">Cell 2</td>
+            <td style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px;">Cell 3</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px;">Cell 4</td>
+            <td style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px;">Cell 5</td>
+            <td style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px;">Cell 6</td>
+          </tr>
+        </tbody>
+      </table>`
+      // @ts-ignore - TableExtension command
+      editor.chain().focus().insertTableBlock(tableHtml).run()
+    } else {
+      // Insert chart using ChartExtension
+      const chartData = {
+        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May'],
+        datasets: [{
+          label: 'Data',
+          values: [10, 20, 15, 25, 30]
+        }]
+      }
+      // @ts-ignore - ChartExtension command
+      editor.chain().focus().setChart(graphType, chartData, '').run()
+    }
+    
+    setShowGraphMenu(false)
+  }
+
 
   const handleImageFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -608,7 +1163,7 @@ export default function Toolbar({
         {showStyleMenu && (() => {
           const rect = styleMenuRef.current?.getBoundingClientRect()
           return (
-            <div style={{
+            <div ref={styleDropdownRef} style={{
               position: 'fixed',
               top: rect ? `${rect.bottom + 4}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
@@ -617,7 +1172,8 @@ export default function Toolbar({
               borderRadius: '12px',
               boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
               zIndex: 10010,
-              minWidth: '200px'
+              minWidth: '170px',
+              maxWidth: '170px'
             }}>
             {styles.map((style) => {
               const isActive = isStyleActive(style.value)
@@ -699,15 +1255,15 @@ export default function Toolbar({
           onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
           onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'left' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap', flex: 1, textAlign: 'left' }}>
             {getCurrentFontFamily()}
           </span>
-          <ArrowDropDownIcon style={{ fontSize: '20px', marginLeft: '4px', flexShrink: 0 }} />
+          <ArrowDropDownIcon style={{ fontSize: '20px', marginLeft: '2px', flexShrink: 0 }} />
         </button>
         {showFontMenu && (() => {
           const rect = fontMenuRef.current?.getBoundingClientRect()
           return (
-            <div style={{
+            <div ref={fontDropdownRef} style={{
               position: 'fixed',
               top: rect ? `${rect.bottom + 4}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
@@ -716,7 +1272,8 @@ export default function Toolbar({
               borderRadius: '12px',
               boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
               zIndex: 10010,
-              minWidth: '150px',
+              minWidth: '170px',
+              maxWidth: '170px',
               maxHeight: '300px',
               overflowY: 'auto'
             }}>
@@ -817,7 +1374,7 @@ export default function Toolbar({
           const rect = fontSizeMenuRef.current?.getBoundingClientRect()
           const fontSizes = [8, 9, 10, 11, 12, 14, 18, 24, 30, 36, 48, 60, 72, 96]
           return (
-            <div style={{
+            <div ref={fontSizeDropdownRef} style={{
               position: 'fixed',
               top: rect ? `${rect.bottom + 4}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
@@ -891,9 +1448,13 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          editor.chain().focus().toggleBold().run()
+          if (isTableNodeSelected() || isSelectionInTableCell()) {
+            applyTableCellFormatting('bold')
+          } else {
+            editor.chain().focus().toggleBold().run()
+          }
         }}
-        style={editor.isActive('bold') ? activeButtonStyle : buttonStyle}
+        style={editor.isActive('bold') || (isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('bold') ? activeButtonStyle : buttonStyle}
         title="Bold"
         onMouseEnter={(e) => {
           if (!editor.isActive('bold')) {
@@ -911,9 +1472,13 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          editor.chain().focus().toggleItalic().run()
+          if (isTableNodeSelected() || isSelectionInTableCell()) {
+            applyTableCellFormatting('italic')
+          } else {
+            editor.chain().focus().toggleItalic().run()
+          }
         }}
-        style={editor.isActive('italic') ? activeButtonStyle : buttonStyle}
+        style={editor.isActive('italic') || ((isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('italic')) ? activeButtonStyle : buttonStyle}
         title="Italic"
         onMouseEnter={(e) => {
           if (!editor.isActive('italic')) {
@@ -931,9 +1496,13 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          editor.chain().focus().toggleUnderline().run()
+          if (isTableNodeSelected() || isSelectionInTableCell()) {
+            applyTableCellFormatting('underline')
+          } else {
+            editor.chain().focus().toggleUnderline().run()
+          }
         }}
-        style={editor.isActive('underline') ? activeButtonStyle : buttonStyle}
+        style={editor.isActive('underline') || ((isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('underline')) ? activeButtonStyle : buttonStyle}
         title="Underline"
         onMouseEnter={(e) => {
           if (!editor.isActive('underline')) {
@@ -976,7 +1545,7 @@ export default function Toolbar({
         {showColorMenu && (() => {
           const rect = colorMenuRef.current?.getBoundingClientRect()
           return (
-            <div style={{
+            <div ref={colorDropdownRef} style={{
               position: 'fixed',
               top: rect ? `${rect.bottom + 4}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
@@ -1077,7 +1646,7 @@ export default function Toolbar({
         {showHighlightMenu && (() => {
           const rect = highlightMenuRef.current?.getBoundingClientRect()
           return (
-            <div style={{
+            <div ref={highlightDropdownRef} style={{
               position: 'fixed',
               top: rect ? `${rect.bottom + 4}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
@@ -1213,6 +1782,87 @@ export default function Toolbar({
         <ImageIcon style={{ fontSize: '20px' }} />
       </button>
 
+      {/* Insert Graph */}
+      <div ref={graphMenuRef} style={{ position: 'relative' }}>
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            const newState = !showGraphMenu
+            closeAllMenusExcept(newState ? 'graph' : null)
+            setShowGraphMenu(newState)
+          }}
+          style={showGraphMenu ? activeButtonStyle : buttonStyle}
+          title="Insert graph"
+          onMouseEnter={(e) => {
+            if (!showGraphMenu) {
+              e.currentTarget.style.backgroundColor = toolbarHoverBg
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!showGraphMenu) {
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }
+          }}
+        >
+          <BarChartIcon style={{ fontSize: '20px' }} />
+        </button>
+        {showGraphMenu && (() => {
+          const rect = graphMenuRef.current?.getBoundingClientRect()
+          const graphTypes = [
+            { label: 'Table', value: 'table' as const, icon: TableChartIcon },
+            { label: 'Column', value: 'column' as const, icon: BarChartIcon },
+            { label: 'Line', value: 'line' as const, icon: TimelineIcon },
+            { label: 'Pie', value: 'pie' as const, icon: PieChartIcon },
+          ]
+          return (
+            <div ref={graphDropdownRef} style={{
+              position: 'fixed',
+              top: rect ? `${rect.bottom + 4}px` : '100%',
+              left: rect ? `${rect.left}px` : 0,
+              backgroundColor: dropdownBg,
+              border: `1px solid ${dropdownBorder}`,
+              borderRadius: '12px',
+              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              zIndex: 10010,
+              minWidth: '150px',
+              maxWidth: '150px'
+            }}>
+            {graphTypes.map((graphType) => {
+              const IconComponent = graphType.icon
+              return (
+                <div
+                  key={graphType.value}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    handleInsertGraph(graphType.value)
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    color: dropdownTextColor,
+                    backgroundColor: 'transparent',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = dropdownHoverBg
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent'
+                  }}
+                >
+                  <IconComponent style={{ fontSize: '18px', color: dropdownTextColor }} />
+                  <span>{graphType.label}</span>
+                </div>
+              )
+            })}
+            </div>
+          )
+        })()}
+      </div>
+
       {/* Insert Math Formula */}
       <button
         onMouseDown={(e) => {
@@ -1249,7 +1899,7 @@ export default function Toolbar({
         {showAlignMenu && (() => {
           const rect = alignMenuRef.current?.getBoundingClientRect()
           return (
-            <div style={{
+            <div ref={alignDropdownRef} style={{
               position: 'fixed',
               top: rect ? `${rect.bottom + 4}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
@@ -1368,7 +2018,7 @@ export default function Toolbar({
         {showSpacingMenu && (() => {
           const rect = spacingMenuRef.current?.getBoundingClientRect()
           return (
-            <div style={{
+            <div ref={spacingDropdownRef} style={{
               position: 'fixed',
               top: rect ? `${rect.bottom + 4}px` : '100%',
               left: rect ? `${rect.left}px` : 0,

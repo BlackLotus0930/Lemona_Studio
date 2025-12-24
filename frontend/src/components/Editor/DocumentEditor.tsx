@@ -180,18 +180,47 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   useEffect(() => {
     if (!editor) return
 
-    const updatePopupPosition = () => {
-      if (!selectedRange || !scrollContainerRef.current) return
+    const updatePopupPosition = (range?: { from: number; to: number }) => {
+      const rangeToUse = range || selectedRange
+      if (!rangeToUse || !scrollContainerRef.current || !editor) return
       
-      const { to } = selectedRange
-      const endCoords = editor.view.coordsAtPos(to)
-      
-      if (endCoords) {
-        setPopupPosition({
-          x: endCoords.right + 8, // 8px after the end of selection
-          y: endCoords.top - 4, // Slightly above the selection line
-        })
-      }
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        if (!rangeToUse || !scrollContainerRef.current || !editor) return
+        
+        const { from, to } = rangeToUse
+        
+        // Try to get the DOM selection first (more reliable for paragraph selections)
+        const domSelection = window.getSelection()
+        if (domSelection && domSelection.rangeCount > 0) {
+          const domRange = domSelection.getRangeAt(0)
+          const rect = domRange.getBoundingClientRect()
+          
+          if (rect.width > 0 || rect.height > 0) {
+            // Use the right edge and top of the selection bounding box
+            const x = rect.right + 8 // 8px after the end of selection
+            const y = rect.top - 4 // Slightly above the selection line
+            
+            setPopupPosition({ x, y })
+            return
+          }
+        }
+        
+        // Fallback to ProseMirror coordinates if DOM selection doesn't work
+        const startCoords = editor.view.coordsAtPos(from)
+        const endCoords = editor.view.coordsAtPos(to)
+        
+        if (startCoords && endCoords) {
+          // Use the rightmost X coordinate (from end position)
+          const x = endCoords.right + 8 // 8px after the end of selection
+          
+          // Use the topmost Y coordinate (from start position) for better positioning
+          // This ensures the popup appears at the top-right of the selection, not at the bottom
+          const y = startCoords.top - 4 // Slightly above the selection line
+          
+          setPopupPosition({ x, y })
+        }
+      })
     }
 
     const handleSelectionUpdate = () => {
@@ -212,9 +241,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
 
       const selected = editor.state.doc.textBetween(from, to)
       if (selected.trim().length > 0) {
+        const range = { from, to }
         setSelectedText(selected)
-        setSelectedRange({ from, to })
-        updatePopupPosition()
+        setSelectedRange(range)
+        // Update position immediately with the new range
+        updatePopupPosition(range)
         setShowRephrasePopup(true)
       } else {
         setSelectedText('')
@@ -239,7 +270,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     // Update popup position on scroll
     const handleScroll = () => {
       if (showRephrasePopup && selectedRange) {
-        updatePopupPosition()
+        updatePopupPosition(selectedRange)
       }
     }
 
@@ -1847,4 +1878,5 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
 DocumentEditor.displayName = 'DocumentEditor'
 
 export default DocumentEditor
+
 
