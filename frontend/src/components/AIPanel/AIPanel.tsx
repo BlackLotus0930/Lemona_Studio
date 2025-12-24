@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Document } from '@shared/types'
 import ChatInterface from './ChatInterface'
+import ChatHistoryDropdown from './ChatHistoryDropdown'
 import { chatApi } from '../../services/api'
 import { useTheme } from '../../contexts/ThemeContext'
 // @ts-ignore
@@ -66,12 +67,17 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
   const chatsRef = useRef<Chat[]>([]) // Track current chats to preserve new chats when switching files
   const [isStreaming, setIsStreaming] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
+  const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
   const [hoveredChatId, setHoveredChatId] = useState<string | null>(null)
   const [chatInputText, setChatInputText] = useState<string>('')
+  const [draggedChatId, setDraggedChatId] = useState<string | null>(null)
+  const [dropTargetChatId, setDropTargetChatId] = useState<string | null>(null)
+  const [dropPosition, setDropPosition] = useState<'left' | 'right' | null>(null)
   const headerScrollRef = useRef<HTMLDivElement>(null)
   const chatTabsScrollRef = useRef<HTMLDivElement>(null) // Ref for chat tabs scrollable container
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const historyButtonRef = useRef<HTMLButtonElement>(null)
   
   // Listen for "Add to Chat" events from editor
   useEffect(() => {
@@ -301,12 +307,9 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     if (chats.length === 1) {
       // If it's the last chat, create a new one
       handleNewChat()
-      // Delete the old chat from backend
-      if (document?.id) {
-        chatApi.deleteChat(document.id, chatId).catch(console.error)
-      }
+      // Don't delete from backend - keep it in history so it can be reopened
     } else {
-      // Remove the chat
+      // Remove the chat from tabs (but keep it in backend history)
       const newChats = chats.filter(c => c.id !== chatId)
       setChats(newChats)
       
@@ -322,10 +325,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         }
       }
       
-      // Delete from backend
-      if (document?.id) {
-        chatApi.deleteChat(document.id, chatId).catch(console.error)
-      }
+      // Don't delete from backend - keep it in history so it can be reopened
     }
   }
 
@@ -371,6 +371,76 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
       saveActiveChatId(document, defaultChatId) // Persist when clearing all chats
     }
     setShowMenu(false)
+  }
+
+  const handleRenameChat = (chatId: string, newName: string) => {
+    setChats(prevChats => 
+      prevChats.map(chat => 
+        chat.id === chatId ? { ...chat, name: newName } : chat
+      )
+    )
+  }
+
+  // Drag and drop handlers for chat tabs
+  const handleChatDragStart = (e: React.DragEvent, chatId: string) => {
+    setDraggedChatId(chatId)
+    setDropTargetChatId(null)
+    setDropPosition(null)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', chatId)
+  }
+
+  const handleChatDragOver = (e: React.DragEvent, targetChatId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    
+    if (draggedChatId && draggedChatId !== targetChatId) {
+      // Calculate drop position based on mouse position within the tab
+      const rect = e.currentTarget.getBoundingClientRect()
+      const mouseX = e.clientX - rect.left
+      const tabWidth = rect.width
+      const dropSide = mouseX < tabWidth / 2 ? 'left' : 'right'
+      
+      setDropTargetChatId(targetChatId)
+      setDropPosition(dropSide)
+    }
+  }
+
+  const handleChatDragLeave = () => {
+    setDropTargetChatId(null)
+    setDropPosition(null)
+  }
+
+  const handleChatDrop = (e: React.DragEvent, targetChatId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    if (draggedChatId && draggedChatId !== targetChatId && dropPosition) {
+      const draggedIndex = chats.findIndex(c => c.id === draggedChatId)
+      const targetIndex = chats.findIndex(c => c.id === targetChatId)
+      
+      if (draggedIndex !== -1 && targetIndex !== -1) {
+        const newChats = [...chats]
+        const [draggedChat] = newChats.splice(draggedIndex, 1)
+        
+        // Insert at the correct position
+        const insertIndex = dropPosition === 'left' ? targetIndex : targetIndex + 1
+        newChats.splice(insertIndex, 0, draggedChat)
+        
+        setChats(newChats)
+      }
+    }
+    
+    setDraggedChatId(null)
+    setDropTargetChatId(null)
+    setDropPosition(null)
+  }
+
+  const handleChatDragEnd = () => {
+    setDraggedChatId(null)
+    setDropTargetChatId(null)
+    setDropPosition(null)
   }
 
   // Close menu when clicking outside
@@ -427,18 +497,39 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
           } as React.CSSProperties}
           className="chat-tabs-scrollable"
         >
-          {chats.map((chat) => (
+          {chats.map((chat) => {
+            const isDragging = draggedChatId === chat.id
+            const isDropTarget = dropTargetChatId === chat.id
+            const showDropIndicator = isDropTarget && dropPosition
+            
+            return (
             <div
               key={chat.id}
+              draggable
+              onDragStart={(e) => handleChatDragStart(e, chat.id)}
+              onDragOver={(e) => handleChatDragOver(e, chat.id)}
+              onDragLeave={handleChatDragLeave}
+              onDrop={(e) => handleChatDrop(e, chat.id)}
+              onDragEnd={handleChatDragEnd}
               onClick={() => {
-                setActiveChatId(chat.id)
-                previousActiveChatIdRef.current = chat.id
-                if (document) {
-                  saveActiveChatId(document, chat.id) // Persist when switching chats
+                if (!isDragging) {
+                  setActiveChatId(chat.id)
+                  previousActiveChatIdRef.current = chat.id
+                  if (document) {
+                    saveActiveChatId(document, chat.id) // Persist when switching chats
+                  }
                 }
               }}
-              onMouseEnter={() => setHoveredChatId(chat.id)}
-              onMouseLeave={() => setHoveredChatId(null)}
+              onMouseEnter={() => {
+                if (!isDragging) {
+                  setHoveredChatId(chat.id)
+                }
+              }}
+              onMouseLeave={() => {
+                if (!isDragging) {
+                  setHoveredChatId(null)
+                }
+              }}
               style={{
                 paddingTop: '4px',
                 paddingBottom: '6px',
@@ -451,15 +542,46 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                 border: 'none',
                 display: 'flex',
                 alignItems: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
+                cursor: isDragging ? 'grabbing' : 'grab',
+                transition: isDragging ? 'none' : 'all 0.2s ease',
                 minWidth: '60px',
                 maxWidth: '160px',
                 flexShrink: 0, // Don't shrink, allow horizontal scroll instead
                 flexGrow: 0,
-                position: 'relative'
+                position: 'relative',
+                opacity: isDragging ? 0.5 : 1,
+                userSelect: 'none'
               }}
             >
+              {/* Drop indicator line */}
+              {showDropIndicator && dropPosition === 'left' && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: '2px',
+                    backgroundColor: theme === 'dark' ? '#999999' : '#c0c0c0',
+                    zIndex: 1000,
+                    pointerEvents: 'none'
+                  }}
+                />
+              )}
+              {showDropIndicator && dropPosition === 'right' && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: '2px',
+                    backgroundColor: theme === 'dark' ? '#999999' : '#c0c0c0',
+                    zIndex: 1000,
+                    pointerEvents: 'none'
+                  }}
+                />
+              )}
               <span style={{
                 fontSize: '13px',
                 fontWeight: 500,
@@ -473,9 +595,13 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               }}>
                 {chat.name}
               </span>
-              {hoveredChatId === chat.id && (
+              {hoveredChatId === chat.id && !isDragging && (
                 <button
-                  onClick={(e) => handleCloseChat(chat.id, e)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleCloseChat(chat.id, e)
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
                   style={{
                     position: 'absolute',
                     right: '6px',
@@ -493,7 +619,8 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                     width: '18px',
                     height: '18px',
                     transition: 'background-color 0.15s',
-                    backdropFilter: 'blur(4px)'
+                    backdropFilter: 'blur(4px)',
+                    zIndex: 5
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#232323' : '#e8eaed'
@@ -509,7 +636,8 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                 </button>
               )}
             </div>
-          ))}
+            )
+          })}
         </div>
         
         {/* Action Buttons - Always visible on the right */}
@@ -540,14 +668,16 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
           </button>
           
           <button
+            ref={historyButtonRef}
             onClick={() => {
-              // Show history
+              setShowHistoryDropdown(!showHistoryDropdown)
+              setShowMenu(false) // Close other menu if open
             }}
             style={{
               padding: '4px 8px 4px 6px',
               border: 'none',
               borderRadius: '4px',
-              backgroundColor: 'transparent',
+              backgroundColor: showHistoryDropdown ? buttonHoverBg : 'transparent',
               color: iconColor,
               cursor: 'pointer',
               fontSize: '20px',
@@ -558,8 +688,8 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               minWidth: '28px',
               minHeight: '28px'
             }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = buttonHoverBg}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            onMouseEnter={(e) => !showHistoryDropdown && (e.currentTarget.style.backgroundColor = buttonHoverBg)}
+            onMouseLeave={(e) => !showHistoryDropdown && (e.currentTarget.style.backgroundColor = 'transparent')}
             title="History"
           >
             <HistoryIcon style={{ fontSize: '16px' }} />
@@ -723,6 +853,63 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
           onInputSet={() => setChatInputText('')}
         />
       </div>
+
+      {/* Chat History Dropdown */}
+      {showHistoryDropdown && (
+        <ChatHistoryDropdown
+          documentId={document?.id}
+          chats={chats}
+          isOpen={showHistoryDropdown}
+          onClose={() => setShowHistoryDropdown(false)}
+          onSelectChat={async (chatId) => {
+            // Check if chat is already in tabs
+            const chatExists = chats.some(c => c.id === chatId)
+            
+            if (!chatExists && document?.id) {
+              // Load the chat from backend and add it to tabs
+              try {
+                const messages = await chatApi.getChat(document.id, chatId)
+                const messageArray = Array.isArray(messages) ? messages : []
+                const firstUserMessage = messageArray.find((msg: any) => msg.role === 'user')
+                const chatName = firstUserMessage?.content 
+                  ? generateChatName(firstUserMessage.content)
+                  : `Chat ${chats.length + 1}`
+                
+                const loadedChat: Chat = {
+                  id: chatId,
+                  name: chatName,
+                  messages: messageArray
+                }
+                
+                setChats([...chats, loadedChat])
+              } catch (error) {
+                console.error('Failed to load chat:', error)
+              }
+            }
+            
+            setActiveChatId(chatId)
+            previousActiveChatIdRef.current = chatId
+            if (document) {
+              saveActiveChatId(document, chatId)
+            }
+          }}
+          onDeleteChat={async (chatId) => {
+            // Permanently delete from backend
+            if (document?.id) {
+              await chatApi.deleteChat(document.id, chatId).catch(console.error)
+            }
+            
+            // Remove from tabs if it's open
+            const chatExists = chats.some(c => c.id === chatId)
+            if (chatExists) {
+              handleCloseChat(chatId)
+            }
+          }}
+          onRenameChat={handleRenameChat}
+          activeChatId={activeChatId}
+          anchorElement={historyButtonRef.current}
+        />
+      )}
     </div>
   )
 }

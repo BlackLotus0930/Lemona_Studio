@@ -267,40 +267,56 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!editor || typeof getPos !== 'function') return
     
-    const tablePos = getPos()
-    if (tablePos === undefined || tablePos < 0) return
+    const target = e.target as HTMLElement
     
-    dragStartRef.current = { x: e.clientX, y: e.clientY }
+    // Check if click is on the table element itself or its children
+    const isClickOnTable = target.closest('table') !== null
+    const isClickOnTableCell = target.closest('[data-table-cell]') !== null
     
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (!dragStartRef.current) return
+    // If clicking in the padding area (outside the table), prevent text selection
+    if (!isClickOnTable && !isClickOnTableCell) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    
+    // Only handle drag selection if clicking on table borders or outside cells
+    if (isClickOnTable && !isClickOnTableCell) {
+      const tablePos = getPos()
+      if (tablePos === undefined || tablePos < 0) return
       
-      const deltaX = Math.abs(moveEvent.clientX - dragStartRef.current.x)
-      const deltaY = Math.abs(moveEvent.clientY - dragStartRef.current.y)
+      dragStartRef.current = { x: e.clientX, y: e.clientY }
       
-      // If moved more than 3px, consider it a drag
-      if (deltaX > 3 || deltaY > 3) {
-        // Select the entire table node
-        try {
-          const tr = editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, tablePos))
-          editor.view.dispatch(tr)
-        } catch (error) {
-          console.error('Error selecting table node:', error)
+      const handleMouseMove = (moveEvent: MouseEvent) => {
+        if (!dragStartRef.current) return
+        
+        const deltaX = Math.abs(moveEvent.clientX - dragStartRef.current.x)
+        const deltaY = Math.abs(moveEvent.clientY - dragStartRef.current.y)
+        
+        // If moved more than 3px, consider it a drag
+        if (deltaX > 3 || deltaY > 3) {
+          // Select the entire table node
+          try {
+            const tr = editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, tablePos))
+            editor.view.dispatch(tr)
+          } catch (error) {
+            console.error('Error selecting table node:', error)
+          }
+          dragStartRef.current = null
+          document.removeEventListener('mousemove', handleMouseMove)
+          document.removeEventListener('mouseup', handleMouseUp)
         }
+      }
+      
+      const handleMouseUp = () => {
         dragStartRef.current = null
         document.removeEventListener('mousemove', handleMouseMove)
         document.removeEventListener('mouseup', handleMouseUp)
       }
+      
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
     }
-    
-    const handleMouseUp = () => {
-      dragStartRef.current = null
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-    }
-    
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
   }
   
   // Expose formatting function via ref for toolbar access
@@ -318,7 +334,7 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
 
   return (
     <NodeViewWrapper
-      style={{ margin: '16px 0', position: 'relative', width: '100%', maxWidth: '100%', overflowX: 'visible', overflowY: 'visible', boxSizing: 'border-box', paddingTop: '40px', paddingLeft: '40px', paddingRight: '50px' }}
+      style={{ margin: '16px 0', position: 'relative', width: '100%', maxWidth: '100%', overflowX: 'visible', overflowY: 'visible', boxSizing: 'border-box', paddingTop: '40px', paddingLeft: '40px', paddingRight: '50px', userSelect: 'none' }}
       onMouseEnter={() => {
         setIsHovered(true)
         if (buttonTimeoutRef.current) {
@@ -516,7 +532,7 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
         </div>
       )}
       
-      <div style={{ position: 'relative', display: 'block', paddingRight: '40px', width: '100%', maxWidth: '100%', overflowX: 'hidden', boxSizing: 'border-box' }}>
+      <div style={{ position: 'relative', display: 'block', paddingRight: '40px', width: '100%', maxWidth: '100%', overflowX: 'hidden', boxSizing: 'border-box', userSelect: 'text' }}>
         <table
           ref={tableRef}
           onMouseDown={(e) => {
