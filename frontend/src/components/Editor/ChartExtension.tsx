@@ -167,9 +167,10 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
 
     let svg = `<defs>
       <style>
-        .chart-text { font-family: ${fontFamily}; font-size: ${fontSize}; fill: ${textColor}; }
+        .chart-text { font-family: ${fontFamily}; font-size: ${fontSize}; fill: ${textColor}; user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; }
         .chart-axis { stroke: ${axisColor}; stroke-width: 1; }
         .chart-grid { stroke: ${gridColor}; stroke-width: 1; stroke-dasharray: 2,2; }
+        svg { user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; }
       </style>
     </defs>`
 
@@ -328,14 +329,40 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
     }
   }, [isClicked, isEditing])
 
+  // Prevent text selection on chart
+  useEffect(() => {
+    if (!isEditing && containerRef.current) {
+      const handleSelectStart = (e: Event) => {
+        e.preventDefault()
+      }
+      const element = containerRef.current
+      element.addEventListener('selectstart', handleSelectStart)
+      return () => {
+        element.removeEventListener('selectstart', handleSelectStart)
+      }
+    }
+  }, [isEditing])
+
   return (
     <NodeViewWrapper style={{ margin: '16px 0', position: 'relative' }}>
       <div
         ref={containerRef}
         onClick={(e) => {
           if (!isEditing) {
+            e.preventDefault()
             e.stopPropagation()
             setIsClicked(true)
+          }
+        }}
+        onMouseDown={(e) => {
+          if (!isEditing) {
+            e.preventDefault()
+            e.stopPropagation()
+            // Clear any existing selection
+            const selection = window.getSelection()
+            if (selection) {
+              selection.removeAllRanges()
+            }
           }
         }}
         style={{
@@ -346,6 +373,10 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
           flexDirection: 'column',
           alignItems: 'center',
           width: '100%',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          MozUserSelect: 'none',
+          msUserSelect: 'none',
         }}
         tabIndex={0}
       >
@@ -630,15 +661,31 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
 
           </div>
         ) : (
-          <div style={{ 
-            overflowX: 'hidden',
-            overflowY: 'visible', 
-            width: '100%',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            marginTop: chartName ? '0' : '0',
-          }} dangerouslySetInnerHTML={{ __html: renderChartSVG(chartType, chartData) }} />
+          <div 
+            style={{ 
+              overflowX: 'hidden',
+              overflowY: 'visible', 
+              width: '100%',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              marginTop: chartName ? '0' : '0',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              MozUserSelect: 'none',
+              msUserSelect: 'none',
+            }}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              // Clear any existing selection
+              const selection = window.getSelection()
+              if (selection) {
+                selection.removeAllRanges()
+              }
+            }}
+            dangerouslySetInnerHTML={{ __html: renderChartSVG(chartType, chartData) }} 
+          />
         )}
       </div>
     </NodeViewWrapper>

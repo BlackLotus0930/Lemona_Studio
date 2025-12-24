@@ -152,10 +152,19 @@ export const documentService = {
 
   async delete(id: string): Promise<boolean> {
     try {
+      // Get document first to check if it exists
+      const document = await this.getById(id)
+      if (!document) {
+        // Document doesn't exist - consider it already deleted
+        return true
+      }
+      
       const filePath = getDocumentPath(id)
       await fs.unlink(filePath)
+      console.log(`[Backend documentService] Deleted document ${id} and its PDF text`)
       return true
     } catch (error) {
+      console.error(`[Backend documentService] Failed to delete document ${id}:`, error)
       return false
     }
   },

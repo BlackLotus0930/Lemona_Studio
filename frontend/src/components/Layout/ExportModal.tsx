@@ -64,6 +64,36 @@ export default function ExportModal({
     }
   }, [isOpen, projectName])
 
+  // Close dropdown when clicking outside of it
+  useEffect(() => {
+    const handleClickOutsideDropdown = (event: MouseEvent) => {
+      if (!showFileDropdown) return
+      
+      const target = event.target as Node
+      
+      // Check if click is inside the dropdown or the button that opens it
+      const isInsideDropdown = fileDropdownRef.current?.contains(target) ||
+                              fileSelectButtonRef.current?.contains(target)
+      
+      // Close dropdown if click is outside
+      if (!isInsideDropdown) {
+        setShowFileDropdown(false)
+      }
+    }
+
+    if (showFileDropdown) {
+      // Use a small delay to avoid closing immediately when opening
+      const timeoutId = setTimeout(() => {
+        document.addEventListener('mousedown', handleClickOutsideDropdown)
+      }, 100)
+      
+      return () => {
+        clearTimeout(timeoutId)
+        document.removeEventListener('mousedown', handleClickOutsideDropdown)
+      }
+    }
+  }, [showFileDropdown])
+
   // Close menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

@@ -19,9 +19,6 @@ const projectRoot = isCompiled
   : path.resolve(__dirname, '../../../..')
 const fontsDir = path.join(projectRoot, 'frontend', 'src', 'assets', 'fonts')
 
-console.log(`[Export Service] Fonts directory: ${fontsDir}`)
-console.log(`[Export Service] Fonts directory exists: ${existsSync(fontsDir)}`)
-
 // Font mapping: Editor font name -> Font file name
 const FONT_FILES: Record<string, { regular: string; italic?: string; bold?: string; boldItalic?: string }> = {
   'Noto Sans SC': { regular: 'NotoSansSC-VariableFont_wght.ttf' },
@@ -93,11 +90,18 @@ function generateFontFaceCSS(): string {
   return css
 }
 
+
 // Convert TipTap JSON to HTML with inline styles (WYSIWYG)
 function tipTapToHTML(content: any): string {
-  if (!content || !content.content) return ''
+  if (!content || !content.content) {
+    return ''
+  }
 
   function renderNode(node: any): string {
+    if (!node || !node.type) {
+      return ''
+    }
+    
     if (node.type === 'text') {
       let text = node.text || ''
       let style = ''
@@ -194,6 +198,74 @@ function tipTapToHTML(content: any): string {
       return `<li style="margin: 0.25em 0; padding-left: 0.25em;">${content}</li>`
     }
 
+    if (node.type === 'image') {
+      let src = node.attrs?.src || ''
+      const alt = node.attrs?.alt || ''
+      const width = node.attrs?.width
+      const height = node.attrs?.height
+      
+      // Check image source type
+      const srcType = src.startsWith('data:') ? 'data-url' :
+                     src.startsWith('blob:') ? 'blob-url' :
+                     src.startsWith('http://') || src.startsWith('https://') ? 'http-url' :
+                     src.startsWith('file://') ? 'file-url' : 'unknown'
+      
+      // Handle blob URLs - these won't work in Puppeteer
+      // Keep the blob URL but it likely won't load - this is a limitation
+      
+      // Build style attributes for responsive image display
+      const imgStyles: string[] = []
+      if (width) imgStyles.push(`width: ${width}px`)
+      if (height) imgStyles.push(`height: ${height}px`)
+      imgStyles.push('max-width: 100%')
+      imgStyles.push('height: auto')
+      imgStyles.push('display: block')
+      imgStyles.push('margin: 1em auto')
+      
+      const styleAttr = imgStyles.length > 0 ? ` style="${imgStyles.join('; ')}"` : ''
+      const widthAttr = width ? ` width="${width}"` : ''
+      const heightAttr = height ? ` height="${height}"` : ''
+      const altAttr = alt ? ` alt="${escapeHTML(alt)}"` : ''
+      
+      // Add data attribute to track image loading
+      const dataTypeAttr = ` data-img-type="${srcType}"`
+      
+      return `<img src="${src}"${altAttr}${widthAttr}${heightAttr}${styleAttr}${dataTypeAttr} />`
+    }
+
+    if (node.type === 'chart') {
+      const chartType = node.attrs?.chartType || 'column'
+      const chartName = node.attrs?.chartName || ''
+      const chartDataStr = node.attrs?.chartData || ''
+      
+      let chartData: any = {
+        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May'],
+        datasets: [{ label: 'Data', values: [10, 20, 15, 25, 30] }]
+      }
+      
+      try {
+        if (chartDataStr) {
+          chartData = JSON.parse(chartDataStr)
+        }
+      } catch (e) {
+        // Use default data if parsing fails
+      }
+      
+      const svg = renderChartSVG(chartType, chartData)
+      const titleHTML = chartName ? `<div style="font-size: 18px; font-weight: bold; margin-bottom: 8px; text-align: center;">${escapeHTML(chartName)}</div>` : ''
+      
+      return `<div style="margin: 1em 0; display: flex; flex-direction: column; align-items: center;">${titleHTML}${svg}</div>`
+    }
+
+    if (node.type === 'tableBlock') {
+      const html = node.attrs?.html || ''
+      if (html) {
+        // Return the stored HTML directly (it's already sanitized when stored)
+        return `<div style="margin: 1em 0;">${html}</div>`
+      }
+      return ''
+    }
+
     if (node.content && Array.isArray(node.content)) {
       return node.content.map(renderNode).join('')
     }
@@ -216,6 +288,159 @@ function escapeHTML(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;')
+}
+
+// Render chart as SVG (similar to ChartExtension's renderChartSVG)
+function renderChartSVG(type: string, data: any): string {
+  const values = data.datasets[0]?.values || []
+  const labels = data.labels || []
+  const maxValue = Math.max(...values, 1)
+  
+  // Calculate nice round numbers for Y-axis
+  const niceMax = Math.ceil(maxValue / 10) * 10 || 10
+  const niceStep = niceMax / 4
+  const yTicks = [0, niceStep, niceStep * 2, niceStep * 3, niceMax]
+  
+  const width = 600
+  const height = 350
+  const leftPadding = 60
+  const rightPadding = 40
+  const topPadding = 40
+  const bottomPadding = 60
+  const chartWidth = width - leftPadding - rightPadding
+  const chartHeight = height - topPadding - bottomPadding
+  
+  // Use light theme colors for PDF export
+  const axisColor = '#cccccc'
+  const gridColor = '#e0e0e0'
+  const textColor = '#666666'
+  const strokeColor = '#1a73e8'
+  const fillColor = '#1a73e8'
+  const fontSize = '12px'
+  const fontFamily = 'Arial, sans-serif'
+
+  let svg = `<defs>
+    <style>
+      .chart-text { font-family: ${fontFamily}; font-size: ${fontSize}; fill: ${textColor}; }
+      .chart-axis { stroke: ${axisColor}; stroke-width: 1; }
+      .chart-grid { stroke: ${gridColor}; stroke-width: 1; stroke-dasharray: 2,2; }
+    </style>
+  </defs>`
+
+  // Only draw grid lines and axes for column and line charts (not pie)
+  if (type !== 'pie') {
+    // Draw grid lines and Y-axis labels
+    yTicks.forEach((tick) => {
+      const y = topPadding + chartHeight - ((tick / niceMax) * chartHeight)
+      // Grid line
+      svg += `<line x1="${leftPadding}" y1="${y}" x2="${leftPadding + chartWidth}" y2="${y}" class="chart-grid"/>`
+      // Y-axis label
+      svg += `<text x="${leftPadding - 10}" y="${y + 4}" text-anchor="end" class="chart-text">${Math.round(tick)}</text>`
+    })
+
+    // Draw X and Y axes
+    svg += `<line x1="${leftPadding}" y1="${topPadding}" x2="${leftPadding}" y2="${topPadding + chartHeight}" class="chart-axis"/>`
+    svg += `<line x1="${leftPadding}" y1="${topPadding + chartHeight}" x2="${leftPadding + chartWidth}" y2="${topPadding + chartHeight}" class="chart-axis"/>`
+  }
+
+  if (type === 'column') {
+    // Column = vertical bars
+    const barSpacing = 8
+    const barWidth = (chartWidth / values.length) - barSpacing
+    
+    // Color palette for different bars
+    const colors = [
+      '#1a73e8', '#34a853', '#fbbc04', '#ea4335',
+      '#9c27b0', '#00acc1', '#ffc107', '#607d8b',
+    ]
+
+    values.forEach((value: number, index: number) => {
+      const color = colors[index % colors.length]
+      const barLength = (value / niceMax) * chartHeight
+      
+      // Vertical bars (Column chart)
+      const x = leftPadding + (index * (chartWidth / values.length)) + (barSpacing / 2)
+      const y = topPadding + chartHeight - barLength
+      svg += `<rect x="${x}" y="${y}" width="${barWidth}" height="${barLength}" fill="${color}" rx="2"/>`
+      // Value label on top of bar
+      if (barLength > 15) {
+        svg += `<text x="${x + barWidth / 2}" y="${y - 5}" text-anchor="middle" class="chart-text">${value}</text>`
+      }
+      // X-axis label (category name)
+      const labelY = topPadding + chartHeight + 20
+      svg += `<text x="${x + barWidth / 2}" y="${labelY}" text-anchor="middle" class="chart-text">${escapeHTML(labels[index] || `Item ${index + 1}`)}</text>`
+    })
+  } else if (type === 'line') {
+    const points = values.map((value: number, index: number) => {
+      const x = leftPadding + (index * (chartWidth / (values.length - 1 || 1)))
+      const y = topPadding + chartHeight - ((value / niceMax) * chartHeight)
+      return { x, y, value }
+    })
+
+    // Draw line
+    const pathData = points.map((p: { x: number; y: number }, i: number) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+    svg += `<path d="${pathData}" fill="none" stroke="${strokeColor}" stroke-width="2"/>`
+
+    // Draw points and labels
+    points.forEach((point: { x: number; y: number; value: number }, index: number) => {
+      svg += `<circle cx="${point.x}" cy="${point.y}" r="4" fill="${fillColor}" stroke="#ffffff" stroke-width="2"/>`
+      // X-axis label
+      const labelY = topPadding + chartHeight + 20
+      svg += `<text x="${point.x}" y="${labelY}" text-anchor="middle" class="chart-text">${escapeHTML(labels[index] || `Item ${index + 1}`)}</text>`
+    })
+  } else if (type === 'pie') {
+    // Pie chart - no axes or grid lines, centered
+    const centerX = width / 2
+    const centerY = height / 2
+    const radius = Math.min(width, height) / 2 - 40
+    let currentAngle = -Math.PI / 2
+    const total = values.reduce((sum: number, val: number) => sum + val, 0) || 1
+
+    // Color palette for pie slices
+    const colors = [
+      '#1a73e8', '#34a853', '#fbbc04', '#ea4335',
+      '#9c27b0', '#00acc1', '#ffc107', '#607d8b',
+    ]
+
+    // Draw pie slices
+    values.forEach((value: number, index: number) => {
+      const sliceAngle = (value / total) * 2 * Math.PI
+      const x1 = centerX + radius * Math.cos(currentAngle)
+      const y1 = centerY + radius * Math.sin(currentAngle)
+      const x2 = centerX + radius * Math.cos(currentAngle + sliceAngle)
+      const y2 = centerY + radius * Math.sin(currentAngle + sliceAngle)
+      const largeArc = sliceAngle > Math.PI ? 1 : 0
+
+      const path = `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`
+      const color = colors[index % colors.length]
+
+      svg += `<path d="${path}" fill="${color}" stroke="#ffffff" stroke-width="2"/>`
+
+      // Label for pie slice
+      const labelAngle = currentAngle + sliceAngle / 2
+      const labelRadius = radius * 0.7
+      const labelX = centerX + labelRadius * Math.cos(labelAngle)
+      const labelY = centerY + labelRadius * Math.sin(labelAngle)
+      const percentage = ((value / total) * 100).toFixed(0)
+      
+      svg += `<text x="${labelX}" y="${labelY}" text-anchor="middle" font-weight="bold" fill="#ffffff" font-family="${fontFamily}" font-size="${fontSize}">${percentage}%</text>`
+
+      currentAngle += sliceAngle
+    })
+
+    // Legend for pie chart (positioned to the right, centered vertically)
+    const legendX = width - 120
+    const legendY = height / 2 - (values.length * 20) / 2
+    values.forEach((_value: number, index: number) => {
+      const color = colors[index % colors.length]
+      const legendItemY = legendY + (index * 20)
+      
+      svg += `<rect x="${legendX}" y="${legendItemY - 8}" width="12" height="12" fill="${color}"/>`
+      svg += `<text x="${legendX + 18}" y="${legendItemY}" class="chart-text">${escapeHTML(labels[index] || `Item ${index + 1}`)}</text>`
+    })
+  }
+
+  return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${svg}</svg>`
 }
 
 // Generate complete HTML document for PDF generation
@@ -341,7 +566,13 @@ export const exportService = {
   async exportToPDF(title: string, content: any): Promise<Buffer> {
     const browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox',
+        '--disable-web-security', // Allow cross-origin images
+        '--allow-file-access-from-files', // Allow local file access
+        '--disable-features=VizDisplayCompositor' // Improve compatibility
+      ]
     })
 
     try {
@@ -351,8 +582,46 @@ export const exportService = {
       const bodyHTML = tipTapToHTML(content)
       const html = generateHTMLDocument(bodyHTML)
       
-      // Set content
-      await page.setContent(html, { waitUntil: 'networkidle0' })
+      // Set content with timeout
+      await page.setContent(html, { 
+        waitUntil: 'networkidle0',
+        timeout: 15000 // 15 seconds timeout
+      })
+      
+      // Wait for all images to load
+      await page.evaluate(() => {
+        // This code runs in browser context, so document is available
+        // @ts-ignore - document is available in browser context
+        const doc: any = document
+        return Promise.all(
+          Array.from(doc.images).map((img: any, index: number) => {
+            return new Promise<void>((resolve) => {
+              // If image is already loaded, resolve immediately
+              if (img.complete && img.naturalHeight !== 0) {
+                console.log(`Image ${index} already loaded: ${img.src.substring(0, 50)}`)
+                resolve()
+                return
+              }
+              
+              // Set timeout to prevent hanging
+              const timeout = setTimeout(() => {
+                console.warn(`Image ${index} load timeout: ${img.src.substring(0, 50)}`)
+                resolve() // Continue even if image fails
+              }, 10000) // 10 second timeout per image
+              
+              img.onload = () => {
+                clearTimeout(timeout)
+                resolve()
+              }
+              
+              img.onerror = () => {
+                clearTimeout(timeout)
+                resolve() // Continue even if image fails
+              }
+            })
+          })
+        )
+      })
       
       // Generate PDF
       const pdfBuffer = await page.pdf({
@@ -375,7 +644,13 @@ export const exportService = {
   async exportMultipleToPDF(documents: Document[]): Promise<Buffer> {
     const browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox',
+        '--disable-web-security', // Allow cross-origin images
+        '--allow-file-access-from-files', // Allow local file access
+        '--disable-features=VizDisplayCompositor' // Improve compatibility
+      ]
     })
 
     try {
@@ -397,8 +672,44 @@ export const exportService = {
       
       const html = generateHTMLDocument(combinedHTML)
       
-      // Set content
-      await page.setContent(html, { waitUntil: 'networkidle0' })
+      // Set content with timeout
+      await page.setContent(html, { 
+        waitUntil: 'networkidle0',
+        timeout: 30000 // 30 seconds timeout
+      })
+      
+      // Wait for all images to load
+      await page.evaluate(() => {
+        // This code runs in browser context, so document is available
+        // @ts-ignore - document is available in browser context
+        const doc: any = document
+        return Promise.all(
+          Array.from(doc.images).map((img: any, index: number) => {
+            return new Promise<void>((resolve) => {
+              // If image is already loaded, resolve immediately
+              if (img.complete && img.naturalHeight !== 0) {
+                resolve()
+                return
+              }
+              
+              // Set timeout to prevent hanging
+              const timeout = setTimeout(() => {
+                resolve() // Continue even if image fails
+              }, 10000) // 10 second timeout per image
+              
+              img.onload = () => {
+                clearTimeout(timeout)
+                resolve()
+              }
+              
+              img.onerror = () => {
+                clearTimeout(timeout)
+                resolve() // Continue even if image fails
+              }
+            })
+          })
+        )
+      })
       
       // Generate PDF
       const pdfBuffer = await page.pdf({

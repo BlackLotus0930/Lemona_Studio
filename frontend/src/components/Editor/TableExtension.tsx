@@ -127,9 +127,9 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
       html += '<thead><tr>'
       for (let i = 0; i < cols; i++) {
         const value = newData[0][i] || ''
-        // First column has no background, others have header background
-        const bgColor = i === 0 ? 'transparent' : (theme === 'dark' ? '#2a2a2a' : '#f5f5f5')
-        html += `<th style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px 4px 8px 8px; text-align: left; background-color: ${bgColor};">${value}</th>`
+        // All header cells are transparent, users can highlight if they want
+        const bgColor = 'transparent'
+        html += `<th style="border: 0.5px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px 4px 8px 8px; text-align: left; background-color: ${bgColor};">${value}</th>`
       }
       html += '</tr></thead>'
     }
@@ -140,7 +140,7 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
       html += '<tr>'
       for (let j = 0; j < cols; j++) {
         const value = newData[i][j] || ''
-        html += `<td style="border: 1px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px 4px 8px 8px;">${value}</td>`
+        html += `<td style="border: 0.5px solid ${theme === 'dark' ? '#555' : '#ddd'}; padding: 8px 4px 8px 8px;">${value}</td>`
       }
       html += '</tr>'
     }
@@ -189,8 +189,8 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
   }
   
   const borderColor = theme === 'dark' ? '#555' : '#ddd'
-  const headerBg = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
-  const highlightBg = theme === 'dark' ? '#2A2A2A' : '#e8e8e8'
+  const headerBg = 'transparent'
+  const highlightBg = theme === 'dark' ? '#2A2A2A' : '#f0f0f0'
   const iconColor = theme === 'dark' ? '#b0b0b0' : '#666666'
   
   const toggleRowHighlight = (rowIndex: number) => {
@@ -436,11 +436,14 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
       )}
       
       {/* Button container for row buttons */}
-      {isHovered && hoveredRow !== null && hoveredRow > 0 && (
+      {isHovered && hoveredRow !== null && hoveredRow >= 0 && (
         <div 
           ref={(el) => {
-            if (el && tableRef.current && hoveredRow > 0) {
-              const row = tableRef.current.querySelector(`tbody tr:nth-child(${hoveredRow})`) as HTMLElement
+            if (el && tableRef.current && hoveredRow !== null) {
+              // For row 0 (header), use thead tr, otherwise use tbody tr
+              const row = hoveredRow === 0
+                ? tableRef.current.querySelector(`thead tr`) as HTMLElement
+                : tableRef.current.querySelector(`tbody tr:nth-child(${hoveredRow})`) as HTMLElement
               if (row) {
                 const rect = row.getBoundingClientRect()
                 const wrapperRect = el.parentElement?.getBoundingClientRect()
@@ -509,7 +512,7 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
           >
             <HighlightIcon style={{ fontSize: '16px', color: highlightedRows.has(hoveredRow) ? (theme === 'dark' ? '#4fc3f7' : '#1a73e8') : iconColor }} />
           </button>
-          {data.length > 2 && (
+          {data.length > 1 && (
             <button
               onClick={() => deleteRow(hoveredRow)}
               style={{
@@ -552,10 +555,17 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
           }}
         >
           <thead>
-            <tr>
+            <tr
+              onMouseEnter={() => setHoveredRow(0)}
+              style={{
+                backgroundColor: 'transparent',
+                position: 'relative',
+              }}
+            >
               {data.length > 0 && data[0].map((_, colIndex) => {
+                const isRowHighlighted = highlightedRows.has(0)
                 const isColHighlighted = highlightedCols.has(colIndex)
-                const headerCellBg = isColHighlighted ? highlightBg : headerBg
+                const headerCellBg = isRowHighlighted || isColHighlighted ? highlightBg : headerBg
                 
                 return (
                 <th
@@ -568,7 +578,7 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
                     }
                   }}
                   style={{
-                    border: `1px solid ${borderColor}`,
+                    border: `0.5px solid ${borderColor}`,
                     paddingLeft: '8px',
                     paddingRight: '4px',
                     paddingTop: '8px',
@@ -656,7 +666,7 @@ const TableComponent = ({ node, updateAttributes, editor, getPos }: ReactNodeVie
                       }
                     }}
                     style={{
-                      border: `1px solid ${borderColor}`,
+                      border: `0.5px solid ${borderColor}`,
                       paddingLeft: '8px',
                       paddingRight: '4px',
                       paddingTop: '8px',

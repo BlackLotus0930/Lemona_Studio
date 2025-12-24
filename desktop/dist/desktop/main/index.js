@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from 'dotenv';
@@ -52,6 +52,38 @@ else {
 let mainWindow = null;
 // Setup IPC handlers
 setupIPC();
+// Set Content Security Policy
+function setupCSP() {
+    const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+    // Build CSP string
+    // In dev mode, allow unsafe-eval for Vite HMR, but block it in production
+    const cspDirectives = [
+        "default-src 'self'",
+        "script-src 'self'" + (isDev ? " 'unsafe-eval' 'unsafe-inline' http://localhost:5173" : ""),
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com data:",
+        "img-src 'self' data: blob: https:",
+        "connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com" + (isDev ? " http://localhost:5173 ws://localhost:5173" : ""),
+        // Allow blob: and data: for PDF viewing in iframe
+        "frame-src 'self' blob: data:",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+        "upgrade-insecure-requests"
+    ];
+    const csp = cspDirectives.join('; ');
+    // Set CSP via session headers
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+        callback({
+            responseHeaders: {
+                ...details.responseHeaders,
+                'Content-Security-Policy': [csp]
+            }
+        });
+    });
+    console.log(`✅ Content Security Policy configured (dev mode: ${isDev})`);
+}
 function createWindow() {
     // Get logo path - try both source and compiled locations
     const logoPathSource = path.join(projectRoot, 'frontend', 'public', 'lemonalogo.png');
@@ -76,6 +108,7 @@ function createWindow() {
         icon: iconPath, // Set window icon (Windows/Linux)
         frame: false, // Remove default frame completely - we use custom title bar
         titleBarStyle: 'hidden', // Hide default title bar (macOS)
+        backgroundColor: '#141414', // Set dark background to prevent white flash
         // Note: titleBarOverlay only works on macOS, removed for Windows compatibility
         webPreferences: {
             nodeIntegration: false,
@@ -129,6 +162,8 @@ else {
 }
 // Migrate existing documents and create window on app ready
 app.whenReady().then(async () => {
+    // Setup Content Security Policy first
+    setupCSP();
     // Migrate documents first
     await migrateDocuments();
     // Clean up orphaned/corrupted documents

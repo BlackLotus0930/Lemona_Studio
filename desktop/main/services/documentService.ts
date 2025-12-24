@@ -146,20 +146,34 @@ export const documentService = {
 
   async delete(id: string): Promise<boolean> {
     try {
+      // First, get the document to find associated file
+      const document = await this.getById(id)
+      
       const filePath = getDocumentPath(id)
       console.log('[documentService.delete] Attempting to delete document:', id, 'at path:', filePath)
       
-      // Check if file exists first
+      // Delete the document JSON file
       try {
         await fs.access(filePath)
+        await fs.unlink(filePath)
+        console.log('[documentService.delete] Successfully deleted document JSON:', id)
       } catch (accessError) {
-        console.error('[documentService.delete] File does not exist:', filePath)
-        // File doesn't exist - might have been already deleted
-        return true // Return true since the end result is the same
+        console.log('[documentService.delete] Document JSON file does not exist (may have been already deleted):', filePath)
       }
       
-      await fs.unlink(filePath)
-      console.log('[documentService.delete] Successfully deleted document:', id)
+      // Also delete the associated file (PDF, image, etc.) if it exists
+      if (document && document.title) {
+        const associatedFilePath = getFilePath(id, document.title)
+        try {
+          await fs.access(associatedFilePath)
+          await fs.unlink(associatedFilePath)
+          console.log('[documentService.delete] Successfully deleted associated file:', associatedFilePath)
+        } catch (fileError) {
+          // File doesn't exist or already deleted - this is okay
+          console.log('[documentService.delete] Associated file does not exist (may have been already deleted):', associatedFilePath)
+        }
+      }
+      
       return true
     } catch (error) {
       console.error('[documentService.delete] Failed to delete document:', id, error)
