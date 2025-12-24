@@ -2,7 +2,22 @@
 // Uses Puppeteer (browser engine) for true WYSIWYG rendering with Variable Fonts
 import puppeteer from 'puppeteer'
 import { documentService } from './documentService.js'
-import { Document as DocxDocument, Packer, Paragraph, TextRun, HeadingLevel, PageBreak, AlignmentType } from 'docx'
+import { 
+  Document as DocxDocument, 
+  Packer, 
+  Paragraph, 
+  TextRun, 
+  HeadingLevel, 
+  PageBreak, 
+  AlignmentType,
+  ImageRun,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  ExternalHyperlink,
+  InternalHyperlink,
+} from 'docx'
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -864,65 +879,388 @@ export const exportService = {
   },
 
   async exportToDOCX(title: string, content: any): Promise<Buffer> {
-    const blocks = parseTipTapToFormattedBlocks(content)
-    const docxParagraphs: Paragraph[] = []
+    const docxElements: (Paragraph | Table)[] = []
 
-    // Convert blocks to DOCX paragraphs
-    blocks.forEach((block) => {
-      const runs = block.segments.map(segment => {
-        return new TextRun({
-          text: segment.text,
-          bold: segment.bold,
-          italics: segment.italic,
-          underline: segment.underline ? {} : undefined,
-          color: segment.color?.replace('#', ''),
-          size: segment.fontSize ? segment.fontSize * 2 : undefined, // DOCX uses half-points
-          font: segment.fontFamily,
-        })
-      })
-
-      if (block.type === 'heading') {
-        const headingLevel =
-          block.level === 1 ? HeadingLevel.HEADING_1 :
-          block.level === 2 ? HeadingLevel.HEADING_2 :
-          block.level === 3 ? HeadingLevel.HEADING_3 :
-          HeadingLevel.HEADING_1
+    // Helper function to convert base64 data URL to Buffer
+    const base64ToBuffer = (dataUrl: string): { buffer: Buffer; width: number; height: number } | null => {
+      try {
+        const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
+        if (!matches) return null
         
-        const alignment = 
-          block.textAlign === 'center' ? AlignmentType.CENTER :
-          block.textAlign === 'right' ? AlignmentType.RIGHT :
-          block.textAlign === 'justify' ? AlignmentType.JUSTIFIED :
-          AlignmentType.LEFT
-
-        docxParagraphs.push(
-          new Paragraph({
-            children: runs,
-            heading: headingLevel,
-            alignment,
-            spacing: { after: 240 },
-          })
-        )
-      } else {
-        const alignment = 
-          block.textAlign === 'center' ? AlignmentType.CENTER :
-          block.textAlign === 'right' ? AlignmentType.RIGHT :
-          block.textAlign === 'justify' ? AlignmentType.JUSTIFIED :
-          AlignmentType.LEFT
-
-        docxParagraphs.push(
-          new Paragraph({
-            children: runs,
-            alignment,
-            spacing: { after: 150 },
-          })
-        )
+        const base64Data = matches[2]
+        const buffer = Buffer.from(base64Data, 'base64')
+        
+        // For DOCX, we'll use default dimensions if not provided
+        // In a real implementation, you might want to parse image dimensions
+        return { buffer, width: 400, height: 300 }
+      } catch (e) {
+        return null
       }
-    })
+    }
 
+    // Helper function to process TipTap nodes recursively
+    const processNode = (node: any): void => {
+      if (!node || !node.type) return
+
+      if (node.type === 'paragraph') {
+        const runs: (TextRun | ImageRun)[] = []
+        
+        if (node.content && Array.isArray(node.content)) {
+          for (const child of node.content) {
+            if (child.type === 'text') {
+              let textRun: TextRun = new TextRun({
+                text: child.text || '',
+              })
+
+              // Apply marks
+              if (child.marks && Array.isArray(child.marks)) {
+                const attrs: any = {}
+                child.marks.forEach((mark: any) => {
+                  if (mark.type === 'bold') attrs.bold = true
+                  if (mark.type === 'italic') attrs.italics = true
+                  if (mark.type === 'underline') attrs.underline = {}
+                  if (mark.type === 'textStyle' && mark.attrs) {
+                    if (mark.attrs.color) attrs.color = mark.attrs.color.replace('#', '')
+                    if (mark.attrs.fontSize) attrs.size = mark.attrs.fontSize * 2 // half-points
+                    if (mark.attrs.fontFamily) attrs.font = mark.attrs.fontFamily
+                  }
+                })
+                textRun = new TextRun({ text: child.text || '', ...attrs })
+              }
+              
+              runs.push(textRun)
+            } else if (child.type === 'image') {
+              // Handle image node
+              const src = child.attrs?.src || ''
+              if (src.startsWith('data:image/')) {
+                const imageData = base64ToBuffer(src)
+                if (imageData) {
+                  const width = child.attrs?.width || imageData.width
+                  const height = child.attrs?.height || imageData.height
+                  try {
+                    runs.push(
+                      new ImageRun({
+                        data: imageData.buffer,
+                        transformation: {
+                          width: Math.min(width, 600), // Max 600px width
+                          height: Math.min(height, (height / width) * 600),
+                        },
+                        type: 'png', // Default to PNG, will be detected from data if possible
+                      })
+                    )
+                  } catch (e) {
+                    // If image fails, add placeholder text
+                    runs.push(new TextRun({ text: '[Image]', italics: true }))
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        const alignment = 
+          node.attrs?.textAlign === 'center' ? AlignmentType.CENTER :
+          node.attrs?.textAlign === 'right' ? AlignmentType.RIGHT :
+          node.attrs?.textAlign === 'justify' ? AlignmentType.JUSTIFIED :
+          AlignmentType.LEFT
+
+        if (runs.length > 0) {
+          docxElements.push(
+            new Paragraph({
+              children: runs,
+              alignment,
+              spacing: { after: 200 },
+            })
+          )
+        } else {
+          // Empty paragraph
+          docxElements.push(
+            new Paragraph({
+              children: [new TextRun('')],
+              spacing: { after: 200 },
+            })
+          )
+        }
+      } else if (node.type === 'heading') {
+        const runs: TextRun[] = []
+        
+        if (node.content && Array.isArray(node.content)) {
+          for (const child of node.content) {
+            if (child.type === 'text') {
+              let textRun: TextRun = new TextRun({
+                text: child.text || '',
+              })
+
+              if (child.marks && Array.isArray(child.marks)) {
+                const attrs: any = {}
+                child.marks.forEach((mark: any) => {
+                  if (mark.type === 'bold') attrs.bold = true
+                  if (mark.type === 'italic') attrs.italics = true
+                  if (mark.type === 'textStyle' && mark.attrs) {
+                    if (mark.attrs.color) attrs.color = mark.attrs.color.replace('#', '')
+                    if (mark.attrs.fontSize) attrs.size = mark.attrs.fontSize * 2
+                    if (mark.attrs.fontFamily) attrs.font = mark.attrs.fontFamily
+                  }
+                })
+                textRun = new TextRun({ text: child.text || '', ...attrs })
+              }
+              
+              runs.push(textRun)
+            }
+          }
+        }
+
+        const level = node.attrs?.level || 1
+        const headingLevel =
+          level === 1 ? HeadingLevel.HEADING_1 :
+          level === 2 ? HeadingLevel.HEADING_2 :
+          level === 3 ? HeadingLevel.HEADING_3 :
+          HeadingLevel.HEADING_1
+
+        const alignment = 
+          node.attrs?.textAlign === 'center' ? AlignmentType.CENTER :
+          node.attrs?.textAlign === 'right' ? AlignmentType.RIGHT :
+          node.attrs?.textAlign === 'justify' ? AlignmentType.JUSTIFIED :
+          AlignmentType.LEFT
+
+        if (runs.length > 0) {
+          docxElements.push(
+            new Paragraph({
+              children: runs,
+              heading: headingLevel,
+              alignment,
+              spacing: { after: 240, before: 240 },
+            })
+          )
+        }
+      } else if (node.type === 'title') {
+        const runs: TextRun[] = []
+        
+        if (node.content && Array.isArray(node.content)) {
+          for (const child of node.content) {
+            if (child.type === 'text') {
+              runs.push(new TextRun({ text: child.text || '', bold: true, size: 32 }))
+            }
+          }
+        }
+
+        if (runs.length > 0) {
+          docxElements.push(
+            new Paragraph({
+              children: runs,
+              heading: HeadingLevel.TITLE,
+              alignment: AlignmentType.CENTER,
+              spacing: { after: 300 },
+            })
+          )
+        }
+      } else if (node.type === 'subtitle') {
+        const runs: TextRun[] = []
+        
+        if (node.content && Array.isArray(node.content)) {
+          for (const child of node.content) {
+            if (child.type === 'text') {
+              runs.push(new TextRun({ text: child.text || '', size: 24 }))
+            }
+          }
+        }
+
+        if (runs.length > 0) {
+          docxElements.push(
+            new Paragraph({
+              children: runs,
+              heading: HeadingLevel.HEADING_2,
+              spacing: { after: 200 },
+            })
+          )
+        }
+      } else if (node.type === 'image') {
+        // Standalone image node
+        const src = node.attrs?.src || ''
+        if (src.startsWith('data:image/')) {
+          const imageData = base64ToBuffer(src)
+          if (imageData) {
+            const width = node.attrs?.width || imageData.width
+            const height = node.attrs?.height || imageData.height
+            try {
+              docxElements.push(
+                new Paragraph({
+                  children: [
+                    new ImageRun({
+                      data: imageData.buffer,
+                      transformation: {
+                        width: Math.min(width, 600),
+                        height: Math.min(height, (height / width) * 600),
+                      },
+                      type: 'png', // Default to PNG
+                    })
+                  ],
+                  alignment: AlignmentType.CENTER,
+                  spacing: { after: 200 },
+                })
+              )
+            } catch (e) {
+              // If image fails, add placeholder
+              docxElements.push(
+                new Paragraph({
+                  children: [new TextRun({ text: '[Image]', italics: true })],
+                  alignment: AlignmentType.CENTER,
+                  spacing: { after: 200 },
+                })
+              )
+            }
+          }
+        }
+      } else if (node.type === 'chart') {
+        // Chart node - convert to description text for now
+        // In a full implementation, you might want to render chart as image
+        const chartType = node.attrs?.chartType || 'chart'
+        const chartName = node.attrs?.chartName || ''
+        const chartText = chartName ? `${chartName} (${chartType} chart)` : `${chartType} chart`
+        
+        docxElements.push(
+          new Paragraph({
+            children: [new TextRun({ text: chartText, italics: true })],
+            spacing: { after: 200 },
+          })
+        )
+      } else if (node.type === 'tableBlock') {
+        // Table node - parse HTML and convert to DOCX table
+        const html = node.attrs?.html || ''
+        if (html) {
+          try {
+            // Simple HTML table parser
+            const tableMatch = html.match(/<table[^>]*>([\s\S]*?)<\/table>/i)
+            if (tableMatch) {
+              const tableContent = tableMatch[1]
+              const rows: TableRow[] = []
+              
+              // Extract rows
+              const rowMatches = tableContent.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)
+              for (const rowMatch of rowMatches) {
+                const rowContent = rowMatch[1]
+                const cells: TableCell[] = []
+                
+                // Extract cells (handle both th and td)
+                const cellMatches = rowContent.matchAll(/<(th|td)[^>]*>([\s\S]*?)<\/(th|td)>/gi)
+                for (const cellMatch of cellMatches) {
+                  const cellText = cellMatch[2].replace(/<[^>]+>/g, '').trim()
+                  cells.push(
+                    new TableCell({
+                      children: [
+                        new Paragraph({
+                          children: [new TextRun(cellText || ' ')],
+                        })
+                      ],
+                      margins: {
+                        top: 100,
+                        bottom: 100,
+                        left: 100,
+                        right: 100,
+                      },
+                    })
+                  )
+                }
+                
+                if (cells.length > 0) {
+                  rows.push(new TableRow({ children: cells }))
+                }
+              }
+              
+              if (rows.length > 0) {
+                docxElements.push(
+                  new Table({
+                    rows,
+                    width: {
+                      size: 100,
+                      type: WidthType.PERCENTAGE,
+                    },
+                  })
+                )
+                // Add spacing after table
+                docxElements.push(
+                  new Paragraph({
+                    children: [new TextRun('')],
+                    spacing: { after: 200 },
+                  })
+                )
+              }
+            }
+          } catch (e) {
+            // If table parsing fails, add a placeholder
+            docxElements.push(
+              new Paragraph({
+                children: [new TextRun({ text: '[Table]', italics: true })],
+                spacing: { after: 200 },
+              })
+            )
+          }
+        }
+      } else if (node.type === 'bulletList' || node.type === 'orderedList') {
+        // Handle lists
+        if (node.content && Array.isArray(node.content)) {
+          node.content.forEach((listItem: any) => {
+            if (listItem.type === 'listItem' && listItem.content) {
+              const runs: TextRun[] = []
+              listItem.content.forEach((itemChild: any) => {
+                if (itemChild.type === 'paragraph' && itemChild.content) {
+                  itemChild.content.forEach((textNode: any) => {
+                    if (textNode.type === 'text') {
+                      runs.push(new TextRun({ text: textNode.text || '' }))
+                    }
+                  })
+                }
+              })
+              
+              if (runs.length > 0) {
+                docxElements.push(
+                  new Paragraph({
+                    children: runs,
+                    bullet: { level: 0 },
+                    spacing: { after: 100 },
+                  })
+                )
+              }
+            }
+          })
+        }
+      } else if (node.content && Array.isArray(node.content)) {
+        // Recursively process children
+        node.content.forEach(processNode)
+      }
+    }
+
+    // Process all nodes
+    if (content.content && Array.isArray(content.content)) {
+      content.content.forEach(processNode)
+    }
+
+    // Create document with proper metadata for Google Docs compatibility
     const doc = new DocxDocument({
+      creator: 'Lemona',
+      title: title,
+      description: `Document exported from Lemona: ${title}`,
       sections: [
         {
-          children: docxParagraphs,
+          properties: {
+            page: {
+              size: {
+                width: 12240, // A4 width in twips (20th of a point)
+                height: 15840, // A4 height in twips
+              },
+              margin: {
+                top: 1440, // 1 inch = 1440 twips
+                right: 1440,
+                bottom: 1440,
+                left: 1440,
+              },
+            },
+          },
+          children: docxElements.length > 0 ? docxElements : [
+            new Paragraph({
+              children: [new TextRun('')],
+            })
+          ],
         },
       ],
     })
@@ -931,79 +1269,300 @@ export const exportService = {
   },
 
   async exportMultipleToDOCX(documents: Document[]): Promise<Buffer> {
-    const docxChildren: Paragraph[] = []
+    // Combine all documents into one
+    const allElements: (Paragraph | Table)[] = []
+
+    // Helper function to convert base64 data URL to Buffer
+    const base64ToBuffer = (dataUrl: string): { buffer: Buffer; width: number; height: number } | null => {
+      try {
+        const matches = dataUrl.match(/^data:image\/(\w+);base64,(.+)$/)
+        if (!matches) return null
+        
+        const base64Data = matches[2]
+        const buffer = Buffer.from(base64Data, 'base64')
+        return { buffer, width: 400, height: 300 }
+      } catch (e) {
+        return null
+      }
+    }
+
+    // Helper function to process TipTap nodes recursively
+    const processNode = (node: any): void => {
+      if (!node || !node.type) return
+
+      if (node.type === 'paragraph') {
+        const runs: (TextRun | ImageRun)[] = []
+        
+        if (node.content && Array.isArray(node.content)) {
+          for (const child of node.content) {
+            if (child.type === 'text') {
+              let textRun: TextRun = new TextRun({ text: child.text || '' })
+              if (child.marks && Array.isArray(child.marks)) {
+                const attrs: any = {}
+                child.marks.forEach((mark: any) => {
+                  if (mark.type === 'bold') attrs.bold = true
+                  if (mark.type === 'italic') attrs.italics = true
+                  if (mark.type === 'underline') attrs.underline = {}
+                  if (mark.type === 'textStyle' && mark.attrs) {
+                    if (mark.attrs.color) attrs.color = mark.attrs.color.replace('#', '')
+                    if (mark.attrs.fontSize) attrs.size = mark.attrs.fontSize * 2
+                    if (mark.attrs.fontFamily) attrs.font = mark.attrs.fontFamily
+                  }
+                })
+                textRun = new TextRun({ text: child.text || '', ...attrs })
+              }
+              runs.push(textRun)
+            } else if (child.type === 'image') {
+              const src = child.attrs?.src || ''
+              if (src.startsWith('data:image/')) {
+                const imageData = base64ToBuffer(src)
+                if (imageData) {
+                  const width = child.attrs?.width || imageData.width
+                  const height = child.attrs?.height || imageData.height
+                  try {
+                    runs.push(
+                      new ImageRun({
+                        data: imageData.buffer,
+                        transformation: {
+                          width: Math.min(width, 600),
+                          height: Math.min(height, (height / width) * 600),
+                        },
+                        type: 'png',
+                      })
+                    )
+                  } catch (e) {
+                    runs.push(new TextRun({ text: '[Image]', italics: true }))
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        const alignment = 
+          node.attrs?.textAlign === 'center' ? AlignmentType.CENTER :
+          node.attrs?.textAlign === 'right' ? AlignmentType.RIGHT :
+          node.attrs?.textAlign === 'justify' ? AlignmentType.JUSTIFIED :
+          AlignmentType.LEFT
+
+        allElements.push(
+          new Paragraph({
+            children: runs.length > 0 ? runs : [new TextRun('')],
+            alignment,
+            spacing: { after: 200 },
+          })
+        )
+      } else if (node.type === 'heading') {
+        const runs: TextRun[] = []
+        if (node.content && Array.isArray(node.content)) {
+          for (const child of node.content) {
+            if (child.type === 'text') {
+              let textRun: TextRun = new TextRun({ text: child.text || '' })
+              if (child.marks && Array.isArray(child.marks)) {
+                const attrs: any = {}
+                child.marks.forEach((mark: any) => {
+                  if (mark.type === 'bold') attrs.bold = true
+                  if (mark.type === 'italic') attrs.italics = true
+                  if (mark.type === 'textStyle' && mark.attrs) {
+                    if (mark.attrs.color) attrs.color = mark.attrs.color.replace('#', '')
+                    if (mark.attrs.fontSize) attrs.size = mark.attrs.fontSize * 2
+                    if (mark.attrs.fontFamily) attrs.font = mark.attrs.fontFamily
+                  }
+                })
+                textRun = new TextRun({ text: child.text || '', ...attrs })
+              }
+              runs.push(textRun)
+            }
+          }
+        }
+
+        const level = node.attrs?.level || 1
+        const headingLevel =
+          level === 1 ? HeadingLevel.HEADING_1 :
+          level === 2 ? HeadingLevel.HEADING_2 :
+          level === 3 ? HeadingLevel.HEADING_3 :
+          HeadingLevel.HEADING_1
+
+        const alignment = 
+          node.attrs?.textAlign === 'center' ? AlignmentType.CENTER :
+          node.attrs?.textAlign === 'right' ? AlignmentType.RIGHT :
+          node.attrs?.textAlign === 'justify' ? AlignmentType.JUSTIFIED :
+          AlignmentType.LEFT
+
+        if (runs.length > 0) {
+          allElements.push(
+            new Paragraph({
+              children: runs,
+              heading: headingLevel,
+              alignment,
+              spacing: { after: 240, before: 240 },
+            })
+          )
+        }
+      } else if (node.type === 'title') {
+        const runs: TextRun[] = []
+        if (node.content && Array.isArray(node.content)) {
+          for (const child of node.content) {
+            if (child.type === 'text') {
+              runs.push(new TextRun({ text: child.text || '', bold: true, size: 32 }))
+            }
+          }
+        }
+        if (runs.length > 0) {
+          allElements.push(
+            new Paragraph({
+              children: runs,
+              heading: HeadingLevel.TITLE,
+              alignment: AlignmentType.CENTER,
+              spacing: { after: 300 },
+            })
+          )
+        }
+      } else if (node.type === 'image') {
+        const src = node.attrs?.src || ''
+        if (src.startsWith('data:image/')) {
+          const imageData = base64ToBuffer(src)
+          if (imageData) {
+            const width = node.attrs?.width || imageData.width
+            const height = node.attrs?.height || imageData.height
+            try {
+              allElements.push(
+                new Paragraph({
+                  children: [
+                    new ImageRun({
+                      data: imageData.buffer,
+                      transformation: {
+                        width: Math.min(width, 600),
+                        height: Math.min(height, (height / width) * 600),
+                      },
+                      type: 'png',
+                    })
+                  ],
+                  alignment: AlignmentType.CENTER,
+                  spacing: { after: 200 },
+                })
+              )
+            } catch (e) {
+              allElements.push(
+                new Paragraph({
+                  children: [new TextRun({ text: '[Image]', italics: true })],
+                  spacing: { after: 200 },
+                })
+              )
+            }
+          }
+        }
+      } else if (node.type === 'chart') {
+        const chartType = node.attrs?.chartType || 'chart'
+        const chartName = node.attrs?.chartName || ''
+        const chartText = chartName ? `${chartName} (${chartType} chart)` : `${chartType} chart`
+        allElements.push(
+          new Paragraph({
+            children: [new TextRun({ text: chartText, italics: true })],
+            spacing: { after: 200 },
+          })
+        )
+      } else if (node.type === 'tableBlock') {
+        const html = node.attrs?.html || ''
+        if (html) {
+          try {
+            const tableMatch = html.match(/<table[^>]*>([\s\S]*?)<\/table>/i)
+            if (tableMatch) {
+              const tableContent = tableMatch[1]
+              const rows: TableRow[] = []
+              const rowMatches = tableContent.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)
+              for (const rowMatch of rowMatches) {
+                const rowContent = rowMatch[1]
+                const cells: TableCell[] = []
+                const cellMatches = rowContent.matchAll(/<(th|td)[^>]*>([\s\S]*?)<\/(th|td)>/gi)
+                for (const cellMatch of cellMatches) {
+                  const cellText = cellMatch[2].replace(/<[^>]+>/g, '').trim()
+                  cells.push(
+                    new TableCell({
+                      children: [
+                        new Paragraph({
+                          children: [new TextRun(cellText || ' ')],
+                        })
+                      ],
+                      margins: { top: 100, bottom: 100, left: 100, right: 100 },
+                    })
+                  )
+                }
+                if (cells.length > 0) {
+                  rows.push(new TableRow({ children: cells }))
+                }
+              }
+              if (rows.length > 0) {
+                allElements.push(
+                  new Table({
+                    rows,
+                    width: { size: 100, type: WidthType.PERCENTAGE },
+                  })
+                )
+                allElements.push(
+                  new Paragraph({
+                    children: [new TextRun('')],
+                    spacing: { after: 200 },
+                  })
+                )
+              }
+            }
+          } catch (e) {
+            allElements.push(
+              new Paragraph({
+                children: [new TextRun({ text: '[Table]', italics: true })],
+                spacing: { after: 200 },
+              })
+            )
+          }
+        }
+      } else if (node.content && Array.isArray(node.content)) {
+        node.content.forEach(processNode)
+      }
+    }
 
     // Process each document
     documents.forEach((document, index) => {
-      // Add page break before each document (except the first)
       if (index > 0) {
-        docxChildren.push(
+        allElements.push(
           new Paragraph({
             children: [new PageBreak()],
           })
         )
       }
 
-      // Parse and add content
       const content = JSON.parse(document.content)
-      const blocks = parseTipTapToFormattedBlocks(content)
-      
-      blocks.forEach((block) => {
-        const runs = block.segments.map(segment => {
-          return new TextRun({
-            text: segment.text,
-            bold: segment.bold,
-            italics: segment.italic,
-            underline: segment.underline ? {} : undefined,
-            color: segment.color?.replace('#', ''),
-            size: segment.fontSize ? segment.fontSize * 2 : undefined,
-            font: segment.fontFamily,
-          })
-        })
-
-        if (block.type === 'heading') {
-          const headingLevel =
-            block.level === 1 ? HeadingLevel.HEADING_1 :
-            block.level === 2 ? HeadingLevel.HEADING_2 :
-            block.level === 3 ? HeadingLevel.HEADING_3 :
-            HeadingLevel.HEADING_1
-          
-          const alignment = 
-            block.textAlign === 'center' ? AlignmentType.CENTER :
-            block.textAlign === 'right' ? AlignmentType.RIGHT :
-            block.textAlign === 'justify' ? AlignmentType.JUSTIFIED :
-            AlignmentType.LEFT
-
-          docxChildren.push(
-            new Paragraph({
-              children: runs,
-              heading: headingLevel,
-              alignment,
-              spacing: { after: 240 },
-            })
-          )
-        } else {
-          const alignment = 
-            block.textAlign === 'center' ? AlignmentType.CENTER :
-            block.textAlign === 'right' ? AlignmentType.RIGHT :
-            block.textAlign === 'justify' ? AlignmentType.JUSTIFIED :
-            AlignmentType.LEFT
-
-          docxChildren.push(
-            new Paragraph({
-              children: runs,
-              alignment,
-              spacing: { after: 150 },
-            })
-          )
-        }
-      })
+      if (content.content && Array.isArray(content.content)) {
+        content.content.forEach(processNode)
+      }
     })
 
+    // Create document with proper metadata
     const doc = new DocxDocument({
+      creator: 'Lemona',
+      title: documents.length === 1 ? documents[0].title : 'Multiple Documents',
+      description: `Document exported from Lemona`,
       sections: [
         {
-          children: docxChildren,
+          properties: {
+            page: {
+              size: {
+                width: 12240, // A4 width in twips
+                height: 15840, // A4 height in twips
+              },
+              margin: {
+                top: 1440,
+                right: 1440,
+                bottom: 1440,
+                left: 1440,
+              },
+            },
+          },
+          children: allElements.length > 0 ? allElements : [
+            new Paragraph({
+              children: [new TextRun('')],
+            })
+          ],
         },
       ],
     })
