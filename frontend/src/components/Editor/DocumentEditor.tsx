@@ -1404,6 +1404,36 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
             }
           }
         }}
+        onClick={(e) => {
+          // Handle Ctrl+Click on links to open in default browser
+          if (e.ctrlKey || e.metaKey) {
+            const target = e.target as HTMLElement
+            // Find the closest link element (could be the target itself or a parent)
+            const linkElement = target.closest('a.editor-link') as HTMLAnchorElement | null
+            
+            if (linkElement && linkElement.href) {
+              e.preventDefault()
+              e.stopPropagation()
+              
+              const url = linkElement.href
+              
+              // Check if running in Electron
+              const isElectron = typeof window !== 'undefined' && window.electron !== undefined
+              
+              if (isElectron && window.electron) {
+                // Open in external browser via IPC
+                window.electron.invoke('openExternal', url).catch((error) => {
+                  console.error('Failed to open external URL:', error)
+                  // Fallback to window.open if IPC fails
+                  window.open(url, '_blank')
+                })
+              } else {
+                // Fallback for web
+                window.open(url, '_blank')
+              }
+            }
+          }
+        }}
         onClickCapture={(e) => {
           // Only handle triple-click in padding area
           if (e.detail !== 3) return
