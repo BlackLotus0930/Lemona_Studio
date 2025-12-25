@@ -1,0 +1,28 @@
+[33mc90ddd4[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m HEAD@{0}: reset: moving to c90ddd4d197bdb05d405d62e085a74280da07774
+[33mc7e9643[m[33m ([m[1;31morigin/main[m[33m)[m HEAD@{1}: commit: User adding their own API key
+[33mc90ddd4[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m HEAD@{2}: commit: DOCX export issue
+[33m047b4b7[m HEAD@{3}: commit: Top Margin Inconsistency
+[33m50db41a[m HEAD@{4}: commit: Image and Graph Export
+[33m84b3db3[m HEAD@{5}: commit: Chat History Feature
+[33ma7970c0[m HEAD@{6}: commit: Insert Graph
+[33m49c1b65[m HEAD@{7}: commit: New file creation issue
+[33m760c4cf[m HEAD@{8}: commit: filename
+[33meec12cc[m HEAD@{9}: commit: try to fix window start white flash
+[33m9ef2930[m HEAD@{10}: commit: Document Editor small autocrolling removed
+[33m8316d49[m HEAD@{11}: commit: PDF Persistent Re-rendering Issue
+[33m222d951[m HEAD@{12}: commit: Inline search highlighting bug
+[33mfec0f89[m HEAD@{13}: commit: Add CSP
+[33m8c07c57[m[33m ([m[1;32mupgrade/tiptap-test[m[33m)[m HEAD@{14}: merge upgrade/tiptap-test: Fast-forward
+[33m62a5a11[m HEAD@{15}: checkout: moving from upgrade/tiptap-test to main
+[33m8c07c57[m[33m ([m[1;32mupgrade/tiptap-test[m[33m)[m HEAD@{16}: commit: Finalize Tiptap upgrade and related editor changes
+[33m62a5a11[m HEAD@{17}: checkout: moving from main to upgrade/tiptap-test
+[33m62a5a11[m HEAD@{18}: commit: inline search in PDF files
+[33md76c288[m HEAD@{19}: commit: chat tab state management
+[33m65ef59b[m HEAD@{20}: commit: Ghost files bug
+[33m913c0fe[m HEAD@{21}: commit: tab bar system
+[33mf6edeb3[m HEAD@{22}: commit: standalone document editor refreshing
+[33ma5e5e41[m HEAD@{23}: commit: Download / Search system / Home page
+[33m7f15924[m HEAD@{24}: commit: Before Semantic Search
+[33m1a5db02[m HEAD@{25}: commit (amend): Initial commit with project files and gitignore
+[33mc9e6fca[m HEAD@{26}: commit (amend): Initial commit with project files and gitignore
+[33mb8c1e7b[m HEAD@{27}: commit (initial): Initial commit with project files and gitignore

@@ -96,9 +96,11 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
       const updatePosition = () => {
         if (settingsButtonRef.current) {
           const rect = settingsButtonRef.current.getBoundingClientRect()
+          // Position modal more to the left to cover both editor and AI chat panel
+          // Move it left by approximately 300px to center it better
           setModalPosition({
             top: rect.top - 8, // 8px above the button
-            left: rect.left,
+            left: Math.max(20, rect.left - 150), // Move left by 300px, but keep at least 20px from left edge
           })
         }
       }
