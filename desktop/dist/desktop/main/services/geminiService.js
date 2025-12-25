@@ -1,21 +1,17 @@
 // Desktop Gemini Service - Uses Google Generative AI
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { projectService } from './projectService.js';
-let genAI = null;
-let initialized = false;
-function getModel(modelName = 'gemini-2.5-flash') {
-    if (!initialized) {
-        initialized = true;
-        const apiKey = process.env.GEMINI_API_KEY || '';
-        if (!apiKey) {
-            console.warn('WARNING: GEMINI_API_KEY is not set. AI features will not work.');
-            throw new Error('GEMINI_API_KEY is not configured. Please set it in your .env file.');
-        }
-        genAI = new GoogleGenerativeAI(apiKey);
+// Store API key instances per API key to allow multiple users
+const genAICache = new Map();
+function getModel(apiKey, modelName = 'gemini-2.5-flash') {
+    if (!apiKey) {
+        throw new Error('Google API key is not configured. Please set it in Settings > API Keys.');
     }
-    if (!genAI) {
-        throw new Error('GEMINI_API_KEY is not configured. Please set it in your .env file.');
+    // Use cached instance if available, otherwise create new one
+    if (!genAICache.has(apiKey)) {
+        genAICache.set(apiKey, new GoogleGenerativeAI(apiKey));
     }
+    const genAI = genAICache.get(apiKey);
     return genAI.getGenerativeModel({ model: modelName });
 }
 const SYSTEM_PROMPT = `You are a reliable, focused assistant for Lemona.
@@ -101,8 +97,8 @@ function extractTextFromTipTap(node) {
     return '';
 }
 export const geminiService = {
-    async chat(message, documentContent, projectId, chatHistory, modelName) {
-        const aiModel = getModel(modelName || 'gemini-2.5-flash');
+    async chat(apiKey, message, documentContent, projectId, chatHistory, modelName) {
+        const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash');
         const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory);
         const conversationHistory = [...(history || [])];
         conversationHistory.push({
@@ -136,8 +132,8 @@ export const geminiService = {
             throw new Error(`Failed to generate response: ${error.message || 'Unknown error'}`);
         }
     },
-    async *streamChat(message, documentContent, projectId, chatHistory, useWebSearch, modelName) {
-        const aiModel = getModel(modelName || 'gemini-2.5-flash');
+    async *streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName) {
+        const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash');
         const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory);
         const conversationHistory = [...(history || [])];
         conversationHistory.push({
@@ -182,8 +178,8 @@ export const geminiService = {
             throw new Error(`Failed to stream response: ${error.message || 'Unknown error'}`);
         }
     },
-    async batchQuestions(questions, documentContent, projectId, modelName) {
-        const aiModel = getModel(modelName || 'gemini-2.5-flash');
+    async batchQuestions(apiKey, questions, documentContent, projectId, modelName) {
+        const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash');
         const { systemInstruction } = await buildContext(documentContent, projectId);
         const questionsText = questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
         const prompt = `${systemInstruction}\n\nUser has the following questions. Please answer each one:\n\n${questionsText}\n\nPlease provide answers in a numbered list format.`;
@@ -203,8 +199,8 @@ export const geminiService = {
             throw new Error(`Failed to process batch questions: ${error.message || 'Unknown error'}`);
         }
     },
-    async autocomplete(text, cursorPosition, documentContent, projectId, modelName) {
-        const aiModel = getModel(modelName || 'gemini-2.5-flash');
+    async autocomplete(apiKey, text, cursorPosition, documentContent, projectId, modelName) {
+        const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash');
         const { systemInstruction } = await buildContext(documentContent, projectId);
         const beforeCursor = text.slice(0, cursorPosition);
         const afterCursor = text.slice(cursorPosition);

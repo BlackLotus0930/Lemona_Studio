@@ -6,6 +6,8 @@ import remarkGfm from 'remark-gfm'
 import { useTheme } from '../../contexts/ThemeContext'
 // @ts-ignore
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
+// @ts-ignore
+import VpnKeyIcon from '@mui/icons-material/VpnKey'
 
 interface ChatInterfaceProps {
   documentId?: string
@@ -42,6 +44,12 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const [isInputFocused, setIsInputFocused] = useState(false)
   const [useWebSearch, setUseWebSearch] = useState(false)
   const [selectedModel, setSelectedModel] = useState<'gemini-2.5-flash' | 'gemini-2.5-pro'>('gemini-2.5-flash')
+  const [showSettingsModal, setShowSettingsModal] = useState(false)
+  const [googleApiKey, setGoogleApiKey] = useState('')
+  const [modalPosition, setModalPosition] = useState({ top: 0, left: 0 })
+  const settingsButtonRef = useRef<HTMLButtonElement>(null)
+  const modalRef = useRef<HTMLDivElement>(null)
+  const apiKeyInputRef = useRef<HTMLInputElement>(null)
   const hasNotifiedFirstMessage = useRef(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -55,6 +63,75 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const lastStreamingContentLengthRef = useRef<number>(0)
   const streamingScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [inputContainerWidth, setInputContainerWidth] = useState<number | null>(null)
+  
+  // Load Google API key from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedKey = localStorage.getItem('googleApiKey')
+      if (savedKey) {
+        setGoogleApiKey(savedKey)
+      }
+    } catch (error) {
+      console.error('Failed to load Google API key:', error)
+    }
+  }, [])
+
+  // Save Google API key to localStorage
+  const handleApiKeyChange = (value: string) => {
+    setGoogleApiKey(value)
+    try {
+      if (value) {
+        localStorage.setItem('googleApiKey', value)
+      } else {
+        localStorage.removeItem('googleApiKey')
+      }
+    } catch (error) {
+      console.error('Failed to save Google API key:', error)
+    }
+  }
+
+  // Update modal position when opening
+  useEffect(() => {
+    if (showSettingsModal && settingsButtonRef.current) {
+      const updatePosition = () => {
+        if (settingsButtonRef.current) {
+          const rect = settingsButtonRef.current.getBoundingClientRect()
+          setModalPosition({
+            top: rect.top - 8, // 8px above the button
+            left: rect.left,
+          })
+        }
+      }
+      updatePosition()
+      window.addEventListener('resize', updatePosition)
+      return () => window.removeEventListener('resize', updatePosition)
+    }
+  }, [showSettingsModal])
+
+  // Close modal when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showSettingsModal) {
+        const target = event.target as Node
+        if (
+          modalRef.current &&
+          !modalRef.current.contains(target) &&
+          settingsButtonRef.current &&
+          !settingsButtonRef.current.contains(target)
+        ) {
+          setShowSettingsModal(false)
+        }
+      }
+    }
+
+    if (showSettingsModal) {
+      // Use capture phase to catch clicks before they bubble
+      document.addEventListener('mousedown', handleClickOutside, true)
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside, true)
+      }
+    }
+  }, [showSettingsModal])
   
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
 
@@ -694,8 +771,43 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
           display: 'flex',
           flexDirection: 'column',
           gap: '8px',
-          transition: 'border-color 0.2s'
+          transition: 'border-color 0.2s',
+          position: 'relative'
         }}>
+          {/* Settings button - bottom left */}
+          <button
+            ref={settingsButtonRef}
+            onClick={() => setShowSettingsModal(!showSettingsModal)}
+            title="API Keys"
+            style={{
+              position: 'absolute',
+              bottom: '8px',
+              left: '10px',
+              padding: '4px',
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: showSettingsModal ? '#858585' : (theme === 'dark' ? 'rgba(255, 255, 255, 0)' : 'rgba(0, 0, 0, 0)'),
+              transition: 'color 0.2s',
+              zIndex: 10,
+            }}
+            onMouseEnter={(e) => {
+              if (!showSettingsModal) {
+                e.currentTarget.style.color = '#858585'
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!showSettingsModal) {
+                e.currentTarget.style.color = theme === 'dark' ? 'rgba(255, 255, 255, 0)' : 'rgba(0, 0, 0, 0)'
+              }
+            }}
+          >
+            <VpnKeyIcon style={{ fontSize: '16px'}} />
+          </button>
+
               {/* Text Input Section - On Top */}
               <textarea
                 ref={textareaRef}
@@ -898,6 +1010,170 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
           </div>
         </div>
       </div>
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div
+          ref={modalRef}
+          style={{
+            position: 'fixed',
+            top: `${modalPosition.top}px`,
+            left: `${modalPosition.left}px`,
+            backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+            borderRadius: '8px',
+            padding: '20px',
+            minWidth: '400px',
+            maxWidth: '500px',
+            boxShadow: theme === 'dark'
+              ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
+              : '0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1)',
+            zIndex: 10000,
+            border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            transform: 'translateY(-100%)',
+            marginTop: '-8px',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Close button */}
+          <button
+            onClick={() => setShowSettingsModal(false)}
+            style={{
+              position: 'absolute',
+              top: '8px',
+              right: '8px',
+              padding: '4px',
+              backgroundColor: 'transparent',
+              border: 'none',
+              color: theme === 'dark' ? '#999' : '#666',
+              cursor: 'pointer',
+              fontSize: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '4px',
+              width: '24px',
+              height: '24px',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f1f3f4'
+              e.currentTarget.style.color = theme === 'dark' ? '#fff' : '#202124'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.color = theme === 'dark' ? '#999' : '#666'
+            }}
+            title="Close"
+          >
+            ✕
+          </button>
+
+          {/* API Keys heading */}
+          <h2
+            style={{
+              fontSize: '18px',
+              fontWeight: '500',
+              color: theme === 'dark' ? '#ffffff' : '#202124',
+              margin: '0 0 20px 0',
+            }}
+          >
+            API Keys
+          </h2>
+
+          {/* Google API Key section */}
+          <div style={{ marginBottom: '20px' }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: theme === 'dark' ? '#e0e0e0' : '#202124',
+                marginBottom: '8px',
+              }}
+            >
+              Google API Key
+            </label>
+            <p
+              style={{
+                fontSize: '12px',
+                color: theme === 'dark' ? '#999' : '#666',
+                margin: '0 0 12px 0',
+                lineHeight: '1.5',
+              }}
+            >
+              Put your{' '}
+              <a
+                href="https://aistudio.google.com/app/api-keys"
+                onClick={(e) => {
+                  e.preventDefault()
+                  const url = 'https://aistudio.google.com/app/api-keys'
+                  // Check if running in Electron
+                  const isElectron = typeof window !== 'undefined' && window.electron !== undefined
+                  if (isElectron && window.electron) {
+                    // Open in external browser via IPC
+                    window.electron.invoke('openExternal', url).catch((error) => {
+                      console.error('Failed to open external URL:', error)
+                      // Fallback to window.open if IPC fails
+                      window.open(url, '_blank')
+                    })
+                  } else {
+                    // Fallback for web
+                    window.open(url, '_blank')
+                  }
+                }}
+                style={{
+                  color: theme === 'dark' ? '#4a9eff' : '#1a73e8',
+                  textDecoration: 'none',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.textDecoration = 'underline'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.textDecoration = 'none'
+                }}
+              >
+                Google AI Studio
+              </a>
+              {' '}key here.
+            </p>
+            <input
+              ref={apiKeyInputRef}
+              type="password"
+              value={googleApiKey}
+              onChange={(e) => handleApiKeyChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  // Save the API key (already handled by handleApiKeyChange, but ensure it's saved)
+                  handleApiKeyChange(googleApiKey)
+                  // Defocus the input
+                  apiKeyInputRef.current?.blur()
+                }
+              }}
+              placeholder="Enter your Google API key"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
+                borderRadius: '4px',
+                backgroundColor: theme === 'dark' ? '#252525' : '#ffffff',
+                color: theme === 'dark' ? '#e0e0e0' : '#202124',
+                fontSize: '13px',
+                outline: 'none',
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                transition: 'border-color 0.2s',
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = theme === 'dark' ? '#555' : '#1a73e8'
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = theme === 'dark' ? '#333' : '#dadce0'
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 // IPC Handlers for Desktop App
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, shell } from 'electron'
 import { documentService } from './services/documentService.js'
 import { chatHistoryService } from './services/chatHistoryService.js'
 import { geminiService } from './services/geminiService.js'
@@ -140,7 +140,7 @@ export function setupIPC() {
 
   // AI operations
   // Chat always uses Gemini (not Ollama)
-  ipcMain.handle('ai:chat', async (_, message: string, documentContent?: string, documentId?: string) => {
+  ipcMain.handle('ai:chat', async (_, apiKey: string, message: string, documentContent?: string, documentId?: string) => {
     try {
       // Get projectId from document if documentId is provided
       let projectId: string | undefined
@@ -148,7 +148,7 @@ export function setupIPC() {
         const document = await documentService.getById(documentId)
         projectId = document?.projectId
       }
-      return await geminiService.chat(message, documentContent, projectId)
+      return await geminiService.chat(apiKey, message, documentContent, projectId)
     } catch (error) {
       console.error('IPC ai:chat error:', error)
       throw error
@@ -157,7 +157,7 @@ export function setupIPC() {
 
   // Stream chat - uses webContents.send to stream chunks
   // Chat always uses Gemini (not Ollama)
-  ipcMain.handle('ai:streamChat', async (event, message: string, documentContent?: string, documentId?: string, chatHistory?: any[], useWebSearch?: boolean, modelName?: string) => {
+  ipcMain.handle('ai:streamChat', async (event, apiKey: string, message: string, documentContent?: string, documentId?: string, chatHistory?: any[], useWebSearch?: boolean, modelName?: string) => {
     const webContents = event.sender
     const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     
@@ -176,7 +176,7 @@ export function setupIPC() {
         try {
           console.log(`[Stream] Calling geminiService.streamChat with ${chatHistory?.length || 0} history messages...`)
           let chunkCount = 0
-          for await (const chunk of geminiService.streamChat(message, documentContent, projectId, chatHistory, useWebSearch, modelName)) {
+          for await (const chunk of geminiService.streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName)) {
             chunkCount++
             webContents.send('ai:streamChunk', streamId, chunk)
           }
@@ -196,7 +196,7 @@ export function setupIPC() {
   })
 
   // Batch questions always uses Gemini (not Ollama)
-  ipcMain.handle('ai:batchQuestions', async (_, questions: string[], documentContent?: string, documentId?: string) => {
+  ipcMain.handle('ai:batchQuestions', async (_, apiKey: string, questions: string[], documentContent?: string, documentId?: string) => {
     try {
       // Get projectId from document if documentId is provided
       let projectId: string | undefined
@@ -204,7 +204,7 @@ export function setupIPC() {
         const document = await documentService.getById(documentId)
         projectId = document?.projectId
       }
-      return await geminiService.batchQuestions(questions, documentContent, projectId)
+      return await geminiService.batchQuestions(apiKey, questions, documentContent, projectId)
     } catch (error) {
       console.error('IPC ai:batchQuestions error:', error)
       throw error
@@ -212,7 +212,7 @@ export function setupIPC() {
   })
 
   // Autocomplete uses Gemini 2.5 Flash Lite (fast and free)
-  ipcMain.handle('ai:autocomplete', async (_, text: string, cursorPosition: number, documentContent?: string, documentId?: string) => {
+  ipcMain.handle('ai:autocomplete', async (_, apiKey: string, text: string, cursorPosition: number, documentContent?: string, documentId?: string) => {
     try {
       // Get projectId from document if documentId is provided
       let projectId: string | undefined
@@ -220,7 +220,7 @@ export function setupIPC() {
         const document = await documentService.getById(documentId)
         projectId = document?.projectId
       }
-      return await geminiService.autocomplete(text, cursorPosition, documentContent, projectId, 'gemini-2.5-flash-lite')
+      return await geminiService.autocomplete(apiKey, text, cursorPosition, documentContent, projectId, 'gemini-2.5-flash-lite')
     } catch (error) {
       console.error('IPC ai:autocomplete error:', error)
       throw error
@@ -229,10 +229,11 @@ export function setupIPC() {
 
   // New AI features: Title generation and rephrase
   // Title generation uses Gemini
-  ipcMain.handle('ai:generateTitle', async (_, documentContent: string) => {
+  ipcMain.handle('ai:generateTitle', async (_, apiKey: string, documentContent: string) => {
     try {
       // Use Gemini via chat
       const msg = await geminiService.chat(
+        apiKey,
         `Generate a short, concise title (max 5 words) for this document: "${documentContent.slice(0, 500)}"`,
         documentContent
       )
@@ -244,7 +245,7 @@ export function setupIPC() {
   })
 
   // Rephrase text uses Gemini 2.5 Flash Lite (fast and free)
-  ipcMain.handle('ai:rephraseText', async (_, text: string, instruction: string) => {
+  ipcMain.handle('ai:rephraseText', async (_, apiKey: string, text: string, instruction: string) => {
     try {
       console.log('[IPC] Rephrase text request:', { textLength: text.length, instruction })
       
@@ -260,7 +261,7 @@ Instruction: ${instruction}
 
 Rephrased text:`
       
-      const msg = await geminiService.chat(prompt, undefined, undefined, undefined, 'gemini-2.5-flash-lite')
+      const msg = await geminiService.chat(apiKey, prompt, undefined, undefined, undefined, 'gemini-2.5-flash-lite')
       let result = msg.content.trim()
       
       // Remove any "Next step" or similar follow-up text that might still appear
@@ -291,13 +292,15 @@ Rephrased text:`
   // Check AI service status
   ipcMain.handle('ai:getStatus', async () => {
     try {
+      // API key is now stored in localStorage on the frontend
+      // This endpoint is kept for compatibility but always returns true for gemini
       return {
-        gemini: !!process.env.GEMINI_API_KEY
+        gemini: true
       }
     } catch (error) {
       console.error('IPC ai:getStatus error:', error)
       return {
-        gemini: !!process.env.GEMINI_API_KEY
+        gemini: true
       }
     }
   })
@@ -325,6 +328,16 @@ Rephrased text:`
     const window = BrowserWindow.fromWebContents(event.sender)
     if (window) {
       window.close()
+    }
+  })
+
+  // Open external URL in default browser
+  ipcMain.handle('openExternal', async (_, url: string) => {
+    try {
+      await shell.openExternal(url)
+    } catch (error) {
+      console.error('IPC openExternal error:', error)
+      throw error
     }
   })
 

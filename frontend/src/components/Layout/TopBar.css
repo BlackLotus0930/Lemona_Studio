@@ -111,6 +111,10 @@
   -webkit-app-region: no-drag;
 }
 
+.settings-btn {
+  -webkit-app-region: no-drag;
+}
+
 .topbar-light .window-control-btn {
   color: #5f6368;
 }

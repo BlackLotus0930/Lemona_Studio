@@ -40,6 +40,7 @@ import TopBar from './TopBar'
 import { useNavigate, useParams } from 'react-router-dom'
 
 const AI_PANEL_STORAGE_KEY = 'aiPanelState'
+const FILE_EXPLORER_SIZE_STORAGE_KEY = 'fileExplorerSize'
 
 interface AIPanelState {
   isOpen: boolean
@@ -67,6 +68,29 @@ function saveAIPanelState(state: AIPanelState) {
     localStorage.setItem(AI_PANEL_STORAGE_KEY, JSON.stringify(state))
   } catch (error) {
     console.error('Failed to save AI panel state:', error)
+  }
+}
+
+function loadFileExplorerSize(): number {
+  try {
+    const stored = localStorage.getItem(FILE_EXPLORER_SIZE_STORAGE_KEY)
+    if (stored) {
+      const parsed = parseFloat(stored)
+      if (!isNaN(parsed) && parsed >= 0 && parsed <= 30) {
+        return parsed
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load FileExplorer size:', error)
+  }
+  return 14 // Default size
+}
+
+function saveFileExplorerSize(size: number) {
+  try {
+    localStorage.setItem(FILE_EXPLORER_SIZE_STORAGE_KEY, size.toString())
+  } catch (error) {
+    console.error('Failed to save FileExplorer size:', error)
   }
 }
 
@@ -127,8 +151,10 @@ export default function Layout() {
   const aiPanelRef = useRef<ImperativePanelHandle>(null)
   const fileExplorerPanelRef = useRef<ImperativePanelHandle>(null)
   const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const isUserResizingRef = useRef<boolean>(false) // Track if user is actively resizing
-  const [fileExplorerSize, setFileExplorerSize] = useState<number>(14) // Track File Explorer size as state
+  const isUserResizingRef = useRef<boolean>(false) // Track if user is actively resizing AI panel
+  const isFileExplorerResizingRef = useRef<boolean>(false) // Track if user is actively resizing File Explorer
+  const fileExplorerResizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [fileExplorerSize, setFileExplorerSize] = useState<number>(() => loadFileExplorerSize()) // Track File Explorer size as state
   const [selectedFolder, setSelectedFolder] = useState<'library' | 'project' | null>(null) // Track selected folder
   const [isSearchMode, setIsSearchMode] = useState(() => {
     // Restore search mode from sessionStorage if available (persists across navigation)
@@ -1932,9 +1958,10 @@ export default function Layout() {
   }, [isAIPanelOpen])
 
   // Restore panel sizes when AI panel state changes
+  // Note: This should NOT run when fileExplorerSize changes (user resizing file explorer)
   useEffect(() => {
-    // Don't interfere if user is actively resizing
-    if (isUserResizingRef.current) return
+    // Don't interfere if user is actively resizing either panel
+    if (isUserResizingRef.current || isFileExplorerResizingRef.current) return
     
     const timer = setTimeout(() => {
       if (isAIPanelOpen && aiPanelRef.current && editorPanelRef.current && fileExplorerPanelRef.current) {
@@ -1963,7 +1990,7 @@ export default function Layout() {
     }, 50) // Increased delay to ensure DOM is ready
     
     return () => clearTimeout(timer)
-  }, [isAIPanelOpen, aiPanelWidth, fileExplorerSize])
+  }, [isAIPanelOpen, aiPanelWidth]) // Removed fileExplorerSize from dependencies
 
   const handleAIPanelClose = () => {
     // Save current File Explorer size before closing AI panel
@@ -2010,11 +2037,14 @@ export default function Layout() {
     }
   }
 
-  // Cleanup resize timeout on unmount
+  // Cleanup resize timeouts on unmount
   useEffect(() => {
     return () => {
       if (resizeTimeoutRef.current) {
         clearTimeout(resizeTimeoutRef.current)
+      }
+      if (fileExplorerResizeTimeoutRef.current) {
+        clearTimeout(fileExplorerResizeTimeoutRef.current)
       }
     }
   }, [])
@@ -2203,8 +2233,23 @@ export default function Layout() {
           maxSize={30}
           collapsible={true}
           onResize={(size) => {
+            // Mark that user is actively resizing File Explorer
+            isFileExplorerResizingRef.current = true
+            
             // Track File Explorer size changes
             setFileExplorerSize(size)
+            
+            // Save to localStorage
+            saveFileExplorerSize(size)
+            
+            // Debounce clearing the resizing flag
+            if (fileExplorerResizeTimeoutRef.current) {
+              clearTimeout(fileExplorerResizeTimeoutRef.current)
+            }
+            fileExplorerResizeTimeoutRef.current = setTimeout(() => {
+              // User finished resizing File Explorer
+              isFileExplorerResizingRef.current = false
+            }, 500) // Same timeout as AI panel resize
           }}
         >
           <div style={{
@@ -2313,17 +2358,21 @@ export default function Layout() {
           </div>
         </Panel>
         
-        <PanelResizeHandle style={{ 
-          width: '1px', 
-          backgroundColor: borderColor,
-          cursor: 'col-resize',
-          transition: 'background-color 0.2s',
-          flexShrink: 0
-        }} />
+        <PanelResizeHandle 
+          id="file-explorer-resize-handle"
+          style={{ 
+            width: '1px', 
+            backgroundColor: borderColor,
+            cursor: 'col-resize',
+            transition: 'background-color 0.2s',
+            flexShrink: 0
+          }} 
+        />
         
         {/* Editor Panel */}
         <Panel 
           ref={editorPanelRef}
+          order={2}
           defaultSize={isAIPanelOpen 
             ? ((100 - fileExplorerSize) - ((aiPanelWidth / 100) * (100 - fileExplorerSize))) 
             : (100 - fileExplorerSize)

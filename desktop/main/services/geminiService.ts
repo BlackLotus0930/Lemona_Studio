@@ -4,22 +4,20 @@ import { AIChatMessage, AIQuestion, AutocompleteSuggestion } from '../../../shar
 import { projectService } from './projectService.js'
 import { documentService } from './documentService.js'
 
-let genAI: GoogleGenerativeAI | null = null
-let initialized = false
+// Store API key instances per API key to allow multiple users
+const genAICache: Map<string, GoogleGenerativeAI> = new Map()
 
-function getModel(modelName: string = 'gemini-2.5-flash'): GenerativeModel {
-  if (!initialized) {
-    initialized = true
-    const apiKey = process.env.GEMINI_API_KEY || ''
-    if (!apiKey) {
-      console.warn('WARNING: GEMINI_API_KEY is not set. AI features will not work.')
-      throw new Error('GEMINI_API_KEY is not configured. Please set it in your .env file.')
-    }
-    genAI = new GoogleGenerativeAI(apiKey)
+function getModel(apiKey: string, modelName: string = 'gemini-2.5-flash'): GenerativeModel {
+  if (!apiKey) {
+    throw new Error('Google API key is not configured. Please set it in Settings > API Keys.')
   }
-  if (!genAI) {
-    throw new Error('GEMINI_API_KEY is not configured. Please set it in your .env file.')
+  
+  // Use cached instance if available, otherwise create new one
+  if (!genAICache.has(apiKey)) {
+    genAICache.set(apiKey, new GoogleGenerativeAI(apiKey))
   }
+  
+  const genAI = genAICache.get(apiKey)!
   return genAI.getGenerativeModel({ model: modelName })
 }
 
@@ -110,8 +108,8 @@ function extractTextFromTipTap(node: any): string {
 }
 
 export const geminiService = {
-  async chat(message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string): Promise<AIChatMessage> {
-    const aiModel = getModel(modelName || 'gemini-2.5-flash')
+  async chat(apiKey: string, message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string): Promise<AIChatMessage> {
+    const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
     const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory)
     const conversationHistory = [...(history || [])]
     conversationHistory.push({
@@ -146,6 +144,7 @@ export const geminiService = {
   },
 
   async *streamChat(
+    apiKey: string,
     message: string, 
     documentContent?: string, 
     projectId?: string,
@@ -153,7 +152,7 @@ export const geminiService = {
     useWebSearch?: boolean,
     modelName?: string
   ): AsyncGenerator<string> {
-    const aiModel = getModel(modelName || 'gemini-2.5-flash')
+    const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
     const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory)
     const conversationHistory = [...(history || [])]
     conversationHistory.push({
@@ -199,8 +198,8 @@ export const geminiService = {
     }
   },
 
-  async batchQuestions(questions: string[], documentContent?: string, projectId?: string, modelName?: string): Promise<AIQuestion[]> {
-    const aiModel = getModel(modelName || 'gemini-2.5-flash')
+  async batchQuestions(apiKey: string, questions: string[], documentContent?: string, projectId?: string, modelName?: string): Promise<AIQuestion[]> {
+    const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
     const { systemInstruction } = await buildContext(documentContent, projectId)
     const questionsText = questions.map((q, i) => `${i + 1}. ${q}`).join('\n')
     const prompt = `${systemInstruction}\n\nUser has the following questions. Please answer each one:\n\n${questionsText}\n\nPlease provide answers in a numbered list format.`
@@ -221,13 +220,14 @@ export const geminiService = {
   },
 
   async autocomplete(
+    apiKey: string,
     text: string, 
     cursorPosition: number, 
     documentContent?: string,
     projectId?: string,
     modelName?: string
   ): Promise<AutocompleteSuggestion> {
-    const aiModel = getModel(modelName || 'gemini-2.5-flash')
+    const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
     const { systemInstruction } = await buildContext(documentContent, projectId)
     const beforeCursor = text.slice(0, cursorPosition)
     const afterCursor = text.slice(cursorPosition)

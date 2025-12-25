@@ -4,6 +4,16 @@ import { Project, AIChatMessage } from '@shared/types'
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electron !== undefined
 
+// Helper to get API key from localStorage
+function getApiKey(): string {
+  try {
+    return localStorage.getItem('googleApiKey') || ''
+  } catch (error) {
+    console.error('Failed to get API key from localStorage:', error)
+    return ''
+  }
+}
+
 // Helper to invoke IPC or fallback to HTTP
 async function invokeOrFetch(channel: string, ...args: any[]): Promise<any> {
   if (isElectron) {
@@ -27,16 +37,26 @@ export const documentApi = {
 }
 
 export const aiApi = {
-  chat: (message: string, documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') =>
-    invokeOrFetch('ai:chat', message, documentContent, documentId, provider),
-  batchQuestions: (questions: string[], documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') =>
-    invokeOrFetch('ai:batchQuestions', questions, documentContent, documentId, provider),
-  autocomplete: (text: string, cursorPosition: number, documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') =>
-    invokeOrFetch('ai:autocomplete', text, cursorPosition, documentContent, documentId, provider),
-  generateTitle: (documentContent: string, provider?: 'gemini' | 'ollama' | 'auto') =>
-    invokeOrFetch('ai:generateTitle', documentContent, provider),
-  rephraseText: (text: string, instruction: string, provider?: 'gemini' | 'ollama' | 'auto') =>
-    invokeOrFetch('ai:rephraseText', text, instruction, provider),
+  chat: (message: string, documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') => {
+    const apiKey = getApiKey()
+    return invokeOrFetch('ai:chat', apiKey, message, documentContent, documentId, provider)
+  },
+  batchQuestions: (questions: string[], documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') => {
+    const apiKey = getApiKey()
+    return invokeOrFetch('ai:batchQuestions', apiKey, questions, documentContent, documentId, provider)
+  },
+  autocomplete: (text: string, cursorPosition: number, documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') => {
+    const apiKey = getApiKey()
+    return invokeOrFetch('ai:autocomplete', apiKey, text, cursorPosition, documentContent, documentId, provider)
+  },
+  generateTitle: (documentContent: string, provider?: 'gemini' | 'ollama' | 'auto') => {
+    const apiKey = getApiKey()
+    return invokeOrFetch('ai:generateTitle', apiKey, documentContent, provider)
+  },
+  rephraseText: (text: string, instruction: string, provider?: 'gemini' | 'ollama' | 'auto') => {
+    const apiKey = getApiKey()
+    return invokeOrFetch('ai:rephraseText', apiKey, text, instruction, provider)
+  },
   getStatus: () =>
     invokeOrFetch('ai:getStatus'),
   streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string, provider?: 'gemini' | 'ollama' | 'auto'): Promise<Response> => {
@@ -44,12 +64,14 @@ export const aiApi = {
       throw new Error('Streaming not available in web mode')
     }
 
+    const apiKey = getApiKey()
+
     // Create a ReadableStream that reads from IPC events
     const stream = new ReadableStream({
       async start(controller) {
         try {
           // Start stream and get streamId
-          const { streamId } = await window.electron!.invoke('ai:streamChat', message, documentContent, documentId, chatHistory, useWebSearch, modelName, provider)
+          const { streamId } = await window.electron!.invoke('ai:streamChat', apiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, provider)
           console.log('[Desktop API] Stream started with ID:', streamId)
           
           // Note: preload script strips the event, so callbacks receive args directly

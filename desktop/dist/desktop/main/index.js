@@ -41,14 +41,9 @@ if (!envLoaded) {
     console.warn(`   1. ${desktopEnvPath}`);
     console.warn(`   2. ${rootEnvPath}`);
 }
-// Log environment status
-if (process.env.GEMINI_API_KEY) {
-    console.log('✅ GEMINI_API_KEY loaded from .env');
-}
-else {
-    console.warn('⚠️  WARNING: GEMINI_API_KEY not found in .env file');
-    console.warn('   AI features will not work. Please add GEMINI_API_KEY to your .env file');
-}
+// Note: API keys are now stored in localStorage via the Settings modal
+// Users can configure their Google API key in Settings > API Keys
+console.log('✅ API keys are configured via Settings > API Keys in the application');
 let mainWindow = null;
 // Setup IPC handlers
 setupIPC();
