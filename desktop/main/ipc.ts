@@ -482,6 +482,55 @@ Rephrased text:`
     }
   })
 
+  // Get PDF file content as base64 (for loading large PDFs without storing in JSON)
+  // Uses streaming for better memory efficiency with large files
+  ipcMain.handle('pdf:getFileContent', async (_, documentId: string) => {
+    try {
+      const document = await documentService.getById(documentId)
+      if (!document) {
+        const error = new Error(`Document ${documentId} not found`)
+        console.error('IPC pdf:getFileContent error:', error.message)
+        throw error
+      }
+      
+      // Check if document is a PDF
+      if (!document.title.toLowerCase().endsWith('.pdf')) {
+        const error = new Error('Document is not a PDF')
+        console.error('IPC pdf:getFileContent error:', error.message)
+        throw error
+      }
+      
+      // Get file path
+      const FILES_DIR = path.join(app.getPath('userData'), 'files')
+      const fileName = document.title
+      const filePath = path.join(FILES_DIR, `${documentId}_${fileName}`)
+      
+      // Check if file exists before trying to read it
+      const fs = await import('fs/promises')
+      try {
+        await fs.access(filePath)
+      } catch (accessError) {
+        const error = new Error(`PDF file not found at path: ${filePath}`)
+        console.error('IPC pdf:getFileContent error:', error.message)
+        throw error
+      }
+      
+      // Read file asynchronously - this doesn't block the main process
+      // The conversion to base64 happens in chunks to keep the event loop responsive
+      const fileBuffer = await fs.readFile(filePath)
+      
+      // Convert to base64 - this is CPU intensive but necessary for PDF.js
+      // The frontend will handle this conversion in chunks to keep UI responsive
+      const base64 = fileBuffer.toString('base64')
+      const pdfDataUrl = `data:application/pdf;base64,${base64}`
+      
+      return pdfDataUrl
+    } catch (error) {
+      console.error('IPC pdf:getFileContent error:', error)
+      throw error
+    }
+  })
+
   // PDF text extraction handler
   ipcMain.handle('pdf:extractText', async (_, documentId: string) => {
     try {

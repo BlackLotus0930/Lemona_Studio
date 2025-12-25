@@ -19,6 +19,8 @@ import DocumentEditor, { DocumentEditorSearchHandle } from '../Editor/DocumentEd
 import Toolbar from '../Editor/Toolbar'
 import AIPanel from '../AIPanel/AIPanel'
 import FileExplorer from '../FileExplorer/FileExplorer'
+import { FileExplorerSkeleton } from '../FileExplorer/FileExplorerSkeleton'
+import { DocumentEditorSkeleton } from '../Editor/DocumentEditorSkeleton'
 import FullScreenPDFViewer, { PDFViewerSearchHandle } from '../PDFViewer/FullScreenPDFViewer'
 import { Document } from '@shared/types'
 import { documentApi, exportApi, projectApi } from '../../services/api'
@@ -359,7 +361,7 @@ export default function Layout() {
   // Track previous projectId to detect changes
   const previousProjectIdRef = useRef<string | undefined>(undefined)
   
-  // Load all documents for FileExplorer and TopBar
+  // Load project name immediately for shell UI, then load documents
   useEffect(() => {
     const currentProjectId = document?.projectId
     
@@ -368,6 +370,23 @@ export default function Layout() {
       // Clear documents immediately when project changes to prevent showing stale data
       setDocuments([])
       setIsLoadingDocuments(true)
+      
+      // Load project name immediately for instant shell UI
+      if (currentProjectId) {
+        projectApi.getById(currentProjectId)
+          .then(project => {
+            if (project) {
+              setProjectName(project.title)
+            } else {
+              setProjectName('LEMONA')
+            }
+          })
+          .catch(() => {
+            setProjectName('LEMONA')
+          })
+      } else {
+        setProjectName('LEMONA')
+      }
       
       // Clear tabs that don't belong to the current project
       setOpenTabs(prevTabs => {
@@ -499,20 +518,13 @@ export default function Layout() {
 
   const loadDocuments = async () => {
     // Note: documents are already cleared in useEffect when projectId changes
+    // Note: project name is already loaded in useEffect for instant shell UI
     // Set loading state
     setIsLoadingDocuments(true)
     
     try {
       // If document has projectId, load project's documents
       if (document?.projectId) {
-        // Load project to get its name
-        const project = await projectApi.getById(document.projectId)
-        if (project) {
-          setProjectName(project.title) // Store original case for exports
-        } else {
-          setProjectName('LEMONA')
-        }
-        
         const docs = await projectApi.getDocuments(document.projectId)
         // Sort by order (creation order) instead of updatedAt
         const sortedDocs = docs.sort((a: any, b: any) => {
@@ -525,14 +537,12 @@ export default function Layout() {
         setDocuments(Array.isArray(sortedDocs) ? sortedDocs : [])
       } else {
         // No project, show all documents
-        setProjectName('LEMONA')
         const docs = await documentApi.list()
         setDocuments(Array.isArray(docs) ? docs : [])
       }
     } catch (error) {
       console.error('Failed to load documents:', error)
       setDocuments([])
-      setProjectName('LEMONA')
     } finally {
       setIsLoadingDocuments(false)
     }
@@ -2145,22 +2155,8 @@ export default function Layout() {
     }
   }
 
-  // Only show full-screen loading on initial load when there's no document yet
-  // When switching documents, keep the UI visible for smooth transition
-  if (isLoadingDocument && id && !document) {
-    return (
-      <div style={{
-        height: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: bgColor,
-        color: secondaryTextColor
-      }}>
-        <div>Loading...</div>
-      </div>
-    )
-  }
+  // Show shell UI immediately - no full-screen loading blocker
+  // Skeletons will handle loading states for progressive reveal
 
   return (
     <div style={{ 
@@ -2351,14 +2347,7 @@ export default function Layout() {
             {/* File Explorer Content */}
             <div style={{ flex: 1, overflow: 'hidden', backgroundColor: bgColor, padding: 0, margin: 0 }}>
               {isLoadingDocuments ? (
-                <div style={{ 
-                  padding: '20px', 
-                  textAlign: 'center', 
-                  color: secondaryTextColor,
-                  fontSize: '13px'
-                }}>
-                  Loading...
-                </div>
+                <FileExplorerSkeleton projectName={projectName} />
               ) : (
                 <FileExplorer
                   documents={documents}
@@ -2445,17 +2434,8 @@ export default function Layout() {
           minSize={40}
         >
           {isLoadingDocument && !document ? (
-            // Show loading state in editor area only when loading first document
-            <div style={{
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: bgColor,
-              color: secondaryTextColor
-            }}>
-              <div>Loading...</div>
-            </div>
+            // Show skeleton in editor area when loading first document
+            <DocumentEditorSkeleton />
           ) : (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
               {/* Render all PDF Viewers for open PDF tabs, but only show the active one */}

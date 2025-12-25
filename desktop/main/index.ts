@@ -72,7 +72,8 @@ function setupCSP() {
     "connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com" + (isDev ? " http://localhost:5173 ws://localhost:5173" : ""),
     // Allow blob: and data: for PDF viewing in iframe
     "frame-src 'self' blob: data:",
-    "object-src 'none'",
+    // Allow blob: for object-src to support PDF rendering in some browsers
+    "object-src 'self' blob: data:",
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",

@@ -42,58 +42,97 @@ export async function extractPDFText(
   try {
     console.log('[PDF Extraction] Starting extraction for:', filePath)
     
-    // Read PDF file
-    const dataBuffer = await fs.readFile(filePath)
-    console.log('[PDF Extraction] File read, size:', dataBuffer.length, 'bytes')
+    // Check file size first to prevent memory issues
+    const stats = await fs.stat(filePath)
+    const fileSizeMB = stats.size / (1024 * 1024)
+    console.log('[PDF Extraction] File size:', fileSizeMB.toFixed(2), 'MB')
     
-    // Load PDF document using pdfjs-dist legacy build
-    const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(dataBuffer),
-      useSystemFonts: true,
-      verbosity: 0, // Suppress warnings
-    })
+    // For very large files (>50MB), use streaming approach
+    // Read PDF file - pdfjs-dist can handle streaming with file path
+    // Use file path directly instead of loading entire buffer for large files
+    const loadingTask = fileSizeMB > 50
+      ? pdfjsLib.getDocument({
+          url: filePath, // Use file path for large files to avoid loading entire file into memory
+          useSystemFonts: true,
+          verbosity: 0,
+          disableAutoFetch: true, // Disable auto-fetch to reduce memory usage
+          disableStream: false, // Enable streaming
+        })
+      : pdfjsLib.getDocument({
+          data: new Uint8Array(await fs.readFile(filePath)), // For smaller files, load into memory
+          useSystemFonts: true,
+          verbosity: 0,
+        })
     
     const pdfDocument = await loadingTask.promise
     console.log('[PDF Extraction] PDF loaded, pages:', pdfDocument.numPages)
     
     const pages: PDFPageText[] = []
     let fullText = ''
+    const totalPages = pdfDocument.numPages
     
-    // Extract text from each page
-    for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-      console.log(`[PDF Extraction] Extracting text from page ${pageNum}/${pdfDocument.numPages}`)
+    // Extract text from each page with memory management
+    // Process pages in batches and clear page references to free memory
+    const BATCH_SIZE = fileSizeMB > 50 ? 5 : 10 // Smaller batches for large files
+    
+    for (let batchStart = 1; batchStart <= totalPages; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE - 1, totalPages)
       
-      const page = await pdfDocument.getPage(pageNum)
-      const textContent = await page.getTextContent()
-      
-      // Combine all text items from the page
-      let pageText = ''
-      if (textContent.items && Array.isArray(textContent.items)) {
-        pageText = textContent.items
-          .map((item: any) => {
-            // Handle different item types
-            if (typeof item === 'string') return item
-            if (item.str) return item.str
-            return ''
+      for (let pageNum = batchStart; pageNum <= batchEnd; pageNum++) {
+        try {
+          console.log(`[PDF Extraction] Extracting text from page ${pageNum}/${totalPages}`)
+          
+          const page = await pdfDocument.getPage(pageNum)
+          const textContent = await page.getTextContent()
+          
+          // Combine all text items from the page
+          let pageText = ''
+          if (textContent.items && Array.isArray(textContent.items)) {
+            pageText = textContent.items
+              .map((item: any) => {
+                // Handle different item types
+                if (typeof item === 'string') return item
+                if (item.str) return item.str
+                return ''
+              })
+              .filter((text: string) => text.length > 0)
+              .join(' ')
+          }
+          
+          console.log(`[PDF Extraction] Page ${pageNum} text length:`, pageText.length)
+          
+          fullText += (fullText ? '\n\n' : '') + pageText
+          
+          // Split into paragraphs if requested
+          const paragraphs = extractParagraphs 
+            ? splitIntoParagraphs(pageText)
+            : [pageText]
+          
+          pages.push({
+            pageNumber: pageNum,
+            paragraphs,
+            fullText: pageText,
           })
-          .filter((text: string) => text.length > 0)
-          .join(' ')
+          
+          // Clean up page reference to free memory
+          if (page.cleanup) {
+            page.cleanup()
+          }
+        } catch (pageError) {
+          console.error(`[PDF Extraction] Error extracting page ${pageNum}:`, pageError)
+          // Continue with next page instead of crashing
+          pages.push({
+            pageNumber: pageNum,
+            paragraphs: [],
+            fullText: '',
+          })
+        }
       }
       
-      console.log(`[PDF Extraction] Page ${pageNum} text length:`, pageText.length)
-      
-      fullText += (fullText ? '\n\n' : '') + pageText
-      
-      // Split into paragraphs if requested
-      const paragraphs = extractParagraphs 
-        ? splitIntoParagraphs(pageText)
-        : [pageText]
-      
-      pages.push({
-        pageNumber: pageNum,
-        paragraphs,
-        fullText: pageText,
-      })
+      // Small delay between batches for large PDFs to prevent memory pressure
+      if (totalPages > 50 && batchEnd < totalPages) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
     }
     
     console.log('[PDF Extraction] Extraction complete, total text length:', fullText.length)
@@ -127,9 +166,64 @@ function splitIntoParagraphs(text: string): string[] {
     .filter(p => p.length > 0)
 }
 
+// PDF Extraction Queue System
+// Limits concurrent PDF extractions to prevent memory issues and crashes
+interface ExtractionTask {
+  filePath: string
+  documentId: string
+  updateCallback?: (pdfText: PDFTextContent) => Promise<void>
+  resolve: (value: PDFTextContent) => void
+  reject: (error: Error) => void
+}
+
+const extractionQueue: ExtractionTask[] = []
+let activeExtractions = 0
+const MAX_CONCURRENT_EXTRACTIONS = 2 // Process max 2 PDFs at a time
+
+async function processExtractionQueue() {
+  // Don't start new extractions if we're at the limit
+  if (activeExtractions >= MAX_CONCURRENT_EXTRACTIONS || extractionQueue.length === 0) {
+    return
+  }
+
+  // Get next task from queue
+  const task = extractionQueue.shift()
+  if (!task) return
+
+  activeExtractions++
+  console.log(`[PDF Extraction Queue] Starting extraction (${activeExtractions}/${MAX_CONCURRENT_EXTRACTIONS} active, ${extractionQueue.length} queued):`, task.documentId)
+
+  try {
+    // Run extraction
+    const pdfText = await extractPDFText(task.filePath, {
+      parsePerPage: true,
+      extractParagraphs: true,
+    })
+
+    console.log('[PDF Extraction] Async extraction complete, pages:', pdfText.pages.length)
+
+    // Call update callback if provided
+    if (task.updateCallback) {
+      console.log('[PDF Extraction] Calling update callback')
+      await task.updateCallback(pdfText)
+    }
+
+    task.resolve(pdfText)
+  } catch (error) {
+    console.error('[PDF Extraction] Error in queue processing:', error)
+    task.reject(error instanceof Error ? error : new Error('PDF extraction failed'))
+  } finally {
+    activeExtractions--
+    console.log(`[PDF Extraction Queue] Extraction complete (${activeExtractions}/${MAX_CONCURRENT_EXTRACTIONS} active, ${extractionQueue.length} queued)`)
+    
+    // Process next task in queue
+    processExtractionQueue()
+  }
+}
+
 /**
- * Extract text from PDF asynchronously (background job)
- * This function can be called without blocking the main thread
+ * Extract text from PDF asynchronously (background job) with queue management
+ * This function queues extractions to prevent memory issues with multiple PDFs
  * @param filePath Path to the PDF file
  * @param documentId Document ID to update
  * @param updateCallback Optional callback to update document when extraction completes
@@ -139,21 +233,18 @@ export async function extractPDFTextAsync(
   documentId: string,
   updateCallback?: (pdfText: PDFTextContent) => Promise<void>
 ): Promise<PDFTextContent> {
-  console.log('[PDF Extraction] Starting async extraction for document:', documentId)
-  
-  // Run extraction in background
-  const pdfText = await extractPDFText(filePath, {
-    parsePerPage: true,
-    extractParagraphs: true,
+  console.log('[PDF Extraction] Queueing extraction for document:', documentId)
+
+  return new Promise<PDFTextContent>((resolve, reject) => {
+    extractionQueue.push({
+      filePath,
+      documentId,
+      updateCallback,
+      resolve,
+      reject,
+    })
+
+    // Start processing if not already running
+    processExtractionQueue()
   })
-  
-  console.log('[PDF Extraction] Async extraction complete, pages:', pdfText.pages.length)
-  
-  // Call update callback if provided
-  if (updateCallback) {
-    console.log('[PDF Extraction] Calling update callback')
-    await updateCallback(pdfText)
-  }
-  
-  return pdfText
 }

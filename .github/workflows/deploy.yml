@@ -1,0 +1,9 @@
+# .github/workflows/deploy.yml
+name: Deploy
+on: [push]
+jobs:
+  dummy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Do nothing
+        run: echo "No deploy configured"

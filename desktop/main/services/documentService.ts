@@ -57,10 +57,29 @@ export const documentService = {
         if (file.endsWith('.json')) {
           try {
             const filePath = path.join(DOCUMENTS_DIR, file)
+            
+            // Check if file still exists (may have been deleted)
+            try {
+              await fs.access(filePath)
+            } catch {
+              // File doesn't exist, skip it
+              console.log(`[getAll] Skipping deleted file: ${file}`)
+              continue
+            }
+            
             const content = await fs.readFile(filePath, 'utf-8')
-            documents.push(JSON.parse(content))
+            const doc = JSON.parse(content)
+            
+            // Validate document has required fields
+            if (!doc.id || !doc.title) {
+              console.warn(`[getAll] Skipping invalid document: ${file}`)
+              continue
+            }
+            
+            documents.push(doc)
           } catch (fileError) {
             console.error(`Error reading file ${file}:`, fileError)
+            // Continue with other files instead of crashing
           }
         }
       }
@@ -185,6 +204,20 @@ export const documentService = {
     await ensureDocumentsDir()
     await ensureFilesDir()
     
+    // Check for duplicate file names and add number suffix if needed
+    const allDocs = await this.getAll()
+    const baseName = fileName.substring(0, fileName.lastIndexOf('.')) || fileName
+    const ext = fileName.substring(fileName.lastIndexOf('.')) || ''
+    
+    let finalFileName = fileName
+    let counter = 1
+    
+    // Check if file with same name already exists
+    while (allDocs.some(doc => doc.title === finalFileName)) {
+      finalFileName = `${baseName} (${counter})${ext}`
+      counter++
+    }
+    
     // Read the source file
     const fileBuffer = await fs.readFile(sourceFilePath)
     
@@ -193,19 +226,19 @@ export const documentService = {
     const now = new Date().toISOString()
     
     // Copy file to files directory
-    const targetFilePath = getFilePath(id, fileName)
+    const targetFilePath = getFilePath(id, finalFileName)
     await fs.writeFile(targetFilePath, fileBuffer)
     
     // Determine file type and create appropriate content
-    const ext = fileName.toLowerCase().split('.').pop() || ''
+    const fileExt = finalFileName.toLowerCase().split('.').pop() || ''
     let content: any
     
-    if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'gif' || ext === 'webp') {
+    if (fileExt === 'png' || fileExt === 'jpg' || fileExt === 'jpeg' || fileExt === 'gif' || fileExt === 'webp') {
       // Image file - convert to base64 and embed as image
       const base64 = fileBuffer.toString('base64')
-      const mimeType = ext === 'png' ? 'image/png' : 
-                      ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' :
-                      ext === 'gif' ? 'image/gif' : 'image/webp'
+      const mimeType = fileExt === 'png' ? 'image/png' : 
+                      fileExt === 'jpg' || fileExt === 'jpeg' ? 'image/jpeg' :
+                      fileExt === 'gif' ? 'image/gif' : 'image/webp'
       const dataUrl = `data:${mimeType};base64,${base64}`
       
       content = {
@@ -215,7 +248,7 @@ export const documentService = {
             type: 'image',
             attrs: {
               src: dataUrl,
-              alt: fileName,
+              alt: finalFileName,
             }
           },
           {
@@ -224,19 +257,18 @@ export const documentService = {
           }
         ]
       }
-    } else if (ext === 'pdf') {
+    } else if (fileExt === 'pdf') {
       // PDF file - create a PDF viewer node
-      const base64 = fileBuffer.toString('base64')
-      const pdfDataUrl = `data:application/pdf;base64,${base64}`
-      
+      // For large PDFs, don't store base64 in JSON - use document ID reference instead
+      // The frontend will load the PDF file content on demand via IPC
       content = {
         type: 'doc',
         content: [
           {
             type: 'pdfViewer',
             attrs: {
-              src: pdfDataUrl,
-              fileName: fileName,
+              src: `document://${id}`, // Use document ID reference instead of base64
+              fileName: finalFileName,
             }
           },
           {
@@ -245,7 +277,7 @@ export const documentService = {
           }
         ]
       }
-    } else if (ext === 'docx' || ext === 'xlsx') {
+    } else if (fileExt === 'docx' || fileExt === 'xlsx') {
       // Office files - show file info and download option
       content = {
         type: 'doc',
@@ -255,7 +287,7 @@ export const documentService = {
             content: [
               {
                 type: 'text',
-                text: `📄 ${fileName}`,
+                text: `📄 ${finalFileName}`,
                 marks: [{ type: 'bold' }]
               }
             ]
@@ -265,7 +297,7 @@ export const documentService = {
             content: [
               {
                 type: 'text',
-                text: `File type: ${ext.toUpperCase()}\nUploaded to: ${folder === 'library' ? 'Library' : 'Workspace'}\n\nThis file can be downloaded from the file explorer.`
+                text: `File type: ${fileExt.toUpperCase()}\nUploaded to: ${folder === 'library' ? 'Library' : 'Workspace'}\n\nThis file can be downloaded from the file explorer.`
               }
             ]
           },
@@ -285,7 +317,7 @@ export const documentService = {
             content: [
               {
                 type: 'text',
-                text: `📄 ${fileName}`
+                text: `📄 ${finalFileName}`
               }
             ]
           },
@@ -300,7 +332,7 @@ export const documentService = {
     // Create document entry
     const document: Document = {
       id,
-      title: fileName,
+      title: finalFileName,
       content: JSON.stringify(content),
       createdAt: now,
       updatedAt: now,

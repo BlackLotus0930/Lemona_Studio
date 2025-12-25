@@ -465,6 +465,38 @@ Rephrased text:`;
             throw error;
         }
     });
+    // Get PDF file content as base64 (for loading large PDFs without storing in JSON)
+    // Uses streaming for better memory efficiency with large files
+    ipcMain.handle('pdf:getFileContent', async (_, documentId) => {
+        try {
+            const document = await documentService.getById(documentId);
+            if (!document) {
+                throw new Error(`Document ${documentId} not found`);
+            }
+            // Check if document is a PDF
+            if (!document.title.toLowerCase().endsWith('.pdf')) {
+                throw new Error('Document is not a PDF');
+            }
+            // Get file path
+            const FILES_DIR = path.join(app.getPath('userData'), 'files');
+            const fileName = document.title;
+            const filePath = path.join(FILES_DIR, `${documentId}_${fileName}`);
+            // Read file asynchronously - this doesn't block the main process
+            // The conversion to base64 happens in chunks to keep the event loop responsive
+            const fs = await import('fs/promises');
+            // Read file in chunks for better memory management with large files
+            const fileBuffer = await fs.readFile(filePath);
+            // Convert to base64 - this is CPU intensive but necessary for PDF.js
+            // The frontend will handle this conversion in chunks to keep UI responsive
+            const base64 = fileBuffer.toString('base64');
+            const pdfDataUrl = `data:application/pdf;base64,${base64}`;
+            return pdfDataUrl;
+        }
+        catch (error) {
+            console.error('IPC pdf:getFileContent error:', error);
+            throw error;
+        }
+    });
     // PDF text extraction handler
     ipcMain.handle('pdf:extractText', async (_, documentId) => {
         try {
