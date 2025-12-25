@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react'
+import { useState, useEffect, useRef, useImperativeHandle, forwardRef, useLayoutEffect } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import { Document } from '@shared/types'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -43,7 +43,8 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     // Canvas refs
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
-    const [navBarLeft, setNavBarLeft] = useState('50%')
+    const [navBarLeft, setNavBarLeft] = useState<string | null>(null)
+    const navBarLeftRef = useRef<string | null>(null) // Track previous position to avoid unnecessary updates
     const renderTaskRef = useRef<any>(null) // Track current render task to cancel if needed
     
     // Inline search state
@@ -316,7 +317,6 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                 const docCheck = await documentApi.get(documentId)
                 if (!docCheck) {
                   // Silently fail - this is a stale reference from a deleted PDF
-                  // No need to log as this is expected behavior
                   setError(true)
                   setLoading(false)
                   setPdfDocument(null)
@@ -600,44 +600,64 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     }, [isAIPanelOpen, aiPanelWidth])
 
     // Update navigation bar position based on container width
-    // Only update after PDF is fully loaded to prevent flashing
-    useEffect(() => {
+    // Use useLayoutEffect to calculate position synchronously before paint to prevent flashing
+    useLayoutEffect(() => {
       // Don't update position while loading or if PDF isn't loaded yet
       if (loading || !pdfDocument || totalPages === 0) {
         return
       }
 
       const updateNavBarPosition = () => {
-        if (containerRef.current) {
-          const rect = containerRef.current.getBoundingClientRect()
-          const centerX = rect.left + rect.width / 2
-          setNavBarLeft(`${centerX}px`)
+        if (!containerRef.current) {
+          return
+        }
+
+        const rect = containerRef.current.getBoundingClientRect()
+        const centerX = rect.left + rect.width / 2
+        
+        // Validate that we have valid dimensions before setting position
+        // Container must have a width > 0 and be visible (not collapsed)
+        const isValid = rect.width > 0 && rect.height > 0 && centerX > 0
+        
+        if (isValid) {
+          const newPosition = `${centerX}px`
+          // Only update if position actually changed to avoid unnecessary re-renders
+          if (navBarLeftRef.current !== newPosition) {
+            navBarLeftRef.current = newPosition
+            setNavBarLeft(newPosition)
+          }
         }
       }
 
-      // Small delay to ensure PDF canvas is fully rendered
-      const timeoutId = setTimeout(() => {
-        updateNavBarPosition()
-      }, 100)
+      // Update immediately before paint
+      updateNavBarPosition()
 
-      window.addEventListener('resize', updateNavBarPosition)
+      const handleResize = () => {
+        updateNavBarPosition()
+      }
+
+      window.addEventListener('resize', handleResize)
+      
       // Also update when AI panel opens/closes
       const container = containerRef.current
       if (container) {
-        // Use MutationObserver to detect container size changes
-        const observer = new ResizeObserver(updateNavBarPosition)
+        // Use ResizeObserver to detect container size changes
+        const observer = new ResizeObserver(() => {
+          // Use requestAnimationFrame to ensure DOM has updated
+          requestAnimationFrame(() => {
+            updateNavBarPosition()
+          })
+        })
         observer.observe(container)
         
         return () => {
-          clearTimeout(timeoutId)
-          window.removeEventListener('resize', updateNavBarPosition)
+          window.removeEventListener('resize', handleResize)
           observer.disconnect()
         }
       }
 
       return () => {
-        clearTimeout(timeoutId)
-        window.removeEventListener('resize', updateNavBarPosition)
+        window.removeEventListener('resize', handleResize)
       }
     }, [isAIPanelOpen, aiPanelWidth, loading, pdfDocument, totalPages])
 
@@ -716,26 +736,26 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
         )}
 
         {/* Page Navigation Controls */}
-        {!error && totalPages > 0 && (
+        {!error && totalPages > 0 && navBarLeft !== null && (
           <div
-            style={{
-              position: 'fixed',
-              bottom: '24px',
-              left: navBarLeft,
-              transform: 'translateX(-50%)',
-              backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
-              borderRadius: '12px',
-              padding: '6px 10px',
-              boxShadow: theme === 'dark' 
-                ? '0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
-                : '0 8px 24px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.08)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              zIndex: 100,
-              fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
-              backdropFilter: 'blur(10px)',
-            }}
+              style={{
+                position: 'fixed',
+                bottom: '24px',
+                left: navBarLeft,
+                transform: 'translateX(-50%)',
+                backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+                borderRadius: '12px',
+                padding: '6px 10px',
+                boxShadow: theme === 'dark' 
+                  ? '0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                  : '0 8px 24px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                zIndex: 100,
+                fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
+                backdropFilter: 'blur(10px)',
+              }}
           >
             {/* Previous Page Button */}
             <button

@@ -74,7 +74,7 @@ function FileExplorer({
   // Upload queue state - use ref to avoid re-renders and manage queue properly
   const uploadQueueRef = useRef<Array<{ file: File; folderId: 'library' | 'project' }>>([])
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; currentFile: string } | null>(null)
-  const [isUploading, setIsUploading] = useState(false)
+  const [uploadQueueTrigger, setUploadQueueTrigger] = useState(0) // Trigger to re-run useEffect when queue changes
   const processingRef = useRef(false)
   const MAX_CONCURRENT_UPLOADS = 3 // Process max 3 files at a time
   
@@ -588,7 +588,6 @@ function FileExplorer({
 
     const processUploads = async () => {
       processingRef.current = true
-      setIsUploading(true)
       
       const totalFiles = uploadQueueRef.current.length
       let processedCount = 0
@@ -675,13 +674,12 @@ function FileExplorer({
       }
 
       processingRef.current = false
-      setIsUploading(false)
       setUploadProgress(null)
     }
 
     processUploads()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploadQueueRef.current.length, onFileUploaded])
+  }, [uploadQueueTrigger, onFileUploaded])
 
   // Handle file drop on folder
   const handleFolderDrop = async (e: React.DragEvent, folderId: 'library' | 'project') => {
@@ -712,8 +710,8 @@ function FileExplorer({
       uploadQueueRef.current.push({ file, folderId })
     })
     
-    // Trigger processing by forcing a re-render
-    setIsUploading(prev => !prev)
+    // Trigger processing by updating trigger state
+    setUploadQueueTrigger(prev => prev + 1)
   }
 
   // Handle drag over folder

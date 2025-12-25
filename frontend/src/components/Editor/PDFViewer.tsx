@@ -122,7 +122,7 @@ const PDFViewerComponent = ({ node, selected }: ReactNodeViewProps) => {
         <span>📄</span>
         <span>{fileName}</span>
       </div>
-      {!error ? (
+      {!error && pdfSrc ? (
         <iframe
           src={pdfSrc}
           style={{
@@ -150,7 +150,7 @@ const PDFViewerComponent = ({ node, selected }: ReactNodeViewProps) => {
         >
           <p>Unable to display PDF preview.</p>
           <p style={{ fontSize: '12px', marginTop: '8px' }}>
-            The PDF file is available in the file explorer.
+            {pdfSrc ? 'The PDF file is available in the file explorer.' : 'PDF source is not available.'}
           </p>
         </div>
       )}
