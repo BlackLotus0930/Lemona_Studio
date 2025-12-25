@@ -52,12 +52,19 @@ function DocumentList() {
       
       setProjects(sortedProjects)
       
-      // Load first document for each project for preview and get actual document count
+      // Load first workspace document (excluding README.md) for each project for preview and get actual document count
       const projectsWithPreviews = await Promise.all(
         sortedProjects.map(async (project: any) => {
     try {
             const docs = await projectApi.getDocuments(project.id)
-            return { ...project, firstDocument: docs[0] || null, actualDocumentCount: docs.length }
+            // Filter to get first workspace file (exclude README.md)
+            const workspaceDocs = docs.filter((doc: any) => 
+              (!doc.folder || doc.folder === 'project') && 
+              doc.title !== 'README.md' && 
+              doc.title.toLowerCase() !== 'readme.md'
+            )
+            const firstWorkspaceDoc = workspaceDocs.length > 0 ? workspaceDocs[0] : (docs[0] || null)
+            return { ...project, firstDocument: firstWorkspaceDoc, actualDocumentCount: docs.length }
           } catch {
             return { ...project, firstDocument: null, actualDocumentCount: 0 }
           }
@@ -152,20 +159,24 @@ function DocumentList() {
     }
   }
 
-  // Extract text preview from TipTap content
-  const extractPreview = (content: string, maxLength: number = 150): string => {
+  // Extract text preview from TipTap content with better handling
+  const extractPreview = (content: string, maxLength: number = 200): string => {
     try {
       const parsed = JSON.parse(content)
       const extractText = (node: any): string => {
         if (typeof node === 'string') return node
         if (node.type === 'text') return node.text || ''
-            if (node.content && Array.isArray(node.content)) {
-          return node.content.map(extractText).join('')
-            }
+        if (node.content && Array.isArray(node.content)) {
+          // Join with spaces for better readability
+          return node.content.map(extractText).filter((t: string) => t.trim()).join(' ')
+        }
         return ''
       }
-      const text = extractText(parsed)
-      return text.length > maxLength ? text.substring(0, maxLength) + '...' : text
+      const text = extractText(parsed).trim()
+      if (!text) return ''
+      // Clean up multiple spaces
+      const cleanedText = text.replace(/\s+/g, ' ')
+      return cleanedText.length > maxLength ? cleanedText.substring(0, maxLength) + '...' : cleanedText
     } catch {
       return ''
     }
@@ -601,8 +612,8 @@ function DocumentList() {
             background: theme === 'dark'
               ? 'radial-gradient(circle at center, rgba(244, 114, 182, 0.15) 0%, rgba(0, 0, 0, 0.85) 100%)'
               : 'radial-gradient(circle at center, rgba(244, 114, 182, 0.1) 0%, rgba(0, 0, 0, 0.5) 100%)',
-            backdropFilter: 'blur(2px)',
-            WebkitBackdropFilter: 'blur(2px)',
+            backdropFilter: 'blur(0.1px)',
+            WebkitBackdropFilter: 'blur(0.1px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -684,7 +695,7 @@ function DocumentList() {
             height: '8px',
             background: 'radial-gradient(circle, #fce7f3 0%, transparent 70%)',
             borderRadius: '50%',
-            animation: 'sparkle 2s ease-in-out infinite',
+            animation: 'sparkle 6s ease-in-out infinite',
             animationDelay: '0s',
             pointerEvents: 'none',
           }} />
@@ -696,7 +707,7 @@ function DocumentList() {
             height: '6px',
             background: 'radial-gradient(circle, #fbcfe8 0%, transparent 70%)',
             borderRadius: '50%',
-            animation: 'sparkle 2.5s ease-in-out infinite',
+            animation: 'sparkle 7.5s ease-in-out infinite',
             animationDelay: '0.5s',
             pointerEvents: 'none',
           }} />
@@ -708,7 +719,7 @@ function DocumentList() {
             height: '10px',
             background: 'radial-gradient(circle, #f9a8d4 0%, transparent 70%)',
             borderRadius: '50%',
-            animation: 'sparkle 3s ease-in-out infinite',
+            animation: 'sparkle 9s ease-in-out infinite',
             animationDelay: '1s',
             pointerEvents: 'none',
           }} />
@@ -720,7 +731,7 @@ function DocumentList() {
             height: '7px',
             background: 'radial-gradient(circle, #f472b6 0%, transparent 70%)',
             borderRadius: '50%',
-            animation: 'sparkle 2.8s ease-in-out infinite',
+            animation: 'sparkle 8.4s ease-in-out infinite',
             animationDelay: '1.5s',
             pointerEvents: 'none',
           }} />
@@ -732,14 +743,14 @@ function DocumentList() {
             height: '9px',
             background: 'radial-gradient(circle, #ec4899 0%, transparent 70%)',
             borderRadius: '50%',
-            animation: 'sparkle 2.2s ease-in-out infinite',
+            animation: 'sparkle 6.6s ease-in-out infinite',
             animationDelay: '0.8s',
             pointerEvents: 'none',
           }} />
           
             <div style={{
               position: 'relative',
-              backgroundColor: bgColor,
+              backgroundColor: theme === 'dark' ? '#070707' : '#ffffff',
               borderRadius: '20px',
               padding: '40px',
               width: '480px',
@@ -752,8 +763,8 @@ function DocumentList() {
               backgroundClip: 'padding-box, border-box',
               backgroundSize: 'auto, 200% 100%',
               animation: theme === 'dark'
-                ? 'modalEnter 0.4s ease-out, shimmer 3s linear infinite, glow-pulse 3s ease-in-out infinite'
-                : 'modalEnter 0.4s ease-out, shimmer 3s linear infinite',
+                ? 'modalEnter 0.4s ease-out, shimmer 8s linear infinite, glow-pulse 8s ease-in-out infinite'
+                : 'modalEnter 0.4s ease-out, shimmer 8s linear infinite',
               boxShadow: theme === 'dark' 
                 ? '0 0 20px rgba(244, 114, 182, 0.4), 0 0 40px rgba(244, 114, 182, 0.2), 0 20px 60px rgba(0, 0, 0, 0.5)' 
                 : '0 0 20px rgba(244, 114, 182, 0.3), 0 0 40px rgba(244, 114, 182, 0.15), 0 20px 60px rgba(0, 0, 0, 0.15)',
@@ -764,19 +775,13 @@ function DocumentList() {
             >
               <h2 style={{ 
                 fontSize: '28px', 
-                fontWeight: 700, 
-                background: 'linear-gradient(90deg, #fce7f3 0%, #fbcfe8 30%, #f9a8d4 60%, #fbcfe8 100%)',
-                backgroundSize: '200% 200%',
-                animation: 'gradient-flow 4s ease infinite',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
+                fontWeight: 600, 
+                color: '#ffffff',
                 marginBottom: '28px',
                 fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                 textAlign: 'center',
                 letterSpacing: '-0.5px',
                 position: 'relative',
-                textShadow: '0 0 30px rgba(252, 231, 243, 0.4)',
               } as React.CSSProperties}>
                 New Project
               </h2>
@@ -831,22 +836,22 @@ function DocumentList() {
                     color: textColor,
                     cursor: 'pointer',
                     fontSize: '15px',
-                    fontWeight: 600,
+                    fontWeight: 500,
                     fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
                     position: 'relative',
                     overflow: 'hidden',
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'
-                    e.currentTarget.style.transform = 'translateY(-2px)'
+                    e.currentTarget.style.transform = 'translateY(-2px) scale(1.05)'
                     e.currentTarget.style.boxShadow = theme === 'dark' 
                       ? '0 4px 12px rgba(0, 0, 0, 0.3)'
                       : '0 4px 12px rgba(0, 0, 0, 0.1)'
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = 'transparent'
-                    e.currentTarget.style.transform = 'translateY(0)'
+                    e.currentTarget.style.transform = 'translateY(0) scale(1)'
                     e.currentTarget.style.boxShadow = 'none'
                   }}
                 >
@@ -865,13 +870,13 @@ function DocumentList() {
                     color: 'white',
                     cursor: newProjectName.trim() ? 'pointer' : 'not-allowed',
                     fontSize: '15px',
-                    fontWeight: 700,
+                    fontWeight: 500,
                     fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
                     boxShadow: newProjectName.trim() 
                       ? theme === 'dark'
-                        ? '0 8px 24px rgba(244, 114, 182, 0.5), 0 0 20px rgba(244, 114, 182, 0.3)'
-                        : '0 8px 24px rgba(244, 114, 182, 0.4), 0 0 20px rgba(244, 114, 182, 0.2)'
+                        ? '0 2px 8px rgba(244, 114, 182, 0.3), 0 0 8px rgba(244, 114, 182, 0.2)'
+                        : '0 2px 8px rgba(244, 114, 182, 0.25), 0 0 8px rgba(244, 114, 182, 0.15)'
                       : 'none',
                     opacity: newProjectName.trim() ? 1 : 0.5,
                     position: 'relative',
@@ -881,16 +886,16 @@ function DocumentList() {
                     if (newProjectName.trim()) {
                       e.currentTarget.style.transform = 'translateY(-2px) scale(1.05)'
                       e.currentTarget.style.boxShadow = theme === 'dark'
-                        ? '0 12px 32px rgba(244, 114, 182, 0.6), 0 0 30px rgba(244, 114, 182, 0.4)'
-                        : '0 12px 32px rgba(244, 114, 182, 0.5), 0 0 30px rgba(244, 114, 182, 0.3)'
+                        ? '0 4px 12px rgba(244, 114, 182, 0.4), 0 0 12px rgba(244, 114, 182, 0.25)'
+                        : '0 4px 12px rgba(244, 114, 182, 0.35), 0 0 12px rgba(244, 114, 182, 0.2)'
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (newProjectName.trim()) {
                       e.currentTarget.style.transform = 'translateY(0) scale(1)'
                       e.currentTarget.style.boxShadow = theme === 'dark'
-                        ? '0 8px 24px rgba(244, 114, 182, 0.5), 0 0 20px rgba(244, 114, 182, 0.3)'
-                        : '0 8px 24px rgba(244, 114, 182, 0.4), 0 0 20px rgba(244, 114, 182, 0.2)'
+                        ? '0 2px 8px rgba(244, 114, 182, 0.3), 0 0 8px rgba(244, 114, 182, 0.2)'
+                        : '0 2px 8px rgba(244, 114, 182, 0.25), 0 0 8px rgba(244, 114, 182, 0.15)'
                     }
                   }}
                 >
@@ -956,7 +961,7 @@ function DocumentList() {
             {filteredProjects.map((project: any) => {
               const lastOpened = new Date(project.updatedAt)
               const firstDoc = project.firstDocument
-              const preview = firstDoc ? extractPreview(firstDoc.content, 200) : ''
+              const preview = firstDoc && firstDoc.content ? extractPreview(firstDoc.content, 250) : ''
               
               const formatDate = (date: Date): string => {
                 const now = new Date()
@@ -1008,64 +1013,109 @@ function DocumentList() {
                   e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'
                 }}
               >
-                  {/* Preview Section - Shows first document content */}
+                  {/* Preview Section - Google Docs-like aesthetic */}
                 <div 
                   onClick={() => handleOpenProject(project.id)}
                   style={{
-                    height: '180px',
+                    height: '200px',
                     background: theme === 'dark' 
-                      ? 'linear-gradient(135deg, #1e1e1e 0%, #252525 100%)'
-                      : 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
-                    padding: '16px',
-                  overflow: 'hidden',
-                  display: 'flex',
-                    alignItems: 'flex-start',
+                      ? '#1a1a1a'
+                      : '#ffffff',
+                    padding: '10px 20px 20px 20px',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
                     cursor: 'pointer',
                     position: 'relative',
                     borderTopLeftRadius: '12px',
                     borderTopRightRadius: '12px',
+                    borderBottom: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'}`,
                   }}>
-                    {/* Subtle gradient overlay */}
+                    {/* Google Docs-like paper effect */}
                     <div style={{
                       position: 'absolute',
-                      bottom: 0,
+                      top: 0,
                       left: 0,
                       right: 0,
-                      height: '40px',
+                      bottom: 0,
                       background: theme === 'dark'
-                        ? 'linear-gradient(to top, rgba(24, 24, 24, 1), transparent)'
-                        : 'linear-gradient(to top, rgba(255, 255, 255, 1), transparent)',
+                        ? 'repeating-linear-gradient(transparent, transparent 31px, rgba(255, 255, 255, 0.03) 31px, rgba(255, 255, 255, 0.03) 32px)'
+                        : 'repeating-linear-gradient(transparent, transparent 31px, rgba(0, 0, 0, 0.02) 31px, rgba(0, 0, 0, 0.02) 32px)',
                       pointerEvents: 'none',
                     }} />
+                    
+                    {/* Document header */}
+                    {firstDoc && (
+                      <div style={{
+                        marginBottom: '8px',
+                        position: 'relative',
+                        zIndex: 1,
+                      }}>
+                        <span style={{
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          color: theme === 'dark' ? '#9aa0a6' : '#5f6368',
+                          fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                        }}>{firstDoc.title}</span>
+                      </div>
+                    )}
+                    
+                    {/* Text preview */}
                     {preview ? (
                       <div style={{
                         fontSize: '13px',
-                        color: theme === 'dark' ? '#d1d5db' : '#4b5563',
-                        lineHeight: '1.6',
+                        color: theme === 'dark' ? '#e8eaed' : '#202124',
+                        lineHeight: '1.8',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         display: '-webkit-box',
-                        WebkitLineClamp: 7,
+                        WebkitLineClamp: 8,
                         WebkitBoxOrient: 'vertical',
                         wordBreak: 'break-word',
                         fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                         position: 'relative',
                         zIndex: 1,
-                }}>
+                        paddingLeft: '0px',
+                        letterSpacing: '0.01em',
+                      }}>
                         {preview}
                       </div>
                     ) : (
                       <div style={{
-                        fontSize: '48px',
-                        color: secondaryTextColor,
                         display: 'flex',
+                        flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
                         width: '100%',
                         height: '100%',
-                        opacity: 0.5,
-                      }}>📄</div>
+                        opacity: 0.4,
+                        position: 'relative',
+                        zIndex: 1,
+                      }}>
+                        <div style={{
+                          fontSize: '48px',
+                          marginBottom: '8px',
+                        }}>📄</div>
+                        <div style={{
+                          fontSize: '13px',
+                          color: secondaryTextColor,
+                          fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                        }}>No content yet</div>
+                      </div>
                     )}
+                    
+                    {/* Fade gradient at bottom */}
+                    <div style={{
+                      position: 'absolute',
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      height: '50px',
+                      background: theme === 'dark'
+                        ? 'linear-gradient(to top, rgba(26, 26, 26, 1), transparent)'
+                        : 'linear-gradient(to top, rgba(255, 255, 255, 1), transparent)',
+                      pointerEvents: 'none',
+                    }} />
                 </div>
 
                   {/* Title and Date Section */}

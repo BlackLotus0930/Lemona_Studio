@@ -4,7 +4,7 @@ interface FileExplorerSkeletonProps {
   projectName?: string
 }
 
-export function FileExplorerSkeleton({ projectName = 'LEMONA' }: FileExplorerSkeletonProps) {
+export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: FileExplorerSkeletonProps) {
   const { theme } = useTheme()
   
   const bgColor = theme === 'dark' ? '#1e1e1e' : '#ffffff'
