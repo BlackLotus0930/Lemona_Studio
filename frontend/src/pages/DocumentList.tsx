@@ -10,7 +10,7 @@ import AddIcon from '@mui/icons-material/Add'
 // @ts-ignore
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 
-function DocumentList() {
+export default function DocumentList() {
   const { theme } = useTheme()
   const [projects, setProjects] = useState<Project[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -844,14 +844,12 @@ function DocumentList() {
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'
-                    e.currentTarget.style.transform = 'translateY(-2px) scale(1.05)'
                     e.currentTarget.style.boxShadow = theme === 'dark' 
                       ? '0 4px 12px rgba(0, 0, 0, 0.3)'
                       : '0 4px 12px rgba(0, 0, 0, 0.1)'
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = 'transparent'
-                    e.currentTarget.style.transform = 'translateY(0) scale(1)'
                     e.currentTarget.style.boxShadow = 'none'
                   }}
                 >
@@ -884,7 +882,6 @@ function DocumentList() {
                   }}
                   onMouseEnter={(e) => {
                     if (newProjectName.trim()) {
-                      e.currentTarget.style.transform = 'translateY(-2px) scale(1.05)'
                       e.currentTarget.style.boxShadow = theme === 'dark'
                         ? '0 4px 12px rgba(244, 114, 182, 0.4), 0 0 12px rgba(244, 114, 182, 0.25)'
                         : '0 4px 12px rgba(244, 114, 182, 0.35), 0 0 12px rgba(244, 114, 182, 0.2)'
@@ -892,7 +889,6 @@ function DocumentList() {
                   }}
                   onMouseLeave={(e) => {
                     if (newProjectName.trim()) {
-                      e.currentTarget.style.transform = 'translateY(0) scale(1)'
                       e.currentTarget.style.boxShadow = theme === 'dark'
                         ? '0 2px 8px rgba(244, 114, 182, 0.3), 0 0 8px rgba(244, 114, 182, 0.2)'
                         : '0 2px 8px rgba(244, 114, 182, 0.25), 0 0 8px rgba(244, 114, 182, 0.15)'
@@ -1481,5 +1477,3 @@ function DocumentList() {
     </div>
   )
 }
-
-export default DocumentList
