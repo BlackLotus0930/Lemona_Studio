@@ -12,7 +12,7 @@ interface AutocompleteProps {
 
 export default function Autocomplete({ editor, documentContent, documentId, enabled = true }: AutocompleteProps) {
   const [suggestion, setSuggestion] = useState<AutocompleteSuggestion | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [, setIsLoading] = useState(false)
   const [showSuggestion, setShowSuggestion] = useState(false)
 
   const fetchSuggestion = useCallback(async (text: string, cursorPosition: number) => {
@@ -81,7 +81,6 @@ export default function Autocomplete({ editor, documentContent, documentId, enab
   const acceptSuggestion = useCallback(() => {
     if (!editor || !suggestion) return
 
-    const { from } = editor.state.selection
     editor.chain()
       .focus()
       .insertContent(suggestion.text)

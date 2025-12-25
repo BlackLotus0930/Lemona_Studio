@@ -34,6 +34,7 @@ export const documentApi = {
   uploadFile: (filePath: string, fileName: string, folder: 'library' | 'project') => 
     invokeOrFetch('document:uploadFile', filePath, fileName, folder),
   extractPDFText: (documentId: string) => invokeOrFetch('pdf:extractText', documentId),
+  getPDFFileContent: (documentId: string) => invokeOrFetch('pdf:getFileContent', documentId),
 }
 
 export const aiApi = {

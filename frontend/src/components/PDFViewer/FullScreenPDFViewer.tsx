@@ -1,6 +1,16 @@
 import { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import { Document } from '@shared/types'
+import * as pdfjsLib from 'pdfjs-dist'
+// Import worker URL using Vite's ?url suffix - this only imports the URL string, not the worker code
+// This is the recommended way for Vite and ensures proper worker initialization
+import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { documentApi } from '../../services/desktop-api'
+
+// Set worker source for pdf.js - use local worker file
+// This avoids CSP violations and works offline
+// Using ?url import ensures Vite properly handles the worker file
+pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
 interface FullScreenPDFViewerProps {
   document: Document | null
@@ -18,27 +28,37 @@ export interface PDFViewerSearchHandle {
 const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewerProps>(
   ({ document, isAIPanelOpen = false, aiPanelWidth = 20 }, ref) => {
     const { theme } = useTheme()
-    const [pdfSrc, setPdfSrc] = useState<string | null>(null)
-    const [basePdfSrc, setBasePdfSrc] = useState<string | null>(null) // Store base URL without page anchor
+    
+    // PDF state
+    const [pdfDocument, setPdfDocument] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
+    const [currentPage, setCurrentPage] = useState(1)
+    const [totalPages, setTotalPages] = useState(0)
+    const [scale, setScale] = useState(1.25)
+    const [loading, setLoading] = useState(false)
     const [error, setError] = useState(false)
-    const iframeRef = useRef<HTMLIFrameElement>(null)
-    const [iframeKey, setIframeKey] = useState(0) // Force iframe reload by changing key
-    const currentPageRef = useRef<number | null>(null) // Track current PDF page
-    const previousDocIdRef = useRef<string | null>(null) // Track previous document ID to detect changes
-    const previousBaseSrcRef = useRef<string | null>(null) // Track previous base src to detect changes
-    const isRestoringPageRef = useRef(false) // Track if we're restoring page position
+    const [isPageInputOpen, setIsPageInputOpen] = useState(false)
+    const [pageInputValue, setPageInputValue] = useState('')
+    const pageInputRef = useRef<HTMLInputElement>(null)
+    
+    // Canvas refs
+    const canvasRef = useRef<HTMLCanvasElement>(null)
+    const containerRef = useRef<HTMLDivElement>(null)
+    const [navBarLeft, setNavBarLeft] = useState('50%')
+    const renderTaskRef = useRef<any>(null) // Track current render task to cancel if needed
     
     // Inline search state
     const [showInlineSearch, setShowInlineSearch] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const [matches, setMatches] = useState<Array<{ pageNumber: number; from: number; to: number }>>([])
     const [currentMatchIndex, setCurrentMatchIndex] = useState(-1)
-    const [activeSearchQuery, setActiveSearchQuery] = useState('') // The query that was actually searched
+    const [activeSearchQuery, setActiveSearchQuery] = useState('')
     const inlineSearchInputRef = useRef<HTMLInputElement>(null)
-    const containerRef = useRef<HTMLDivElement>(null)
     const [rightOffset, setRightOffset] = useState(20)
     
-    // Clear search state (used when switching tabs)
+    // Page position tracking
+    const previousDocIdRef = useRef<string | null>(null)
+    
+    // Clear search state
     const clearSearchState = () => {
       setShowInlineSearch(false)
       setSearchQuery('')
@@ -47,7 +67,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
       setActiveSearchQuery('')
     }
 
-    // Expose search API to parent (Layout)
+    // Expose search API to parent
     useImperativeHandle(ref, () => ({
       openSearch: () => {
         setShowInlineSearch(true)
@@ -75,542 +95,461 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
       },
     }))
 
-  // Find matches in PDF text
-  const findMatches = (query: string): Array<{ pageNumber: number; from: number; to: number }> => {
-    if (!query.trim()) {
-      return []
-    }
-    
-    if (!document?.pdfText) {
-      return []
-    }
-    
-    const matches: Array<{ pageNumber: number; from: number; to: number }> = []
-    const searchText = query.toLowerCase()
-    
-    document.pdfText.pages.forEach((page) => {
-      const pageText = page.fullText.toLowerCase()
-      let searchIndex = 0
+    // Find matches in PDF text
+    const findMatches = (query: string): Array<{ pageNumber: number; from: number; to: number }> => {
+      if (!query.trim() || !document?.pdfText) {
+        return []
+      }
       
-      while (true) {
-        const index = pageText.indexOf(searchText, searchIndex)
-        if (index === -1) break
+      const matches: Array<{ pageNumber: number; from: number; to: number }> = []
+      const searchText = query.toLowerCase()
+      
+      document.pdfText.pages.forEach((page) => {
+        const pageText = page.fullText.toLowerCase()
+        let searchIndex = 0
         
-        matches.push({
-          pageNumber: page.pageNumber,
-          from: index,
-          to: index + query.length,
-        })
-        searchIndex = index + 1
-      }
-    })
-    
-    return matches
-  }
-  
-  // Get context text around a match for display
-  const getMatchContext = (match: { pageNumber: number; from: number; to: number }, contextLength: number = 50): string => {
-    if (!document?.pdfText) return ''
-    
-    const page = document.pdfText.pages.find(p => p.pageNumber === match.pageNumber)
-    if (!page) return ''
-    
-    const pageText = page.fullText
-    const start = Math.max(0, match.from - contextLength)
-    const end = Math.min(pageText.length, match.to + contextLength)
-    const context = pageText.substring(start, end)
-    
-    // Highlight the match in the context
-    const matchText = pageText.substring(match.from, match.to)
-    const beforeMatch = context.substring(0, match.from - start)
-    const afterMatch = context.substring(match.to - start)
-    
-    return `${beforeMatch}[${matchText}]${afterMatch}`
-  }
-  
-  // Save PDF page position to localStorage
-  const savePagePosition = (docId: string, pageNumber: number) => {
-    try {
-      localStorage.setItem(`pdfPage_${docId}`, pageNumber.toString())
-      currentPageRef.current = pageNumber
-    } catch (error) {
-      console.error('Failed to save PDF page position:', error)
-    }
-  }
-  
-  // Load PDF page position from localStorage
-  const loadPagePosition = (docId: string): number | null => {
-    try {
-      const saved = localStorage.getItem(`pdfPage_${docId}`)
-      return saved ? parseInt(saved, 10) : null
-    } catch (error) {
-      console.error('Failed to load PDF page position:', error)
-      return null
-    }
-  }
-  
-  // Navigate to a specific page in the PDF and try to highlight text
-  const navigateToPage = (pageNumber: number, match?: { pageNumber: number; from: number; to: number }, skipReload = false) => {
-    if (!basePdfSrc) {
-      return
-    }
-    
-    // Save page position
-    if (document?.id) {
-      savePagePosition(document.id, pageNumber)
-    }
-    
-    // Append page anchor to PDF URL
-    // Most PDF viewers support #page=N format
-    let pageAnchor = `#page=${pageNumber}`
-    
-    // Try to add text search parameter if match is provided
-    // Some PDF viewers support #search=text or #text=search
-    if (match && searchQuery.trim()) {
-      // Try different formats for text highlighting
-      pageAnchor += `&search=${encodeURIComponent(searchQuery)}`
-      // Also try alternative formats
-      // pageAnchor += `&text=${encodeURIComponent(searchQuery)}`
-    }
-    
-    const newSrc = basePdfSrc.includes('#') 
-      ? basePdfSrc.replace(/#.*$/, pageAnchor) 
-      : basePdfSrc + pageAnchor
-    
-    // Only reload iframe if skipReload is false (e.g., when user navigates, not when restoring)
-    if (!skipReload) {
-      // Force iframe reload by updating key
-      setIframeKey(prev => prev + 1)
-    }
-    
-    // Set the new src
-    setPdfSrc(newSrc)
-    
-    // Also try to communicate with iframe if it's a PDF.js viewer
-    // This is a fallback for PDF.js-based viewers
-    setTimeout(() => {
-      if (iframeRef.current?.contentWindow) {
-        try {
-          // Try multiple postMessage formats that different PDF viewers might use
-          const messages: any[] = [
-            { type: 'goToPage', page: pageNumber },
-            { type: 'navigate', page: pageNumber },
-            { type: 'page', page: pageNumber },
-            { action: 'goToPage', page: pageNumber },
-          ]
+        while (true) {
+          const index = pageText.indexOf(searchText, searchIndex)
+          if (index === -1) break
           
-          // If we have a match, try to highlight the text
-          if (match && searchQuery.trim()) {
-            messages.push(
-              { type: 'highlight', page: pageNumber, text: searchQuery },
-              { type: 'search', page: pageNumber, query: searchQuery },
-              { action: 'highlight', page: pageNumber, text: searchQuery },
-            )
-          }
-          
-          messages.forEach((msg) => {
-            try {
-              iframeRef.current?.contentWindow?.postMessage(msg, '*')
-            } catch (e) {
-              // Ignore errors
-            }
+          matches.push({
+            pageNumber: page.pageNumber,
+            from: index,
+            to: index + query.length,
           })
-        } catch (e) {
-          // Ignore errors
+          searchIndex = index + 1
         }
-      }
-    }, skipReload ? 100 : 500) // Longer delay if reloading iframe
-  }
-  
-  // Perform search
-  const performSearch = () => {
-    if (!searchQuery.trim()) {
-      setMatches([])
-      setCurrentMatchIndex(-1)
-      setActiveSearchQuery('')
-      return
-    }
-    
-    const foundMatches = findMatches(searchQuery)
-    setMatches(foundMatches)
-    setActiveSearchQuery(searchQuery)
-    
-    if (foundMatches.length > 0) {
-      setCurrentMatchIndex(0)
-      const firstMatch = foundMatches[0]
-      navigateToPage(firstMatch.pageNumber, firstMatch)
-    } else {
-      setCurrentMatchIndex(-1)
-    }
-  }
-  
-  // Navigate to previous match
-  const navigateToPrevious = () => {
-    if (matches.length === 0) return
-    const prevIndex = currentMatchIndex <= 0 ? matches.length - 1 : currentMatchIndex - 1
-    setCurrentMatchIndex(prevIndex)
-    const match = matches[prevIndex]
-    if (match && match.pageNumber) {
-      navigateToPage(match.pageNumber)
-    }
-  }
-  
-  // Navigate to next match
-  const navigateToNext = () => {
-    if (matches.length === 0) return
-    const nextIndex = (currentMatchIndex + 1) % matches.length
-    setCurrentMatchIndex(nextIndex)
-    const match = matches[nextIndex]
-    if (match && match.pageNumber) {
-      navigateToPage(match.pageNumber, match)
-    }
-  }
-
-  useEffect(() => {
-    if (!document) {
-      setPdfSrc(null)
-      setError(false)
-      previousDocIdRef.current = null
-      return
-    }
-
-    // Check if document is a PDF by filename
-    const isPDF = document.title.toLowerCase().endsWith('.pdf')
-    
-    if (!isPDF) {
-      setPdfSrc(null)
-      setError(false)
-      previousDocIdRef.current = null
-      return
-    }
-
-    // Check if this is the same document (switching tabs back to same PDF)
-    const isSameDocument = previousDocIdRef.current === document.id
-    
-    // Parse document content to extract PDF data URL
-    try {
-      const content = JSON.parse(document.content)
+      })
       
-      // Look for pdfViewer node in content
-      const findPDFSrc = (node: any): string | null => {
-        if (node.type === 'pdfViewer' && node.attrs?.src) {
-          return node.attrs.src
-        }
-        if (node.content && Array.isArray(node.content)) {
-          for (const child of node.content) {
-            const result = findPDFSrc(child)
-            if (result) return result
-          }
-        }
+      return matches
+    }
+
+    // Save page position to localStorage
+    const savePagePosition = (docId: string, pageNumber: number) => {
+      try {
+        localStorage.setItem(`pdfPage_${docId}`, pageNumber.toString())
+      } catch (error) {
+      }
+    }
+
+    // Load page position from localStorage
+    const loadPagePosition = (docId: string): number | null => {
+      try {
+        const saved = localStorage.getItem(`pdfPage_${docId}`)
+        return saved ? parseInt(saved, 10) : null
+      } catch (error) {
         return null
       }
-
-      const src = findPDFSrc(content)
-      if (src) {
-        // Store base URL without page anchor
-        const baseSrc = src.split('#')[0]
-        const isSameBaseSrc = previousBaseSrcRef.current === baseSrc
-        
-        // If same document AND same base src, just restore page position without reloading
-        if (isSameDocument && isSameBaseSrc && basePdfSrc === baseSrc) {
-          // Same document and same PDF source, restore page position without reloading iframe
-          const savedPage = loadPagePosition(document.id)
-          if (savedPage !== null && savedPage > 0) {
-            isRestoringPageRef.current = true
-            // Update src with saved page - this will update iframe src without reloading
-            const restoredSrc = baseSrc + `#page=${savedPage}`
-            setPdfSrc(restoredSrc)
-            currentPageRef.current = savedPage
-            
-            // Also update iframe src directly to avoid any delay
-            if (iframeRef.current) {
-              iframeRef.current.src = restoredSrc
-            }
-            
-            // Try to navigate to saved page in iframe without reload
-            setTimeout(() => {
-              if (iframeRef.current?.contentWindow) {
-                try {
-                  iframeRef.current.contentWindow.postMessage({
-                    type: 'goToPage',
-                    page: savedPage
-                  }, '*')
-                } catch (e) {
-                  // Ignore errors
-                }
-              }
-              isRestoringPageRef.current = false
-            }, 100)
-          } else {
-            // No saved page, but still update src to ensure iframe is correct
-            setPdfSrc(src)
-          }
-          // Don't update basePdfSrc or reload iframe - keep current state
-          return
-        }
-        
-        // Different document or different PDF source - need to reload
-        setBasePdfSrc(baseSrc)
-        previousBaseSrcRef.current = baseSrc
-        
-        // Check for saved page position
-        const savedPage = loadPagePosition(document.id)
-        if (savedPage !== null && savedPage > 0) {
-          // Restore saved page position
-          const restoredSrc = baseSrc + `#page=${savedPage}`
-          setPdfSrc(restoredSrc)
-          currentPageRef.current = savedPage
-        } else {
-          // Use original src with any existing anchor
-          setPdfSrc(src)
-        }
-        
-        setError(false)
-        previousDocIdRef.current = document.id
-      } else {
-        setError(true)
-        previousDocIdRef.current = null
-        previousBaseSrcRef.current = null
-      }
-    } catch (e) {
-      setError(true)
-      previousDocIdRef.current = null
-      previousBaseSrcRef.current = null
     }
-  }, [document?.id, document?.content])
-  
-  // Handle Escape key to close search (when search is open)
-  useEffect(() => {
-    if (!showInlineSearch) return
-    
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't interfere with input fields - input handlers will handle their own keys
-      if (e.target instanceof HTMLInputElement) {
-        // Let the input's onKeyDown handler handle Enter and Escape
-        // This listener only handles Escape when input is not focused
-        if (e.key === 'Escape' && e.target !== inlineSearchInputRef.current) {
-          e.preventDefault()
-          setShowInlineSearch(false)
-          setSearchQuery('')
-          setMatches([])
-          setCurrentMatchIndex(-1)
-          setActiveSearchQuery('')
+
+    // Render PDF page to canvas
+    const renderPage = async (pageNum: number) => {
+      if (!pdfDocument || !canvasRef.current) return
+
+      try {
+        // Cancel any ongoing render task to prevent canvas conflicts
+        if (renderTaskRef.current) {
+          try {
+            renderTaskRef.current.cancel()
+          } catch (cancelError) {
+            // Ignore cancellation errors
+          }
+          renderTaskRef.current = null
+        }
+
+        setLoading(true)
+        const page = await pdfDocument.getPage(pageNum)
+        const canvas = canvasRef.current
+        const context = canvas.getContext('2d', { alpha: false })
+        
+        if (!context) {
+          setLoading(false)
           return
         }
+
+        // Get device pixel ratio for high DPI displays (improves clarity on retina screens)
+        const devicePixelRatio = window.devicePixelRatio || 1
+        
+        // Calculate viewport at the desired scale (for display size)
+        const viewport = page.getViewport({ scale })
+        
+        // Set canvas display size (CSS pixels) - this is what users see
+        canvas.style.width = viewport.width + 'px'
+        canvas.style.height = viewport.height + 'px'
+        
+        // Set canvas internal size (actual pixels) - multiply by devicePixelRatio for sharper rendering
+        canvas.width = viewport.width * devicePixelRatio
+        canvas.height = viewport.height * devicePixelRatio
+        
+        // Scale the context to account for device pixel ratio
+        // This ensures the rendering matches the higher resolution canvas
+        context.scale(devicePixelRatio, devicePixelRatio)
+        
+        // Render PDF page at the display scale (context.scale handles the pixel ratio)
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport,
+        }
+        
+        // Store render task and wait for it to complete
+        const renderTask = page.render(renderContext as any)
+        renderTaskRef.current = renderTask
+        
+        await renderTask.promise
+        
+        // Only update state if this render task is still the current one
+        // (prevents race conditions if user navigated away)
+        if (renderTaskRef.current === renderTask) {
+          setCurrentPage(pageNum)
+          setLoading(false)
+          renderTaskRef.current = null
+          
+          // Save page position
+          if (document?.id) {
+            savePagePosition(document.id, pageNum)
+          }
+        }
+      } catch (err) {
+        // Ignore cancellation errors (they're expected when navigating quickly)
+        const errorMessage = err instanceof Error ? err.message : String(err)
+        if (errorMessage.includes('cancelled') || errorMessage.includes('cancel')) {
+          return
+        }
+        
+        setError(true)
+        setLoading(false)
+        renderTaskRef.current = null
+      }
+    }
+
+    // Cleanup: Cancel any ongoing render tasks on unmount
+    useEffect(() => {
+      return () => {
+        if (renderTaskRef.current) {
+          try {
+            renderTaskRef.current.cancel()
+          } catch (cancelError) {
+            // Ignore cancellation errors
+          }
+          renderTaskRef.current = null
+        }
+      }
+    }, [])
+
+    // Load PDF document
+    useEffect(() => {
+      if (!document) {
+        // Cancel any ongoing render when document changes
+        if (renderTaskRef.current) {
+          try {
+            renderTaskRef.current.cancel()
+          } catch (cancelError) {
+            // Ignore cancellation errors
+          }
+          renderTaskRef.current = null
+        }
+        setPdfDocument(null)
+        setError(false)
+        previousDocIdRef.current = null
         return
       }
+
+      const isPDF = document.title.toLowerCase().endsWith('.pdf')
+      if (!isPDF) {
+        // Cancel any ongoing render when document changes
+        if (renderTaskRef.current) {
+          try {
+            renderTaskRef.current.cancel()
+          } catch (cancelError) {
+            // Ignore cancellation errors
+          }
+          renderTaskRef.current = null
+        }
+        setPdfDocument(null)
+        setError(false)
+        previousDocIdRef.current = null
+        return
+      }
+
+      // Check if same document
+      const isSameDocument = previousDocIdRef.current === document.id
       
-      // Handle Escape when search is open but no input is focused
-      if (e.key === 'Escape') {
+      // Parse document content to extract PDF data URL
+      try {
+        const content = JSON.parse(document.content)
+        
+        const findPDFSrc = (node: any): string | null => {
+          if (node.type === 'pdfViewer' && node.attrs?.src) {
+            return node.attrs.src
+          }
+          if (node.content && Array.isArray(node.content)) {
+            for (const child of node.content) {
+              const result = findPDFSrc(child)
+              if (result) return result
+            }
+          }
+          return null
+        }
+
+        const src = findPDFSrc(content)
+        if (!src) {
+          setError(true)
+          return
+        }
+
+        // Convert data URL or document reference to Uint8Array
+        const loadPDF = async () => {
+          try {
+            setLoading(true)
+            setError(false)
+            
+            let pdfData: Uint8Array
+            
+            if (src.startsWith('document://')) {
+              // Load PDF file content via IPC (for large PDFs not stored in JSON)
+              // This is done asynchronously to avoid blocking the UI
+              const documentId = src.replace('document://', '')
+              
+              // Verify document exists before trying to load
+              // This handles cases where PDFs were deleted but references remain
+              try {
+                const docCheck = await documentApi.get(documentId)
+                if (!docCheck) {
+                  // Silently fail - this is a stale reference from a deleted PDF
+                  // No need to log as this is expected behavior
+                  setError(true)
+                  setLoading(false)
+                  setPdfDocument(null)
+                  setTotalPages(0)
+                  return
+                }
+              } catch (checkError) {
+                // Silently fail - this is a stale reference from a deleted PDF
+                setError(true)
+                setLoading(false)
+                setPdfDocument(null)
+                setTotalPages(0)
+                return
+              }
+              
+              // Show loading state immediately
+              setLoading(true)
+              
+              // Load PDF content asynchronously
+              const pdfDataUrl = await documentApi.getPDFFileContent(documentId)
+              
+              // Extract base64 data from data URL
+              const base64Data = pdfDataUrl.split(',')[1]
+              if (!base64Data) {
+                throw new Error('No base64 data found')
+              }
+              
+              // Convert base64 to binary asynchronously using chunked processing
+              // This prevents blocking the main thread for large files
+              const binaryString = atob(base64Data)
+              const bytes = new Uint8Array(binaryString.length)
+              
+              // Process in chunks to avoid blocking UI
+              const chunkSize = 1024 * 1024 // 1MB chunks
+              for (let i = 0; i < binaryString.length; i += chunkSize) {
+                const end = Math.min(i + chunkSize, binaryString.length)
+                for (let j = i; j < end; j++) {
+                  bytes[j] = binaryString.charCodeAt(j)
+                }
+                // Yield to browser to keep UI responsive
+                if (i % (chunkSize * 10) === 0) {
+                  await new Promise(resolve => setTimeout(resolve, 0))
+                }
+              }
+              pdfData = bytes
+            } else if (src.startsWith('data:application/pdf')) {
+              // Extract base64 data from data URL (for small PDFs stored in JSON)
+              const base64Data = src.split(',')[1]
+              if (!base64Data) {
+                throw new Error('No base64 data found')
+              }
+              
+              // Convert base64 to binary
+              const binaryString = atob(base64Data)
+              const bytes = new Uint8Array(binaryString.length)
+              for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i)
+              }
+              pdfData = bytes
+            } else if (src.startsWith('blob:')) {
+              // Fetch blob URL
+              const response = await fetch(src)
+              const arrayBuffer = await response.arrayBuffer()
+              pdfData = new Uint8Array(arrayBuffer)
+            } else {
+              throw new Error('Unsupported PDF source format')
+            }
+
+            // Load PDF document
+            const loadingTask = pdfjsLib.getDocument({
+              data: pdfData,
+              useSystemFonts: true,
+            })
+            
+            const pdf = await loadingTask.promise
+            setPdfDocument(pdf)
+            setTotalPages(pdf.numPages)
+            
+            // Restore page position if same document
+            if (isSameDocument) {
+              const savedPage = loadPagePosition(document.id)
+              if (savedPage !== null && savedPage > 0 && savedPage <= pdf.numPages) {
+                setCurrentPage(savedPage)
+                await renderPage(savedPage)
+              } else {
+                await renderPage(1)
+              }
+            } else {
+              // New document - restore saved page or start at page 1
+              const savedPage = loadPagePosition(document.id)
+              if (savedPage !== null && savedPage > 0 && savedPage <= pdf.numPages) {
+                setCurrentPage(savedPage)
+                await renderPage(savedPage)
+              } else {
+                await renderPage(1)
+              }
+            }
+            
+            previousDocIdRef.current = document.id
+            setLoading(false)
+          } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : String(err)
+            
+            // Check if it's a "not found" error (deleted PDF reference)
+            if (errorMessage.includes('not found') || errorMessage.includes('Document')) {
+              // Silently handle deleted PDF references - this is expected behavior
+              setError(true)
+              setLoading(false)
+              // Clear the document reference to prevent retry loops
+              setPdfDocument(null)
+              setTotalPages(0)
+            } else {
+              setError(true)
+              setLoading(false)
+            }
+          }
+        }
+
+        loadPDF()
+      } catch (e) {
+        setError(true)
+      }
+    }, [document?.id, document?.content])
+
+    // Render page when currentPage or scale changes
+    useEffect(() => {
+      if (pdfDocument && currentPage > 0) {
+        renderPage(currentPage)
+      }
+    }, [currentPage, scale, pdfDocument])
+
+    // Navigate to page
+    const navigateToPage = (pageNumber: number) => {
+      if (!pdfDocument || pageNumber < 1 || pageNumber > totalPages) return
+      setCurrentPage(pageNumber)
+    }
+
+    // Handle page input
+    const handlePageInputClick = () => {
+      setIsPageInputOpen(true)
+      setPageInputValue(currentPage.toString())
+      setTimeout(() => {
+        pageInputRef.current?.focus()
+        pageInputRef.current?.select()
+      }, 50)
+    }
+
+    const handlePageInputSubmit = () => {
+      const pageNum = parseInt(pageInputValue, 10)
+      if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+        navigateToPage(pageNum)
+      }
+      setIsPageInputOpen(false)
+      setPageInputValue('')
+    }
+
+    const handlePageInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === 'Enter') {
         e.preventDefault()
-        setShowInlineSearch(false)
-        setSearchQuery('')
+        handlePageInputSubmit()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        setIsPageInputOpen(false)
+        setPageInputValue('')
+      }
+    }
+
+    // Navigate to previous page
+    const goToPreviousPage = () => {
+      if (currentPage > 1) {
+        navigateToPage(currentPage - 1)
+      }
+    }
+
+    // Navigate to next page
+    const goToNextPage = () => {
+      if (currentPage < totalPages) {
+        navigateToPage(currentPage + 1)
+      }
+    }
+
+    // Perform search
+    const performSearch = () => {
+      if (!searchQuery.trim()) {
         setMatches([])
         setCurrentMatchIndex(-1)
         setActiveSearchQuery('')
         return
       }
-    }
-    
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showInlineSearch])
-  
-  // Focus search input when opening
-  useEffect(() => {
-    if (showInlineSearch && inlineSearchInputRef.current) {
-      setTimeout(() => {
-        inlineSearchInputRef.current?.focus()
-        inlineSearchInputRef.current?.select()
-      }, 50)
-    }
-  }, [showInlineSearch])
-  
-  // Perform search when query changes (debounced) - 混合模式：实时高亮，不自动导航
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      setMatches([])
-      setCurrentMatchIndex(-1)
-      return
-    }
-    
-    const timeoutId = setTimeout(() => {
-      if (!searchQuery.trim()) {
-        setMatches([])
-        setCurrentMatchIndex(-1)
-        return
-      }
-      
-      if (!document?.pdfText) {
-        setMatches([])
-        setCurrentMatchIndex(-1)
-        return
-      }
       
       const foundMatches = findMatches(searchQuery)
-      
-      // 实时高亮：更新匹配结果，但不自动导航
       setMatches(foundMatches)
+      setActiveSearchQuery(searchQuery)
       
       if (foundMatches.length > 0) {
-        // 设置当前匹配索引为0（用于显示 "1/N"），但不导航
         setCurrentMatchIndex(0)
+        const firstMatch = foundMatches[0]
+        navigateToPage(firstMatch.pageNumber)
       } else {
         setCurrentMatchIndex(-1)
       }
-    }, 300) // 300ms 防抖延迟
-    
-    return () => {
-      clearTimeout(timeoutId)
     }
-  }, [searchQuery, document])
 
-  // Monitor PDF page changes and save position
-  useEffect(() => {
-    if (!document?.id || !iframeRef.current) return
-    
-    // Check iframe URL periodically to detect page changes
-    // This works for PDF viewers that update the hash in the URL
-    const checkPageChange = () => {
-      try {
-        // Try to access iframe's location (may fail due to CORS)
-        const iframe = iframeRef.current
-        if (!iframe || !iframe.contentWindow) return
-        
-        // Try to get iframe URL (may be blocked by CORS)
-        let iframeUrl: string | null = null
-        try {
-          iframeUrl = iframe.contentWindow.location.href
-        } catch (e) {
-          // CORS blocked, try alternative method
-          // Check if src has changed
-          if (iframe.src && iframe.src.includes('#page=')) {
-            const match = iframe.src.match(/#page=(\d+)/)
-            if (match) {
-              const pageNum = parseInt(match[1], 10)
-              if (pageNum !== currentPageRef.current && pageNum > 0) {
-                savePagePosition(document.id, pageNum)
-                currentPageRef.current = pageNum
-              }
-            }
-          }
-          return
-        }
-        
-        // Extract page number from iframe URL
-        if (iframeUrl && iframeUrl.includes('#page=')) {
-          const match = iframeUrl.match(/#page=(\d+)/)
-          if (match) {
-            const pageNum = parseInt(match[1], 10)
-            if (pageNum !== currentPageRef.current && pageNum > 0) {
-              savePagePosition(document.id, pageNum)
-              currentPageRef.current = pageNum
-            }
-          }
-        }
-      } catch (e) {
-        // Ignore errors (CORS, etc.)
+    // Navigate to previous match
+    const navigateToPrevious = () => {
+      if (matches.length === 0) return
+      const prevIndex = currentMatchIndex <= 0 ? matches.length - 1 : currentMatchIndex - 1
+      setCurrentMatchIndex(prevIndex)
+      const match = matches[prevIndex]
+      if (match) {
+        navigateToPage(match.pageNumber)
       }
     }
-    
-    // Check periodically (every 1 second)
-    const intervalId = setInterval(checkPageChange, 1000)
-    
-    // Also check when iframe src changes
-    const observer = new MutationObserver(() => {
-      checkPageChange()
-    })
-    
-    if (iframeRef.current) {
-      observer.observe(iframeRef.current, {
-        attributes: true,
-        attributeFilter: ['src']
-      })
+
+    // Navigate to next match
+    const navigateToNext = () => {
+      if (matches.length === 0) return
+      const nextIndex = (currentMatchIndex + 1) % matches.length
+      setCurrentMatchIndex(nextIndex)
+      const match = matches[nextIndex]
+      if (match) {
+        navigateToPage(match.pageNumber)
+      }
     }
-    
-    return () => {
-      clearInterval(intervalId)
-      observer.disconnect()
-    }
-  }, [document?.id])
 
-  // Calculate right offset based on AI panel state
-  useEffect(() => {
-    const calculateRightOffset = () => {
-      if (!isAIPanelOpen) return 20
-      // AI panel takes up a percentage of the viewport width
-      // FileExplorer typically takes ~14% of width, so AI panel is percentage of remaining 86%
-      const viewportWidth = window.innerWidth
-      const fileExplorerPercent = 14 // Approximate FileExplorer width
-      const remainingWidth = viewportWidth * (1 - fileExplorerPercent / 100)
-      const aiPanelPixelWidth = remainingWidth * (aiPanelWidth / 100)
-      return aiPanelPixelWidth + 20 // Add 20px margin
-    }
-    
-    setRightOffset(calculateRightOffset())
-    
-    // Update on window resize
-    const handleResize = () => {
-      setRightOffset(calculateRightOffset())
-    }
-    
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [isAIPanelOpen, aiPanelWidth])
-
-  // Early returns AFTER all hooks
-  if (!document) {
-    return null
-  }
-
-  // Check if document is a PDF
-  const isPDF = document.title.toLowerCase().endsWith('.pdf')
-  if (!isPDF) {
-    return null
-  }
-
-  // Show loading state while extracting PDF src
-  if (!pdfSrc && !error) {
-    return (
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: theme === 'dark' ? '#141414' : '#ffffff',
-          color: theme === 'dark' ? '#858585' : '#5f6368',
-        }}
-      >
-        <p>Loading PDF...</p>
-      </div>
-    )
-  }
-
-  const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
-
-  return (
-    <div
-      ref={containerRef}
-      style={{
-        width: '100%',
-        height: '100%',
-        backgroundColor: bgColor,
-        overflow: 'hidden',
-        position: 'relative',
-      }}
-      onKeyDown={(e) => {
-        // Handle Ctrl+F on the container div
-        if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F') && !e.shiftKey) {
+    // Handle keyboard shortcuts
+    useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        // Ctrl+F or Cmd+F to toggle search
+        if ((e.ctrlKey || e.metaKey) && e.key === 'f' && !e.shiftKey) {
           e.preventDefault()
-          e.stopPropagation()
           if (showInlineSearch) {
-            setShowInlineSearch(false)
-            setSearchQuery('')
-            setMatches([])
-            setCurrentMatchIndex(-1)
-            setActiveSearchQuery('')
+            clearSearchState()
           } else {
             setShowInlineSearch(true)
             setTimeout(() => {
@@ -619,347 +558,636 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
             }, 50)
           }
         }
-      }}
-      onClick={(e) => {
-        // If clicking on the container (not the iframe), focus it so keyboard events work
-        if (e.target === containerRef.current) {
-          containerRef.current?.focus()
+        
+        // Arrow keys for navigation (when search is not focused)
+        if (e.target instanceof HTMLInputElement) return
+        
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          e.preventDefault()
+          goToPreviousPage()
+        } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          e.preventDefault()
+          goToNextPage()
         }
-      }}
-      tabIndex={-1}
-    >
-      {!error ? (
-        <iframe
-          key={iframeKey}
-          ref={iframeRef}
-          src={pdfSrc ?? undefined}
-          style={{
-            width: '100%',
-            height: '100%',
-            border: 'none',
-            display: 'block',
-            backgroundColor: bgColor,
-          }}
-          onError={() => setError(true)}
-          onLoad={() => {
-            // Try postMessage again after iframe loads
-            if (pdfSrc && pdfSrc.includes('#page=')) {
-              const pageMatch = pdfSrc.match(/#page=(\d+)/)
-              if (pageMatch && iframeRef.current?.contentWindow) {
-                const pageNum = parseInt(pageMatch[1], 10)
-                currentPageRef.current = pageNum
-                
-                // Save page position
-                if (document?.id) {
-                  savePagePosition(document.id, pageNum)
-                }
-                
-                setTimeout(() => {
-                  try {
-                    iframeRef.current?.contentWindow?.postMessage({
-                      type: 'goToPage',
-                      page: pageNum
-                    }, '*')
-                  } catch (e) {
-                    // Ignore errors
-                  }
-                }, 500)
-              }
-            }
-            
-            // Listen for page changes from iframe (if PDF viewer supports postMessage)
-            if (iframeRef.current?.contentWindow) {
-              const handleMessage = (event: MessageEvent) => {
-                // Listen for page change events from PDF viewer
-                if (event.data && typeof event.data === 'object') {
-                  if (event.data.type === 'pagechange' && event.data.page && document?.id) {
-                    const pageNum = parseInt(event.data.page, 10)
-                    if (!isNaN(pageNum) && pageNum > 0) {
-                      savePagePosition(document.id, pageNum)
-                      currentPageRef.current = pageNum
-                    }
-                  }
-                }
-              }
-              
-              window.addEventListener('message', handleMessage)
-              
-              // Cleanup listener when iframe unloads
-              return () => {
-                window.removeEventListener('message', handleMessage)
-              }
-            }
-          }}
-          title={document.title}
-        />
-      ) : (
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '40px',
-            backgroundColor: bgColor,
-            color: theme === 'dark' ? '#858585' : '#5f6368',
-          }}
-        >
-          <p style={{ fontSize: '16px', marginBottom: '8px' }}>Unable to display PDF.</p>
-          <p style={{ fontSize: '12px' }}>
-            The PDF file is available in the file explorer.
-          </p>
-        </div>
-      )}
+      }
+
+      window.addEventListener('keydown', handleKeyDown)
+      return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [showInlineSearch, currentPage, totalPages])
+
+    // Calculate right offset for search bar
+    useEffect(() => {
+      const calculateRightOffset = () => {
+        if (!isAIPanelOpen) return 20
+        // AI panel takes up a percentage of the viewport width
+        // FileExplorer typically takes ~14% of width, so AI panel is percentage of remaining 86%
+        const viewportWidth = window.innerWidth
+        const fileExplorerPercent = 14 // Approximate FileExplorer width
+        const remainingWidth = viewportWidth * (1 - fileExplorerPercent / 100)
+        const aiPanelPixelWidth = remainingWidth * (aiPanelWidth / 100)
+        return aiPanelPixelWidth + 20 // Add 20px margin
+      }
       
-      {/* Inline Search Bar for PDF */}
-      {showInlineSearch && (
-        <div
-          style={{
-            position: 'fixed',
-            top: '92px',
-            right: `${rightOffset}px`,
-            backgroundColor: '#1e1e1e',
-            borderRadius: '8px',
-            padding: '12px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)',
-            zIndex: 1000,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-            minWidth: '280px',
-            maxWidth: '300px',
-            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            fontWeight: '300',
-            transition: 'right 0.3s ease',
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Show message if PDF text is not available */}
-          {!document?.pdfText && (
-            <div style={{
-              padding: '8px 12px',
-              backgroundColor: '#2a2a2a',
-              borderRadius: '4px',
-              fontSize: '12px',
-              color: '#999',
-              marginBottom: '8px',
-            }}>
-              PDF text is being extracted... Search will be available shortly.
-            </div>
-          )}
-          {/* Close button */}
-          <button
-            onClick={() => {
-              setShowInlineSearch(false)
-              setSearchQuery('')
-              setMatches([])
-              setCurrentMatchIndex(-1)
-              setActiveSearchQuery('')
-            }}
+      setRightOffset(calculateRightOffset())
+      
+      // Update on window resize
+      const handleResize = () => {
+        setRightOffset(calculateRightOffset())
+      }
+      
+      window.addEventListener('resize', handleResize)
+      return () => window.removeEventListener('resize', handleResize)
+    }, [isAIPanelOpen, aiPanelWidth])
+
+    // Update navigation bar position based on container width
+    // Only update after PDF is fully loaded to prevent flashing
+    useEffect(() => {
+      // Don't update position while loading or if PDF isn't loaded yet
+      if (loading || !pdfDocument || totalPages === 0) {
+        return
+      }
+
+      const updateNavBarPosition = () => {
+        if (containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect()
+          const centerX = rect.left + rect.width / 2
+          setNavBarLeft(`${centerX}px`)
+        }
+      }
+
+      // Small delay to ensure PDF canvas is fully rendered
+      const timeoutId = setTimeout(() => {
+        updateNavBarPosition()
+      }, 100)
+
+      window.addEventListener('resize', updateNavBarPosition)
+      // Also update when AI panel opens/closes
+      const container = containerRef.current
+      if (container) {
+        // Use MutationObserver to detect container size changes
+        const observer = new ResizeObserver(updateNavBarPosition)
+        observer.observe(container)
+        
+        return () => {
+          clearTimeout(timeoutId)
+          window.removeEventListener('resize', updateNavBarPosition)
+          observer.disconnect()
+        }
+      }
+
+      return () => {
+        clearTimeout(timeoutId)
+        window.removeEventListener('resize', updateNavBarPosition)
+      }
+    }, [isAIPanelOpen, aiPanelWidth, loading, pdfDocument, totalPages])
+
+    // Early returns
+    if (!document) {
+      return null
+    }
+
+    const isPDF = document.title.toLowerCase().endsWith('.pdf')
+    if (!isPDF) {
+      return null
+    }
+
+    const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
+
+    return (
+      <div
+        ref={containerRef}
+        style={{
+          width: '100%',
+          height: '100%',
+          backgroundColor: bgColor,
+          overflow: 'auto',
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          padding: '20px',
+        }}
+      >
+        {/* PDF Canvas */}
+        {!error ? (
+          <div style={{ position: 'relative' }}>
+            {loading && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  color: theme === 'dark' ? '#858585' : '#5f6368',
+                }}
+              >
+                Loading PDF...
+              </div>
+            )}
+            <canvas
+              ref={canvasRef}
+              style={{
+                display: 'block',
+                boxShadow: theme === 'dark' 
+                  ? '0 4px 12px rgba(0, 0, 0, 0.5)' 
+                  : '0 4px 12px rgba(0, 0, 0, 0.1)',
+                backgroundColor: '#fff',
+              }}
+            />
+          </div>
+        ) : (
+          <div
             style={{
-              position: 'absolute',
-              top: '8px',
-              right: '8px',
-              padding: '2px',
-              backgroundColor: 'transparent',
-              border: 'none',
-              color: '#999',
-              cursor: 'pointer',
-              fontSize: '14px',
+              width: '100%',
+              height: '100%',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              borderRadius: '4px',
-              width: '18px',
-              height: '18px',
-              fontWeight: '300',
+              padding: '40px',
+              color: theme === 'dark' ? '#858585' : '#5f6368',
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#2a2a2a'
-              e.currentTarget.style.color = '#fff'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent'
-              e.currentTarget.style.color = '#999'
-            }}
-            title="Close (Esc)"
           >
-            ✕
-          </button>
+            <p style={{ fontSize: '16px', marginBottom: '8px' }}>Unable to display PDF.</p>
+            <p style={{ fontSize: '12px' }}>
+              The PDF file is available in the file explorer.
+            </p>
+          </div>
+        )}
 
-          {/* Find section */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: '300', width: '100%' }}>
-            <label style={{
-              fontSize: '11px',
-              fontWeight: '300',
-              color: '#e0e0e0',
-              margin: 0,
-            }}>
-              Find in PDF
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%' }}>
-              <input
-                ref={inlineSearchInputRef}
-                data-search-input="true"
-                type="text"
-                placeholder=""
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  padding: '6px 10px',
-                  border: '1px solid #333',
-                  borderRadius: '4px',
-                  backgroundColor: '#252525',
-                  color: '#e0e0e0',
-                  fontSize: '13px',
-                  outline: 'none',
-                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                  fontWeight: '300',
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    e.stopPropagation() // Prevent window-level listener from also handling this
-                    // If search query hasn't changed, navigate to next match
-                    // Otherwise, perform a new search (goes to first match)
-                    if (searchQuery === activeSearchQuery && matches.length > 0) {
-                      navigateToNext()
-                    } else {
-                      performSearch()
-                    }
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault()
-                    e.stopPropagation() // Prevent window-level listener from also handling this
-                    setShowInlineSearch(false)
-                    setSearchQuery('')
-                    setMatches([])
-                    setCurrentMatchIndex(-1)
-                    setActiveSearchQuery('')
-                  }
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = '#555'
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = '#333'
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-              />
-              {matches.length > 0 && (
-                <>
-                  <div style={{
-                    fontSize: '11px',
-                    color: '#999',
-                    minWidth: '35px',
+        {/* Page Navigation Controls */}
+        {!error && totalPages > 0 && (
+          <div
+            style={{
+              position: 'fixed',
+              bottom: '24px',
+              left: navBarLeft,
+              transform: 'translateX(-50%)',
+              backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+              borderRadius: '12px',
+              padding: '6px 10px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                : '0 8px 24px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              zIndex: 100,
+              fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            {/* Previous Page Button */}
+            <button
+              onClick={goToPreviousPage}
+              disabled={currentPage <= 1}
+              style={{
+                padding: '6px 8px',
+                backgroundColor: 'transparent',
+                color: currentPage <= 1 
+                  ? (theme === 'dark' ? '#4a4a4a' : '#c0c0c0')
+                  : (theme === 'dark' ? '#D6D6DD' : '#202124'),
+                border: 'none',
+                borderRadius: '8px',
+                cursor: currentPage <= 1 ? 'not-allowed' : 'pointer',
+                fontSize: '16px',
+                fontWeight: 400,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '28px',
+                height: '28px',
+                transition: 'all 0.15s ease',
+                opacity: currentPage <= 1 ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (currentPage > 1) {
+                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }}
+            >
+              <span style={{ fontSize: '18px', lineHeight: 1 }}>←</span>
+            </button>
+
+            {/* Page Info - Clickable to input page number */}
+            {isPageInputOpen ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <input
+                  ref={pageInputRef}
+                  type="number"
+                  min="1"
+                  max={totalPages}
+                  value={pageInputValue}
+                  onChange={(e) => setPageInputValue(e.target.value)}
+                  onKeyDown={handlePageInputKeyDown}
+                  onBlur={handlePageInputSubmit}
+                  style={{
+                    width: '60px',
+                    padding: '4px 8px',
+                    backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa',
+                    borderRadius: '6px',
+                    color: theme === 'dark' ? '#D6D6DD' : '#202124',
+                    fontSize: '12px',
+                    fontWeight: 500,
                     textAlign: 'center',
+                    border: `1px solid ${theme === 'dark' ? '#3a3a3a' : '#c0c0c0'}`,
+                    outline: 'none',
+                  }}
+                />
+                <span style={{ 
+                  color: theme === 'dark' ? '#858585' : '#5f6368', 
+                  fontSize: '12px' 
+                }}>
+                  / {totalPages}
+                </span>
+              </div>
+            ) : (
+              <div
+                onClick={handlePageInputClick}
+                style={{
+                  padding: '6px 12px',
+                  backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa',
+                  borderRadius: '8px',
+                  color: theme === 'dark' ? '#D6D6DD' : '#202124',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  minWidth: '90px',
+                  textAlign: 'center',
+                  border: `1px solid ${theme === 'dark' ? '#2d2d2d' : '#e0e0e0'}`,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f0f0f0'
+                  e.currentTarget.style.borderColor = theme === 'dark' ? '#3a3a3a' : '#c0c0c0'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#252525' : '#f8f9fa'
+                  e.currentTarget.style.borderColor = theme === 'dark' ? '#2d2d2d' : '#e0e0e0'
+                }}
+              >
+                {currentPage} of {totalPages}
+              </div>
+            )}
+
+            {/* Next Page Button */}
+            <button
+              onClick={goToNextPage}
+              disabled={currentPage >= totalPages}
+              style={{
+                padding: '6px 8px',
+                backgroundColor: 'transparent',
+                color: currentPage >= totalPages
+                  ? (theme === 'dark' ? '#4a4a4a' : '#c0c0c0')
+                  : (theme === 'dark' ? '#D6D6DD' : '#202124'),
+                border: 'none',
+                borderRadius: '8px',
+                cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer',
+                fontSize: '16px',
+                fontWeight: 400,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '28px',
+                height: '28px',
+                transition: 'all 0.15s ease',
+                opacity: currentPage >= totalPages ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (currentPage < totalPages) {
+                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }}
+            >
+              <span style={{ fontSize: '18px', lineHeight: 1 }}>→</span>
+            </button>
+
+            {/* Divider */}
+            <div 
+              style={{ 
+                width: '1px', 
+                height: '20px', 
+                backgroundColor: theme === 'dark' ? '#2d2d2d' : '#dadce0',
+                margin: '0 4px',
+              }} 
+            />
+
+            {/* Zoom Out Button */}
+            <button
+              onClick={() => setScale(Math.max(0.5, scale - 0.25))}
+              style={{
+                padding: '6px 8px',
+                backgroundColor: 'transparent',
+                color: theme === 'dark' ? '#D6D6DD' : '#202124',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: 400,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '28px',
+                height: '28px',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }}
+            >
+              −
+            </button>
+
+            {/* Zoom Percentage */}
+            <div
+              style={{
+                padding: '6px 10px',
+                backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa',
+                borderRadius: '8px',
+                color: theme === 'dark' ? '#D6D6DD' : '#202124',
+                fontSize: '12px',
+                fontWeight: 500,
+                minWidth: '55px',
+                textAlign: 'center',
+                border: `1px solid ${theme === 'dark' ? '#2d2d2d' : '#e0e0e0'}`,
+              }}
+            >
+              {Math.round(scale * 100)}%
+            </div>
+
+            {/* Zoom In Button */}
+            <button
+              onClick={() => setScale(Math.min(3, scale + 0.25))}
+              style={{
+                padding: '6px 8px',
+                backgroundColor: 'transparent',
+                color: theme === 'dark' ? '#D6D6DD' : '#202124',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: 400,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '28px',
+                height: '28px',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }}
+            >
+              +
+            </button>
+          </div>
+        )}
+
+        {/* Inline Search Bar */}
+        {showInlineSearch && (
+          <div
+            style={{
+              position: 'fixed',
+              top: '92px', // TopBar (32px) + Toolbar container padding (8px top) + Toolbar content (~32px) + margin (20px) = 92px to match right margin
+              right: `${rightOffset}px`,
+              backgroundColor: '#1e1e1e',
+              borderRadius: '8px',
+              padding: '12px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)',
+              zIndex: 1000,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px', // Increased from 10px for more spacing
+              minWidth: '280px',
+              maxWidth: '300px',
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+              fontWeight: '300', // Apply to whole modal
+              transition: 'right 0.3s ease',
+            }}
+            onMouseDown={(e) => {
+              // Prevent PDF viewer from intercepting clicks on the search dialog
+              e.stopPropagation()
+            }}
+            onClick={(e) => {
+              // Prevent PDF viewer from intercepting clicks on the search dialog
+              e.stopPropagation()
+            }}
+          >
+            {/* Close button */}
+            <button
+              onClick={() => {
+                clearSearchState()
+              }}
+              style={{
+                position: 'absolute',
+                top: '8px',
+                right: '8px',
+                padding: '2px',
+                backgroundColor: 'transparent',
+                border: 'none',
+                color: '#999',
+                cursor: 'pointer',
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '4px',
+                width: '18px',
+                height: '18px',
+                fontWeight: '300',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#2a2a2a'
+                e.currentTarget.style.color = '#fff'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent'
+                e.currentTarget.style.color = '#999'
+              }}
+              title="Close (Esc)"
+            >
+              ✕
+            </button>
+
+            {/* Find section */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: '300', width: '100%' }}>
+              <label style={{
+                fontSize: '11px',
+                fontWeight: '300',
+                color: '#e0e0e0',
+                margin: 0,
+              }}>
+                Find
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%' }}>
+                <input
+                  ref={inlineSearchInputRef}
+                  type="text"
+                  placeholder=""
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    flex: 1,
+                    minWidth: 0, // Allow flex item to shrink below content size
+                    padding: '6px 10px',
+                    border: '1px solid #333',
+                    borderRadius: '4px',
+                    backgroundColor: '#252525',
+                    color: '#e0e0e0',
+                    fontSize: '13px',
+                    outline: 'none',
                     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
                     fontWeight: '300',
-                  }}>
-                    {currentMatchIndex + 1}/{matches.length}
-                  </div>
-                  {/* Show match context and page info */}
-                  {currentMatchIndex >= 0 && matches[currentMatchIndex] && (
-                    <div 
-                      style={{
-                        fontSize: '10px',
-                        color: '#666',
-                        padding: '2px 6px',
-                        backgroundColor: '#2a2a2a',
-                        borderRadius: '3px',
-                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                        fontWeight: '300',
-                        maxWidth: '120px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                      title={`Page ${matches[currentMatchIndex].pageNumber}: ${getMatchContext(matches[currentMatchIndex], 30)}`}
-                    >
-                      Page {matches[currentMatchIndex].pageNumber}
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      e.stopPropagation() // Prevent window-level listener from also handling this
+                      // If search query hasn't changed, navigate to next match
+                      // Otherwise, perform a new search (goes to first match)
+                      if (searchQuery === activeSearchQuery && matches.length > 0) {
+                        navigateToNext()
+                      } else {
+                        performSearch()
+                      }
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault()
+                      e.stopPropagation() // Prevent window-level listener from also handling this
+                      clearSearchState()
+                    } else if (e.key === 'ArrowUp' && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault()
+                      navigateToPrevious()
+                    } else if (e.key === 'ArrowDown' && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault()
+                      navigateToNext()
+                    }
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = '#555' // Darker gray on focus
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = '#333'
+                  }}
+                  onMouseDown={(e) => {
+                    // Prevent PDF viewer from intercepting the click
+                    e.stopPropagation()
+                  }}
+                />
+                {activeSearchQuery && matches.length > 0 && (
+                  <>
+                    <div style={{
+                      fontSize: '11px',
+                      color: '#999',
+                      minWidth: '35px',
+                      textAlign: 'center',
+                      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                      fontWeight: '300',
+                    }}>
+                      {currentMatchIndex + 1}/{matches.length}
                     </div>
-                  )}
-                  <button
-                    onClick={navigateToPrevious}
-                    disabled={matches.length === 0}
-                    style={{
-                      padding: '4px 6px',
-                      backgroundColor: 'transparent',
-                      border: '1px solid #333',
-                      borderRadius: '4px',
-                      color: matches.length > 0 ? '#e0e0e0' : '#666',
-                      cursor: matches.length > 0 ? 'pointer' : 'not-allowed',
-                      fontSize: '12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      minWidth: '24px',
-                      height: '24px',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (matches.length > 0) {
-                        e.currentTarget.style.backgroundColor = '#333'
-                        e.currentTarget.style.borderColor = '#444'
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (matches.length > 0) {
-                        e.currentTarget.style.backgroundColor = 'transparent'
-                        e.currentTarget.style.borderColor = '#333'
-                      }
-                    }}
-                    title="Previous match"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    onClick={navigateToNext}
-                    disabled={matches.length === 0}
-                    style={{
-                      padding: '4px 6px',
-                      backgroundColor: 'transparent',
-                      border: '1px solid #333',
-                      borderRadius: '4px',
-                      color: matches.length > 0 ? '#e0e0e0' : '#666',
-                      cursor: matches.length > 0 ? 'pointer' : 'not-allowed',
-                      fontSize: '12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      minWidth: '24px',
-                      height: '24px',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (matches.length > 0) {
-                        e.currentTarget.style.backgroundColor = '#333'
-                        e.currentTarget.style.borderColor = '#444'
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (matches.length > 0) {
-                        e.currentTarget.style.backgroundColor = 'transparent'
-                        e.currentTarget.style.borderColor = '#333'
-                      }
-                    }}
-                    title="Next match"
-                  >
-                    ›
-                  </button>
-                </>
-              )}
+                    <button
+                      onClick={navigateToPrevious}
+                      disabled={matches.length === 0}
+                      style={{
+                        padding: '4px 6px',
+                        backgroundColor: 'transparent',
+                        border: '1px solid #333',
+                        borderRadius: '4px',
+                        color: matches.length > 0 ? '#e0e0e0' : '#666',
+                        cursor: matches.length > 0 ? 'pointer' : 'not-allowed',
+                        fontSize: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: '24px',
+                        height: '24px',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (matches.length > 0) {
+                          e.currentTarget.style.backgroundColor = '#333'
+                          e.currentTarget.style.borderColor = '#444'
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (matches.length > 0) {
+                          e.currentTarget.style.backgroundColor = 'transparent'
+                          e.currentTarget.style.borderColor = '#333'
+                        }
+                      }}
+                      title="Previous match"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      onClick={navigateToNext}
+                      disabled={matches.length === 0}
+                      style={{
+                        padding: '4px 6px',
+                        backgroundColor: 'transparent',
+                        border: '1px solid #333',
+                        borderRadius: '4px',
+                        color: matches.length > 0 ? '#e0e0e0' : '#666',
+                        cursor: matches.length > 0 ? 'pointer' : 'not-allowed',
+                        fontSize: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: '24px',
+                        height: '24px',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (matches.length > 0) {
+                          e.currentTarget.style.backgroundColor = '#333'
+                          e.currentTarget.style.borderColor = '#444'
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (matches.length > 0) {
+                          e.currentTarget.style.backgroundColor = 'transparent'
+                          e.currentTarget.style.borderColor = '#333'
+                        }
+                      }}
+                      title="Next match"
+                    >
+                      ›
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
+            
+            {/* Match status */}
+            {activeSearchQuery && (
+              <div style={{ 
+                fontSize: '11px', 
+                color: '#999',
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                fontWeight: '300',
+              }}>
+                {matches.length > 0
+                  ? `${matches.length} match${matches.length !== 1 ? 'es' : ''} found`
+                  : 'No matches found'}
+              </div>
+            )}
           </div>
-        </div>
-      )}
-    </div>
-  )
-})
+        )}
+      </div>
+    )
+  }
+)
 
 FullScreenPDFViewer.displayName = 'FullScreenPDFViewer'
 
 export default FullScreenPDFViewer
-

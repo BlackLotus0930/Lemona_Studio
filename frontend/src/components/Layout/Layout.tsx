@@ -1036,17 +1036,61 @@ export default function Layout() {
       }
       
       // Remove document from tabs if it's open
-      setOpenTabs(prevTabs => prevTabs.filter(tab => tab.id !== docId))
+      const wasActiveTab = activeTabId === docId
+      const isCurrentDocument = document?.id === docId
       
-      // Clear scroll position for the deleted document
-      try {
-        localStorage.removeItem(`documentScroll_${docId}`)
-      } catch (error) {
-        console.error('Failed to clear scroll position:', error)
+      setOpenTabs(prevTabs => {
+        const tabExists = prevTabs.find(tab => tab.id === docId)
+        if (!tabExists) {
+          return prevTabs // Tab not open, nothing to do
+        }
+        
+        const newTabs = prevTabs.filter(tab => tab.id !== docId)
+        
+        // Clear scroll position for the deleted document
+        try {
+          localStorage.removeItem(`documentScroll_${docId}`)
+          localStorage.removeItem(`pdfPage_${docId}`)
+        } catch (error) {
+          console.error('Failed to clear scroll position:', error)
+        }
+        
+        // Remove PDF Viewer ref when tab is closed
+        pdfViewerRefsMap.current.delete(docId)
+        
+        // If the deleted document was the active tab but NOT the current document,
+        // navigate to another tab (if it's the current document, navigation is handled below)
+        if (wasActiveTab && !isCurrentDocument) {
+          if (newTabs.length > 0) {
+            // Switch to the last tab, or the one before if closing the last one
+            const closedIndex = prevTabs.findIndex(tab => tab.id === docId)
+            const targetIndex = closedIndex > 0 ? closedIndex - 1 : 0
+            const targetTab = newTabs[targetIndex] || newTabs[0]
+            setActiveTabId(targetTab.id)
+            navigate(`/document/${targetTab.id}`)
+          } else {
+            // No tabs left, navigate to document list
+            setActiveTabId(null)
+            navigate('/documents')
+          }
+        }
+        
+        return newTabs
+      })
+      
+      // Cleanup for documents that weren't in tabs (e.g., deleted from file explorer without being opened)
+      if (!openTabs.find(tab => tab.id === docId)) {
+        try {
+          localStorage.removeItem(`documentScroll_${docId}`)
+          localStorage.removeItem(`pdfPage_${docId}`)
+        } catch (error) {
+          console.error('Failed to clear scroll position:', error)
+        }
+        pdfViewerRefsMap.current.delete(docId)
       }
       
       // If current document was deleted, find next file to navigate to
-      if (document?.id === docId) {
+      if (isCurrentDocument) {
         // Helper function to get documents in file explorer order:
         // 1. README.md (if exists)
         // 2. Library files (sorted by order or createdAt)
@@ -2331,9 +2375,18 @@ export default function Layout() {
                   onDocumentsUpdated={loadDocuments}
                   onDocumentChange={setDocument}
                   onSelectedFolderChange={setSelectedFolder}
-                  onFileUploaded={async (newDoc) => {
-                    // Reload documents to show the new file
-                    await loadDocuments()
+                  onFileUploaded={async (newDoc, isBatchUpload = false) => {
+                    // Optimistically add the new document to the list without full reload
+                    // This avoids re-rendering the entire file explorer and prevents deleted files from reappearing
+                    setDocuments((prevDocs) => {
+                      // Check if document already exists to avoid duplicates
+                      if (prevDocs.some(doc => doc.id === newDoc.id)) {
+                        return prevDocs
+                      }
+                      // Add new document to the list
+                      return [...prevDocs, newDoc]
+                    })
+                    
                     // If current document has projectId, add new doc to same project
                     if (document?.projectId) {
                       // Calculate order based on documents in the same folder
@@ -2346,11 +2399,23 @@ export default function Layout() {
                       const maxOrder = folderDocs.length > 0
                         ? Math.max(...folderDocs.map(doc => doc.order ?? 0), -1) + 1
                         : 0
-                      await projectApi.addDocument(document.projectId, newDoc.id, maxOrder)
-                      await loadDocuments()
+                      
+                      // Add to project in background (don't wait for it)
+                      projectApi.addDocument(document.projectId, newDoc.id, maxOrder).catch(err => {
+                        console.error('Failed to add document to project:', err)
+                        // Update optimistically instead of reloading to prevent deleted files from reappearing
+                        // Only reload if absolutely necessary (e.g., order conflict)
+                        if (err.message?.includes('order') || err.message?.includes('duplicate')) {
+                          loadDocuments()
+                        }
+                      })
                     }
-                    // Navigate to the newly uploaded file
-                    navigate(`/document/${newDoc.id}`)
+                    
+                    // Only navigate to the newly uploaded file if it's a single file upload
+                    // This prevents flashing when uploading multiple PDFs
+                    if (!isBatchUpload) {
+                      navigate(`/document/${newDoc.id}`)
+                    }
                   }}
                 />
               )}

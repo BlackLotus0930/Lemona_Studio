@@ -20,7 +20,6 @@ export default function ExportModal({
   onExport, 
   documents, 
   projectName, 
-  documentTitle,
   triggerRef,
   isOpen,
   onClose
@@ -164,7 +163,6 @@ export default function ExportModal({
     onExport(format, downloadFilename, selectedIds)
   }
 
-  const dropdownBg = theme === 'dark' ? '#141414' : '#ffffff'
   const dropdownBorder = '#212121'
   const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const dropdownHoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'

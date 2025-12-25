@@ -21,7 +21,7 @@ interface FileExplorerProps {
   onReorderDocuments?: (documentIds: string[]) => void
   projectName?: string // Project name for the ProjectName folder
   onSelectedFolderChange?: (folderId: 'library' | 'project' | null) => void // Callback when folder selection changes
-  onFileUploaded?: (document: Document) => void // Callback when a file is uploaded
+  onFileUploaded?: (document: Document, isBatchUpload?: boolean) => void // Callback when a file is uploaded, isBatchUpload indicates if multiple files are being uploaded
   isSearchMode?: boolean // Whether search mode is active
   onSearchModeChange?: (isSearchMode: boolean) => void // Callback to toggle search mode
   onSearchQueryChange?: (query: string) => void // Callback when search query changes
@@ -70,6 +70,13 @@ function FileExplorer({
   const [dropPosition, setDropPosition] = useState<'above' | 'below' | null>(null) // Track drop position relative to item
   const [dropTargetId, setDropTargetId] = useState<string | null>(null) // Track which item we're dropping relative to
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['library', 'project'])) // Default both folders expanded
+  
+  // Upload queue state - use ref to avoid re-renders and manage queue properly
+  const uploadQueueRef = useRef<Array<{ file: File; folderId: 'library' | 'project' }>>([])
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; currentFile: string } | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const processingRef = useRef(false)
+  const MAX_CONCURRENT_UPLOADS = 3 // Process max 3 files at a time
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
@@ -148,6 +155,11 @@ function FileExplorer({
       const query = searchQuery.toLowerCase()
       
       for (const doc of documents) {
+        // Skip documents in the library folder - only search workspace files
+        if (doc.folder === 'library') {
+          continue
+        }
+        
         try {
           let textContent = ''
           const isPDF = doc.title.toLowerCase().endsWith('.pdf')
@@ -570,6 +582,107 @@ function FileExplorer({
     return ['pdf', 'png', 'docx', 'xlsx'].includes(ext || '')
   }
 
+  // Process upload queue
+  useEffect(() => {
+    if (uploadQueueRef.current.length === 0 || processingRef.current) return
+
+    const processUploads = async () => {
+      processingRef.current = true
+      setIsUploading(true)
+      
+      const totalFiles = uploadQueueRef.current.length
+      let processedCount = 0
+
+      while (uploadQueueRef.current.length > 0) {
+        const batch = uploadQueueRef.current.splice(0, MAX_CONCURRENT_UPLOADS)
+
+        // Process batch in parallel
+        const uploadPromises = batch.map(async (item) => {
+          const { file, folderId } = item
+          processedCount++
+
+          try {
+            setUploadProgress({
+              current: processedCount,
+              total: totalFiles,
+              currentFile: file.name,
+            })
+
+            if (!isSupportedFileType(file.name)) {
+              console.warn(`File type not supported: ${file.name}`)
+              return { success: false, error: `File type not supported: ${file.name}` }
+            }
+
+            // In Electron, when dragging from file system, file.path should be available
+            const filePath = (file as any).path
+
+            let document: Document | null = null
+
+            if (!filePath) {
+              // If no path, try to read file and save temporarily
+              // This handles files dragged from browser or other sources
+              const arrayBuffer = await file.arrayBuffer()
+              const uint8Array = new Uint8Array(arrayBuffer)
+
+              // Use Electron IPC to save temp file
+              if ((window as any).electron) {
+                const tempPath = await (window as any).electron.invoke('file:saveTemp', Array.from(uint8Array), file.name)
+                if (tempPath) {
+                  document = await documentApi.uploadFile(tempPath, file.name, folderId)
+                } else {
+                  throw new Error('Failed to save temporary file')
+                }
+              } else {
+                throw new Error('File path not available and Electron API not accessible')
+              }
+            } else {
+              // File has a path (dragged from file system)
+              document = await documentApi.uploadFile(filePath, file.name, folderId)
+            }
+
+            if (document && onFileUploaded) {
+              // Check if this is part of a batch upload (more than 1 file)
+              const isBatchUpload = totalFiles > 1
+              onFileUploaded(document, isBatchUpload)
+            }
+
+            return { success: true, document }
+          } catch (error) {
+            console.error('Failed to upload file:', error)
+            return {
+              success: false,
+              error: `Failed to upload ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            }
+          }
+        })
+
+        // Wait for batch to complete
+        const results = await Promise.allSettled(uploadPromises)
+
+        // Log errors but don't stop processing
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            console.error(`Upload failed for ${batch[index].file.name}:`, result.reason)
+          } else if (result.value && !result.value.success) {
+            console.error(result.value.error)
+          }
+        })
+
+        // Small delay between batches to prevent overwhelming the system
+        if (uploadQueueRef.current.length > 0) {
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
+      }
+
+      processingRef.current = false
+      setIsUploading(false)
+      setUploadProgress(null)
+    }
+
+    processUploads()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadQueueRef.current.length, onFileUploaded])
+
   // Handle file drop on folder
   const handleFolderDrop = async (e: React.DragEvent, folderId: 'library' | 'project') => {
     e.preventDefault()
@@ -580,49 +693,27 @@ function FileExplorer({
     const files = Array.from(e.dataTransfer.files)
     if (files.length === 0) return
 
-    for (const file of files) {
+    // Filter supported files
+    const supportedFiles = files.filter(file => {
       if (!isSupportedFileType(file.name)) {
-        alert(`File type not supported: ${file.name}. Supported formats: .pdf, .png, .docx, .xlsx`)
-        continue
+        console.warn(`File type not supported: ${file.name}. Supported formats: .pdf, .png, .docx, .xlsx`)
+        return false
       }
+      return true
+    })
 
-      try {
-        // In Electron, when dragging from file system, file.path should be available
-        const filePath = (file as any).path
-        
-        if (!filePath) {
-          // If no path, try to read file and save temporarily
-          // This handles files dragged from browser or other sources
-          const arrayBuffer = await file.arrayBuffer()
-          const uint8Array = new Uint8Array(arrayBuffer)
-          
-          // Use Electron IPC to save temp file
-          if ((window as any).electron) {
-            const tempPath = await (window as any).electron.invoke('file:saveTemp', Array.from(uint8Array), file.name)
-            if (tempPath) {
-              const document = await documentApi.uploadFile(tempPath, file.name, folderId)
-              if (onFileUploaded) {
-                onFileUploaded(document)
-              }
-            } else {
-              throw new Error('Failed to save temporary file')
-            }
-          } else {
-            throw new Error('File path not available and Electron API not accessible')
-          }
-        } else {
-          // File has a path (dragged from file system)
-          const document = await documentApi.uploadFile(filePath, file.name, folderId)
-          
-          if (onFileUploaded) {
-            onFileUploaded(document)
-          }
-        }
-      } catch (error) {
-        console.error('Failed to upload file:', error)
-        alert(`Failed to upload file: ${file.name}. ${error instanceof Error ? error.message : 'Unknown error'}`)
-      }
+    if (supportedFiles.length === 0) {
+      alert('No supported files found. Supported formats: .pdf, .png, .docx, .xlsx')
+      return
     }
+
+    // Add files to upload queue
+    supportedFiles.forEach(file => {
+      uploadQueueRef.current.push({ file, folderId })
+    })
+    
+    // Trigger processing by forcing a re-render
+    setIsUploading(prev => !prev)
   }
 
   // Handle drag over folder
@@ -1046,6 +1137,71 @@ function FileExplorer({
       return () => document.removeEventListener('click', handleClickOutside)
     }
   }, [contextMenuPos])
+
+  // Upload progress indicator
+  const uploadProgressIndicator = uploadProgress ? (
+    <div
+      style={{
+        position: 'fixed',
+        bottom: '20px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+        border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+        borderRadius: '8px',
+        padding: '12px 20px',
+        boxShadow: theme === 'dark'
+          ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
+          : '0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1)',
+        zIndex: 10001,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        minWidth: '300px',
+      }}
+    >
+      <div
+        style={{
+          width: '16px',
+          height: '16px',
+          border: `2px solid ${theme === 'dark' ? '#555' : '#ccc'}`,
+          borderTopColor: theme === 'dark' ? '#858585' : '#666',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite',
+        }}
+      />
+      <div style={{ flex: 1 }}>
+        <div
+          style={{
+            fontSize: '13px',
+            fontWeight: '500',
+            color: theme === 'dark' ? '#ffffff' : '#202124',
+            marginBottom: '4px',
+          }}
+        >
+          Uploading files... ({uploadProgress.current}/{uploadProgress.total})
+        </div>
+        <div
+          style={{
+            fontSize: '11px',
+            color: theme === 'dark' ? '#999' : '#666',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={uploadProgress.currentFile}
+        >
+          {uploadProgress.currentFile}
+        </div>
+      </div>
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  ) : null
 
   // Render README.md as a standalone file item with outlined info icon
   const renderReadmeItem = () => {
@@ -1600,6 +1756,9 @@ function FileExplorer({
           )}
         </div>
       )}
+
+      {/* Upload progress indicator */}
+      {uploadProgressIndicator}
     </div>
   )
 }
