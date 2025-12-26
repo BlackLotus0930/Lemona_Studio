@@ -25,6 +25,7 @@
     "@tiptap/extension-underline": "^3.14.0",
     "@tiptap/react": "^3.14.0",
     "@tiptap/starter-kit": "^3.14.0",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "axios": "^1.6.2",
     "katex": "^0.16.27",
     "pdfjs-dist": "^5.4.449",
@@ -32,6 +33,7 @@
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^2.0.17",
+    "react-syntax-highlighter": "^16.1.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {

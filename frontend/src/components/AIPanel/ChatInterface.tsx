@@ -4,6 +4,8 @@ import { aiApi, chatApi } from '../../services/api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTheme } from '../../contexts/ThemeContext'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
 // @ts-ignore
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 // @ts-ignore
@@ -16,6 +18,10 @@ import AlternateEmailIcon from '@mui/icons-material/AlternateEmail'
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf'
 // @ts-ignore
 import CloseIcon from '@mui/icons-material/Close'
+// @ts-ignore
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+// @ts-ignore
+import CheckIcon from '@mui/icons-material/Check'
 
 interface ChatInterfaceProps {
   documentId?: string
@@ -74,6 +80,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const [inputContainerWidth, setInputContainerWidth] = useState<number | null>(null)
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [copiedCodeBlocks, setCopiedCodeBlocks] = useState<Set<string>>(new Set())
   
   // Load Google API key from localStorage on mount
   useEffect(() => {
@@ -553,6 +560,23 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     setAttachments(prev => prev.filter(att => att.id !== attachmentId))
   }
 
+  // Copy code block to clipboard
+  const handleCopyCode = async (code: string, blockId: string) => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopiedCodeBlocks(prev => new Set(prev).add(blockId))
+      setTimeout(() => {
+        setCopiedCodeBlocks(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(blockId)
+          return newSet
+        })
+      }, 2000)
+    } catch (error) {
+      console.error('Failed to copy code:', error)
+    }
+  }
+
   const handleSend = async () => {
     if ((!input.trim() && attachments.length === 0) || isLoading || !documentId || !chatId) return
 
@@ -794,8 +818,8 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                 style={{
                   width: '100%',
                   color: textColor,
-                  fontSize: '13px',
-                  lineHeight: '1.6',
+                  fontSize: '14px',
+                  lineHeight: '1.7',
                   fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                   userSelect: 'text',
                   WebkitUserSelect: 'text',
@@ -808,103 +832,328 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                   remarkPlugins={[remarkGfm]}
                   components={{
                     // Headers
-                    h1: ({node, ...props}) => <h1 style={{ fontSize: '24px', fontWeight: 600, marginTop: '24px', marginBottom: '12px', color: textColor, lineHeight: '1.3' }} {...props} />,
-                    h2: ({node, ...props}) => <h2 style={{ fontSize: '20px', fontWeight: 600, marginTop: '20px', marginBottom: '10px', color: textColor, lineHeight: '1.3' }} {...props} />,
-                    h3: ({node, ...props}) => <h3 style={{ fontSize: '18px', fontWeight: 600, marginTop: '16px', marginBottom: '8px', color: textColor, lineHeight: '1.3' }} {...props} />,
-                    h4: ({node, ...props}) => <h4 style={{ fontSize: '16px', fontWeight: 600, marginTop: '14px', marginBottom: '8px', color: textColor, lineHeight: '1.3' }} {...props} />,
-                    h5: ({node, ...props}) => <h5 style={{ fontSize: '15px', fontWeight: 600, marginTop: '12px', marginBottom: '6px', color: textColor, lineHeight: '1.3' }} {...props} />,
-                    h6: ({node, ...props}) => <h6 style={{ fontSize: '14px', fontWeight: 600, marginTop: '10px', marginBottom: '6px', color: textColor, lineHeight: '1.3' }} {...props} />,
+                    h1: ({node, ...props}) => <h1 style={{ 
+                      fontSize: '26px', 
+                      fontWeight: 700, 
+                      marginTop: '28px', 
+                      marginBottom: '16px', 
+                      color: textColor, 
+                      lineHeight: '1.3',
+                      letterSpacing: '-0.02em'
+                    }} {...props} />,
+                    h2: ({node, ...props}) => <h2 style={{ 
+                      fontSize: '22px', 
+                      fontWeight: 600, 
+                      marginTop: '24px', 
+                      marginBottom: '12px', 
+                      color: textColor, 
+                      lineHeight: '1.3',
+                      letterSpacing: '-0.01em'
+                    }} {...props} />,
+                    h3: ({node, ...props}) => <h3 style={{ 
+                      fontSize: '19px', 
+                      fontWeight: 600, 
+                      marginTop: '20px', 
+                      marginBottom: '10px', 
+                      color: textColor, 
+                      lineHeight: '1.3'
+                    }} {...props} />,
+                    h4: ({node, ...props}) => <h4 style={{ 
+                      fontSize: '17px', 
+                      fontWeight: 600, 
+                      marginTop: '18px', 
+                      marginBottom: '10px', 
+                      color: textColor, 
+                      lineHeight: '1.3'
+                    }} {...props} />,
+                    h5: ({node, ...props}) => <h5 style={{ 
+                      fontSize: '16px', 
+                      fontWeight: 600, 
+                      marginTop: '16px', 
+                      marginBottom: '8px', 
+                      color: textColor, 
+                      lineHeight: '1.3'
+                    }} {...props} />,
+                    h6: ({node, ...props}) => <h6 style={{ 
+                      fontSize: '15px', 
+                      fontWeight: 600, 
+                      marginTop: '14px', 
+                      marginBottom: '8px', 
+                      color: textColor, 
+                      lineHeight: '1.3'
+                    }} {...props} />,
                     // Paragraphs
-                    p: ({node, ...props}) => <p style={{ marginBottom: '12px', marginTop: 0, lineHeight: '1.6', color: textColor }} {...props} />,
-                    // Code blocks
+                    p: ({node, ...props}) => <p style={{ 
+                      marginBottom: '14px', 
+                      marginTop: 0, 
+                      lineHeight: '1.7', 
+                      color: textColor 
+                    }} {...props} />,
+                    // Code blocks - handle inline code
                     code: ({node, inline, className, children, ...props}: any) => {
                       if (inline) {
                         return <code style={{ 
                           backgroundColor: theme === 'dark' ? '#2d2d2d' : '#f1f3f4', 
-                          padding: '2px 6px', 
+                          padding: '3px 6px', 
                           borderRadius: '4px', 
                           fontSize: '13px',
-                          fontFamily: 'Monaco, "Courier New", monospace',
-                          color: theme === 'dark' ? '#ce9178' : '#c5221f'
+                          fontFamily: '"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace',
+                          color: theme === 'dark' ? '#ce9178' : '#c5221f',
+                          fontWeight: 500
                         }} {...props}>{children}</code>
                       }
-                      return (
-                        <code 
-                          className={className}
-                          style={{
-                            display: 'block',
-                            fontFamily: 'Monaco, "Courier New", monospace',
-                            fontSize: '13px',
-                            lineHeight: '1.5',
-                            color: textColor
-                          }}
-                          {...props}
-                        >
-                          {children}
-                        </code>
-                      )
+                      // For code blocks, return the code element as-is (will be wrapped in pre)
+                      return <code className={className}>{children}</code>
                     },
-                    pre: ({node, children, ...props}: any) => {
+                    // Pre component handles code blocks
+                    pre: ({children}: any) => {
+                      // Extract code from children (which is a code element)
+                      const codeProps = (children as any)?.props || {}
+                      const codeElement = codeProps.children
+                      const className = codeProps.className || ''
+                      const match = /language-(\w+)/.exec(className || '')
+                      const language = match ? match[1] : ''
+                      const codeString = String(codeElement || '').replace(/\n$/, '')
+                      // Create a stable ID based on message ID and code content hash
+                      const codeHash = codeString.split('').reduce((acc, char) => {
+                        const hash = ((acc << 5) - acc) + char.charCodeAt(0)
+                        return hash & hash
+                      }, 0)
+                      const blockId = `${message.id}-${codeHash}-${codeString.length}`
+                      const isCopied = copiedCodeBlocks.has(blockId)
+                      
                       return (
-                        <pre style={{
-                          backgroundColor: theme === 'dark' ? '#181818' : '#f8f9fa',
-                          border: `1px solid ${borderColor}`,
-                          borderRadius: '8px',
-                          padding: '16px',
-                          overflowX: 'auto',
-                          marginBottom: '16px',
-                          marginTop: '8px',
-                          fontSize: '13px',
-                          lineHeight: '1.5',
-                          fontFamily: 'Monaco, "Courier New", monospace'
-                        }} {...props}>
-                          {children}
-                        </pre>
+                        <div style={{
+                          position: 'relative',
+                          marginTop: '16px',
+                          marginBottom: '16px'
+                        }}>
+                          <div style={{
+                            position: 'relative',
+                            backgroundColor: theme === 'dark' ? '#1e1e1e' : '#f8f9fa',
+                            border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`,
+                            borderRadius: '8px',
+                            overflow: 'hidden'
+                          }}>
+                            {language && (
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                padding: '8px 12px',
+                                backgroundColor: theme === 'dark' ? '#252525' : '#f0f0f0',
+                                borderBottom: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`,
+                                fontSize: '12px',
+                                color: secondaryTextColor,
+                                fontWeight: 500
+                              }}>
+                                <span style={{ textTransform: 'uppercase' }}>{language}</span>
+                                <button
+                                  onClick={() => handleCopyCode(codeString, blockId)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '4px 8px',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    color: secondaryTextColor,
+                                    cursor: 'pointer',
+                                    fontSize: '12px',
+                                    fontFamily: 'inherit',
+                                    transition: 'all 0.2s'
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#3a3a3a' : '#e0e0e0'
+                                    e.currentTarget.style.color = textColor
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = 'transparent'
+                                    e.currentTarget.style.color = secondaryTextColor
+                                  }}
+                                >
+                                  {isCopied ? (
+                                    <>
+                                      <CheckIcon style={{ fontSize: '14px' }} />
+                                      <span>Copied</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ContentCopyIcon style={{ fontSize: '14px' }} />
+                                      <span>Copy</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            )}
+                            {!language && (
+                              <button
+                                onClick={() => handleCopyCode(codeString, blockId)}
+                                style={{
+                                  position: 'absolute',
+                                  top: '8px',
+                                  right: '8px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  padding: '6px 10px',
+                                  backgroundColor: theme === 'dark' ? 'rgba(30, 30, 30, 0.8)' : 'rgba(248, 249, 250, 0.9)',
+                                  border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`,
+                                  borderRadius: '6px',
+                                  color: secondaryTextColor,
+                                  cursor: 'pointer',
+                                  fontSize: '12px',
+                                  fontFamily: 'inherit',
+                                  transition: 'all 0.2s',
+                                  zIndex: 1
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#3a3a3a' : '#e0e0e0'
+                                  e.currentTarget.style.color = textColor
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(30, 30, 30, 0.8)' : 'rgba(248, 249, 250, 0.9)'
+                                  e.currentTarget.style.color = secondaryTextColor
+                                }}
+                              >
+                                {isCopied ? (
+                                  <>
+                                    <CheckIcon style={{ fontSize: '14px' }} />
+                                    <span>Copied</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <ContentCopyIcon style={{ fontSize: '14px' }} />
+                                    <span>Copy</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                            <SyntaxHighlighter
+                              language={language || 'text'}
+                              style={theme === 'dark' ? vscDarkPlus : vs}
+                              customStyle={{
+                                margin: 0,
+                                padding: language ? '16px' : '16px',
+                                fontSize: '13px',
+                                lineHeight: '1.5',
+                                fontFamily: '"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace',
+                                backgroundColor: 'transparent',
+                                borderRadius: language ? '0 0 8px 8px' : '8px'
+                              }}
+                              PreTag="div"
+                            >
+                              {codeString}
+                            </SyntaxHighlighter>
+                          </div>
+                        </div>
                       )
                     },
                     // Lists
-                    ul: ({node, ...props}) => <ul style={{ marginBottom: '12px', paddingLeft: '24px', marginTop: '8px', listStyleType: 'disc', color: textColor }} {...props} />,
-                    ol: ({node, ...props}) => <ol style={{ marginBottom: '12px', paddingLeft: '24px', marginTop: '8px', color: textColor }} {...props} />,
-                    li: ({node, ...props}) => <li style={{ marginBottom: '6px', lineHeight: '1.6', color: textColor }} {...props} />,
+                    ul: ({node, ...props}) => <ul style={{ 
+                      marginBottom: '14px', 
+                      paddingLeft: '28px', 
+                      marginTop: '8px', 
+                      listStyleType: 'disc',
+                      color: textColor,
+                      lineHeight: '1.7'
+                    }} {...props} />,
+                    ol: ({node, ...props}) => <ol style={{ 
+                      marginBottom: '14px', 
+                      paddingLeft: '28px', 
+                      marginTop: '8px', 
+                      color: textColor,
+                      lineHeight: '1.7'
+                    }} {...props} />,
+                    li: ({node, ...props}) => <li style={{ 
+                      marginBottom: '8px', 
+                      lineHeight: '1.7', 
+                      color: textColor,
+                      paddingLeft: '4px'
+                    }} {...props} />,
                     // Links
-                    a: ({node, ...props}: any) => <a style={{ color: '#1a73e8', textDecoration: 'none' }} target="_blank" rel="noopener noreferrer" {...props} />,
+                    a: ({node, ...props}: any) => <a 
+                      style={{ 
+                        color: theme === 'dark' ? '#4a9eff' : '#1a73e8', 
+                        textDecoration: 'none',
+                        borderBottom: `1px solid ${theme === 'dark' ? 'rgba(74, 158, 255, 0.3)' : 'rgba(26, 115, 232, 0.3)'}`,
+                        transition: 'all 0.2s'
+                      }} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderBottomColor = theme === 'dark' ? '#4a9eff' : '#1a73e8'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderBottomColor = theme === 'dark' ? 'rgba(74, 158, 255, 0.3)' : 'rgba(26, 115, 232, 0.3)'
+                      }}
+                      {...props} 
+                    />,
                     // Blockquotes
                     blockquote: ({node, ...props}) => <blockquote style={{
-                      borderLeft: `4px solid ${borderColor}`,
-                      paddingLeft: '16px',
+                      borderLeft: `4px solid ${theme === 'dark' ? '#4a9eff' : '#1a73e8'}`,
+                      paddingLeft: '20px',
+                      paddingRight: '16px',
+                      paddingTop: '8px',
+                      paddingBottom: '8px',
                       marginLeft: 0,
                       marginRight: 0,
-                      marginTop: '12px',
-                      marginBottom: '12px',
-                      color: secondaryTextColor,
-                      fontStyle: 'italic'
+                      marginTop: '16px',
+                      marginBottom: '16px',
+                      backgroundColor: theme === 'dark' ? 'rgba(74, 158, 255, 0.05)' : 'rgba(26, 115, 232, 0.05)',
+                      color: textColor,
+                      fontStyle: 'normal',
+                      borderRadius: '0 6px 6px 0'
                     }} {...props} />,
                     // Horizontal rule
-                    hr: ({node, ...props}) => <hr style={{ border: 'none', borderTop: `1px solid ${borderColor}`, margin: '20px 0' }} {...props} />,
+                    hr: ({node, ...props}) => <hr style={{ 
+                      border: 'none', 
+                      borderTop: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`, 
+                      margin: '24px 0' 
+                    }} {...props} />,
                     // Tables
-                    table: ({node, ...props}) => <div style={{ overflowX: 'auto', marginBottom: '16px', marginTop: '8px' }}><table style={{ 
-                      borderCollapse: 'collapse', 
-                      width: '100%'
-                    }} {...props} /></div>,
-                    thead: ({node, ...props}) => <thead style={{ backgroundColor: theme === 'dark' ? '#181818' : '#f8f9fa' }} {...props} />,
+                    table: ({node, ...props}) => <div style={{ 
+                      overflowX: 'auto', 
+                      marginBottom: '16px', 
+                      marginTop: '12px',
+                      borderRadius: '8px',
+                      border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`
+                    }}>
+                      <table style={{ 
+                        borderCollapse: 'collapse', 
+                        width: '100%',
+                        fontSize: '14px'
+                      }} {...props} />
+                    </div>,
+                    thead: ({node, ...props}) => <thead style={{ 
+                      backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa' 
+                    }} {...props} />,
                     tbody: ({node, ...props}) => <tbody {...props} />,
                     th: ({node, ...props}) => <th style={{ 
-                      border: `1px solid ${borderColor}`, 
-                      padding: '10px 12px', 
+                      border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`, 
+                      padding: '12px 16px', 
                       textAlign: 'left',
                       fontWeight: 600,
-                      fontSize: '13px',
-                      color: textColor
+                      fontSize: '14px',
+                      color: textColor,
+                      backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa'
                     }} {...props} />,
                     td: ({node, ...props}) => <td style={{ 
-                      border: `1px solid ${borderColor}`, 
-                      padding: '10px 12px',
-                      fontSize: '13px',
+                      border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`, 
+                      padding: '12px 16px',
+                      fontSize: '14px',
                       color: textColor
                     }} {...props} />,
                     // Strong and emphasis
-                    strong: ({node, ...props}) => <strong style={{ fontWeight: 600 }} {...props} />,
-                    em: ({node, ...props}) => <em style={{ fontStyle: 'italic' }} {...props} />,
+                    strong: ({node, ...props}) => <strong style={{ 
+                      fontWeight: 600,
+                      color: textColor
+                    }} {...props} />,
+                    em: ({node, ...props}) => <em style={{ 
+                      fontStyle: 'italic',
+                      color: textColor
+                    }} {...props} />,
                   }}
                 >
                   {message.content}
