@@ -9,8 +9,6 @@ import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
 // @ts-ignore
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 // @ts-ignore
-import VpnKeyIcon from '@mui/icons-material/VpnKey'
-// @ts-ignore
 import CropOriginalIcon from '@mui/icons-material/CropOriginal'
 // @ts-ignore
 import AlternateEmailIcon from '@mui/icons-material/AlternateEmail'
@@ -22,6 +20,14 @@ import CloseIcon from '@mui/icons-material/Close'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 // @ts-ignore
 import CheckIcon from '@mui/icons-material/Check'
+// @ts-ignore
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
+// @ts-ignore
+import AddIcon from '@mui/icons-material/Add'
+// @ts-ignore
+import AttachFileIcon from '@mui/icons-material/AttachFile'
+// @ts-ignore
+import FormatQuoteIcon from '@mui/icons-material/FormatQuote'
 
 interface ChatInterfaceProps {
   documentId?: string
@@ -58,10 +64,19 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const [isInputFocused, setIsInputFocused] = useState(false)
   const [useWebSearch, setUseWebSearch] = useState(false)
   const [selectedModel, setSelectedModel] = useState<'gemini-2.5-flash' | 'gemini-2.5-pro'>('gemini-2.5-flash')
+  const [selectedStyle, setSelectedStyle] = useState<'Normal' | 'Learning' | 'Concise' | 'Explanatory' | 'Formal'>('Normal')
   const [showSettingsModal, setShowSettingsModal] = useState(false)
+  const [showModelDropdown, setShowModelDropdown] = useState(false)
+  const [showPlusMenu, setShowPlusMenu] = useState(false)
+  const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [googleApiKey, setGoogleApiKey] = useState('')
   const [modalPosition, setModalPosition] = useState({ top: 0, left: 0 })
-  const settingsButtonRef = useRef<HTMLButtonElement>(null)
+  const modelDropdownRef = useRef<HTMLDivElement>(null)
+  const modelNameRef = useRef<HTMLDivElement>(null)
+  const plusMenuRef = useRef<HTMLDivElement>(null)
+  const plusButtonRef = useRef<HTMLButtonElement>(null)
+  const styleMenuRef = useRef<HTMLDivElement>(null)
+  const styleButtonRef = useRef<HTMLButtonElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
   const apiKeyInputRef = useRef<HTMLInputElement>(null)
   const hasNotifiedFirstMessage = useRef(false)
@@ -110,15 +125,28 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
 
   // Update modal position when opening
   useEffect(() => {
-    if (showSettingsModal && settingsButtonRef.current) {
+    if (showSettingsModal && modelNameRef.current) {
       const updatePosition = () => {
-        if (settingsButtonRef.current) {
-          const rect = settingsButtonRef.current.getBoundingClientRect()
-          // Position modal more to the left to cover both editor and AI chat panel
-          // Move it left by approximately 300px to center it better
+        if (modelNameRef.current) {
+          const rect = modelNameRef.current.getBoundingClientRect()
+          const modalWidth = 400 // minWidth of modal
+          const viewportWidth = window.innerWidth
+          
+          // Calculate left position - align to the right edge of the model name, but ensure it fits on screen
+          let left = rect.right - modalWidth + 50 // Start 50px to the left of the right edge
+          
+          // Ensure modal doesn't go off the left edge
+          left = Math.max(20, left)
+          
+          // Ensure modal doesn't go off the right edge
+          if (left + modalWidth > viewportWidth - 20) {
+            left = viewportWidth - modalWidth - 20
+          }
+          
+          // Position modal above the model name
           setModalPosition({
-            top: rect.top - 8, // 8px above the button
-            left: Math.max(20, rect.left - 150), // Move left by 300px, but keep at least 20px from left edge
+            top: rect.top - 8, // 8px above the model name
+            left: left,
           })
         }
       }
@@ -131,27 +159,63 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   // Close modal when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node
+      
       if (showSettingsModal) {
-        const target = event.target as Node
-        if (
-          modalRef.current &&
-          !modalRef.current.contains(target) &&
-          settingsButtonRef.current &&
-          !settingsButtonRef.current.contains(target)
-        ) {
+        // Close modal if clicking anywhere outside the modal itself
+        if (modalRef.current && !modalRef.current.contains(target)) {
           setShowSettingsModal(false)
+        }
+      }
+      
+      if (showModelDropdown) {
+        if (
+          modelDropdownRef.current &&
+          !modelDropdownRef.current.contains(target) &&
+          modelNameRef.current &&
+          !modelNameRef.current.contains(target)
+        ) {
+          setShowModelDropdown(false)
+        }
+      }
+      
+      if (showPlusMenu) {
+        // Close plus menu if clicking anywhere outside the menu, button, and style submenu
+        const isInPlusMenu = plusMenuRef.current?.contains(target)
+        const isInPlusButton = plusButtonRef.current?.contains(target)
+        const isInStyleMenu = styleMenuRef.current?.contains(target)
+        const isInStyleButton = styleButtonRef.current?.contains(target)
+        
+        if (
+          !isInPlusMenu &&
+          !isInPlusButton &&
+          !isInStyleMenu &&
+          !isInStyleButton
+        ) {
+          setShowPlusMenu(false)
+          setShowStyleMenu(false)
+        }
+      }
+      
+      if (showStyleMenu && showPlusMenu) {
+        // Only handle style menu closing if plus menu is also open
+        const isInStyleMenu = styleMenuRef.current?.contains(target)
+        const isInStyleButton = styleButtonRef.current?.contains(target)
+        
+        if (!isInStyleMenu && !isInStyleButton) {
+          setShowStyleMenu(false)
         }
       }
     }
 
-    if (showSettingsModal) {
+    if (showSettingsModal || showModelDropdown || showPlusMenu || showStyleMenu) {
       // Use capture phase to catch clicks before they bubble
       document.addEventListener('mousedown', handleClickOutside, true)
       return () => {
         document.removeEventListener('mousedown', handleClickOutside, true)
       }
     }
-  }, [showSettingsModal])
+  }, [showSettingsModal, showModelDropdown, showPlusMenu, showStyleMenu])
   
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
 
@@ -746,7 +810,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                   wordBreak: 'break-word',
                   fontSize: '13px',
                   lineHeight: '1.6',
-                  fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                  fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                   userSelect: 'text',
                   WebkitUserSelect: 'text',
                   MozUserSelect: 'text',
@@ -820,7 +884,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                   color: textColor,
                   fontSize: '14px',
                   lineHeight: '1.7',
-                  fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                  fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                   userSelect: 'text',
                   WebkitUserSelect: 'text',
                   MozUserSelect: 'text',
@@ -1291,9 +1355,9 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                   resize: 'none',
                   overflowY: 'hidden',
                   overflowX: 'hidden',
-                  fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                  fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                   lineHeight: '1.6',
-                  minHeight: '24px',
+                  minHeight: '32px',
                   maxHeight: '200px'
                 }}
                 onInput={(e) => {
@@ -1311,274 +1375,602 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                 }}
               />
           
-          {/* Controls Section - Left side: Model selector, Right side: Web search, File upload, @, API key, Send button */}
+          {/* Bottom Controls Section */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '6px'
           }}>
-            {/* Left side - Model Selector */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '2px',
-              backgroundColor: theme === 'dark' ? '#1f1f1f' : '#e0e0e0',
-              borderRadius: '8px',
-              fontSize: '11px',
-              fontWeight: '500'
-            }}>
+            {/* Left side - Plus button and Web search */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '1px' }}>
+              {/* Plus Button */}
+              <div style={{ position: 'relative' }}>
                 <button
-                onClick={() => setSelectedModel('gemini-2.5-flash')}
-                disabled={isLoading}
+                  ref={plusButtonRef}
+                  onClick={() => {
+                    setShowPlusMenu(!showPlusMenu)
+                    setShowModelDropdown(false)
+                  }}
+                  disabled={isLoading}
                   style={{
-                  padding: '4px 8px',
-                  backgroundColor: selectedModel === 'gemini-2.5-flash' 
-                    ? (theme === 'dark' ? '#2d2d2d' : '#d0d0d0') 
-                    : 'transparent',
-                  color: selectedModel === 'gemini-2.5-flash'
-                    ? (theme === 'dark' ? '#b0b0b0' : '#505050')
-                    : secondaryTextColor,
+                    padding: '2px',
+                    backgroundColor: showPlusMenu ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0') : 'transparent',
+                    color: showPlusMenu ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
                     border: 'none',
                     borderRadius: '6px',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  fontSize: '11px',
-                  fontWeight: '500',
-                  transition: 'all 0.15s',
-                  opacity: isLoading ? 0.5 : 1,
-                  whiteSpace: 'nowrap'
+                    cursor: isLoading ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.15s',
+                    opacity: isLoading ? 0.5 : 1,
+                    width: '24px',
+                    height: '24px'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isLoading) {
+                      e.currentTarget.style.backgroundColor = showPlusMenu 
+                        ? (theme === 'dark' ? '#454545' : '#d0d0d0')
+                        : (theme === 'dark' ? '#1d1d1d' : '#f5f5f5')
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isLoading) {
+                      e.currentTarget.style.backgroundColor = showPlusMenu 
+                        ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0')
+                        : 'transparent'
+                    }
+                  }}
+                  title="More options"
+                >
+                  <AddIcon style={{ fontSize: '20px', transform: 'translateY(-1px)' }} />
+                </button>
+                
+                {/* Plus Menu Dropup */}
+                {showPlusMenu && (
+                  <div
+                    ref={plusMenuRef}
+                    style={{
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: 0,
+                      marginBottom: '4px',
+                      backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+                      borderRadius: '8px',
+                      padding: '6px',
+                      minWidth: '180px',
+                      boxShadow: theme === 'dark'
+                        ? '0 -4px 16px rgba(0, 0, 0, 0.5), 0 -2px 4px rgba(0, 0, 0, 0.3)'
+                        : '0 -4px 16px rgba(0, 0, 0, 0.2), 0 -2px 4px rgba(0, 0, 0, 0.1)',
+                      zIndex: 10001,
+                      border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '2px',
+                      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Upload files */}
+                    <button
+                      onClick={() => {
+                        fileInputRef.current?.click()
+                        setShowPlusMenu(false)
                       }}
-                title="Gemini 2.5 Flash - Faster responses"
-              >
-                Flash
-              </button>
+                      disabled={isLoading}
+                      style={{
+                        padding: '10px 14px',
+                        backgroundColor: 'transparent',
+                        color: theme === 'dark' ? '#d6d6d6' : '#202124',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: isLoading ? 'not-allowed' : 'pointer',
+                        fontSize: '13px',
+                        fontWeight: '300',
+                        fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                        textAlign: 'left',
+                        transition: 'all 0.15s',
+                        opacity: isLoading ? 0.5 : 1,
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isLoading) {
+                          e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isLoading) {
+                          e.currentTarget.style.backgroundColor = 'transparent'
+                        }
+                      }}
+                    >
+                      <AttachFileIcon style={{ fontSize: '18px' }} />
+                      <span>Upload files</span>
+                    </button>
+                    
+                    {/* Web search */}
+                    <button
+                      onClick={() => {
+                        setUseWebSearch(!useWebSearch)
+                        setShowPlusMenu(false)
+                      }}
+                      disabled={isLoading}
+                      style={{
+                        padding: '10px 14px',
+                        backgroundColor: useWebSearch 
+                          ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                          : 'transparent',
+                        color: useWebSearch
+                          ? (theme === 'dark' ? '#ffffff' : '#202124')
+                          : (theme === 'dark' ? '#d6d6d6' : '#202124'),
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: isLoading ? 'not-allowed' : 'pointer',
+                        fontSize: '13px',
+                        fontWeight: useWebSearch ? '400' : '300',
+                        fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                        textAlign: 'left',
+                        transition: 'all 0.15s',
+                        opacity: isLoading ? 0.5 : 1,
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isLoading) {
+                          e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isLoading) {
+                          e.currentTarget.style.backgroundColor = useWebSearch 
+                            ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                            : 'transparent'
+                        }
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <span 
+                          className="material-symbols-outlined"
+                          style={{
+                            fontVariationSettings: "'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24",
+                            fontSize: '18px'
+                          }}
+                        >
+                          language
+                        </span>
+                        <span>Web search</span>
+                      </div>
+                      {useWebSearch && (
+                        <CheckIcon style={{ fontSize: '18px' }} />
+                      )}
+                    </button>
+                    
+                    {/* Use style */}
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        ref={styleButtonRef}
+                        disabled={isLoading}
+                        onMouseEnter={() => {
+                          if (!isLoading) {
+                            setShowStyleMenu(true)
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          // Don't close if mouse is moving to style menu
+                          const relatedTarget = e.relatedTarget as Node
+                          if (
+                            styleMenuRef.current &&
+                            !styleMenuRef.current.contains(relatedTarget) &&
+                            relatedTarget !== styleMenuRef.current
+                          ) {
+                            setShowStyleMenu(false)
+                          }
+                        }}
+                        style={{
+                          padding: '10px 14px',
+                          backgroundColor: showStyleMenu ? (theme === 'dark' ? '#2a2a2a' : '#f5f5f5') : 'transparent',
+                          color: theme === 'dark' ? '#d6d6d6' : '#202124',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: isLoading ? 'not-allowed' : 'pointer',
+                          fontSize: '13px',
+                          fontWeight: '300',
+                          fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                          textAlign: 'left',
+                          transition: 'all 0.15s',
+                          opacity: isLoading ? 0.5 : 1,
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <FormatQuoteIcon style={{ fontSize: '18px' }} />
+                          <span>Use style</span>
+                        </div>
+                        <KeyboardArrowDownIcon style={{ fontSize: '16px', transform: 'rotate(-90deg)' }} />
+                      </button>
+                      
+                      {/* Style Submenu */}
+                      {showStyleMenu && (
+                        <>
+                          {/* Invisible bridge to prevent gap */}
+                          <div
+                            onMouseEnter={() => setShowStyleMenu(true)}
+                            style={{
+                              position: 'absolute',
+                              left: '100%',
+                              bottom: 0,
+                              width: '4px',
+                              height: '100%',
+                              zIndex: 10001,
+                              backgroundColor: 'transparent'
+                            }}
+                          />
+                          <div
+                            ref={styleMenuRef}
+                            onMouseEnter={() => setShowStyleMenu(true)}
+                            onMouseLeave={() => setShowStyleMenu(false)}
+                            style={{
+                              position: 'absolute',
+                              left: '100%',
+                              bottom: 0,
+                              marginLeft: '4px',
+                              backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+                              borderRadius: '8px',
+                              padding: '6px',
+                              minWidth: '160px',
+                              boxShadow: theme === 'dark'
+                                ? '0 4px 16px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3)'
+                                : '0 4px 16px rgba(0, 0, 0, 0.2), 0 2px 4px rgba(0, 0, 0, 0.1)',
+                              zIndex: 10002,
+                              border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '2px',
+                              fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {(['Normal', 'Learning', 'Concise', 'Explanatory', 'Formal'] as const).map((style) => (
+                              <button
+                                key={style}
+                                onClick={() => {
+                                  setSelectedStyle(style)
+                                  setShowStyleMenu(false)
+                                  setShowPlusMenu(false)
+                                }}
+                                disabled={isLoading}
+                                style={{
+                                  padding: '10px 14px',
+                                  backgroundColor: selectedStyle === style 
+                                    ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                                    : 'transparent',
+                                  color: selectedStyle === style
+                                    ? (theme === 'dark' ? '#ffffff' : '#202124')
+                                    : (theme === 'dark' ? '#d6d6d6' : '#202124'),
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: isLoading ? 'not-allowed' : 'pointer',
+                                  fontSize: '13px',
+                                  fontWeight: selectedStyle === style ? '400' : '300',
+                                  fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                                  textAlign: 'left',
+                                  transition: 'all 0.15s',
+                                  opacity: isLoading ? 0.5 : 1,
+                                  width: '100%',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  gap: '12px'
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (!isLoading && selectedStyle !== style) {
+                                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (!isLoading && selectedStyle !== style) {
+                                    e.currentTarget.style.backgroundColor = 'transparent'
+                                  }
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                  <FormatQuoteIcon style={{ fontSize: '18px' }} />
+                                  <span>{style}</span>
+                                </div>
+                                {selectedStyle === style && (
+                                  <CheckIcon style={{ fontSize: '18px' }} />
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Web Search Button */}
               <button
-                onClick={() => setSelectedModel('gemini-2.5-pro')}
+                onClick={() => setUseWebSearch(!useWebSearch)}
                 disabled={isLoading}
                 style={{
-                  padding: '4px 8px',
-                  backgroundColor: selectedModel === 'gemini-2.5-pro' 
-                    ? (theme === 'dark' ? '#2d2d2d' : '#d0d0d0') 
-                    : 'transparent',
-                  color: selectedModel === 'gemini-2.5-pro'
-                    ? (theme === 'dark' ? '#b0b0b0' : '#505050')
-                    : secondaryTextColor,
+                  padding: '2px',
+                  backgroundColor: useWebSearch ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0') : 'transparent',
+                  color: useWebSearch ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
                   border: 'none',
                   borderRadius: '6px',
                   cursor: isLoading ? 'not-allowed' : 'pointer',
-                  fontSize: '11px',
-                  fontWeight: '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   transition: 'all 0.15s',
                   opacity: isLoading ? 0.5 : 1,
-                  whiteSpace: 'nowrap'
+                  width: '24px',
+                  height: '24px'
                 }}
-                title="Gemini 2.5 Pro - More capable"
+                onMouseEnter={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = useWebSearch 
+                      ? (theme === 'dark' ? '#454545' : '#d0d0d0')
+                      : (theme === 'dark' ? '#1d1d1d' : '#f5f5f5')
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = useWebSearch 
+                      ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0')
+                      : 'transparent'
+                  }
+                }}
+                title={useWebSearch ? "Web search enabled - AI can search the internet" : "Enable web search"}
               >
-                Pro
+                <span 
+                  className="material-symbols-outlined"
+                  style={{
+                    fontVariationSettings: "'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24",
+                    fontSize: '17px'
+                  }}
+                >
+                  language
+                </span>
               </button>
             </div>
             
-            {/* Right side - Web Search, File upload, @, API key, Send button */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}>
-              {/* Web Search Toggle */}
-              <button
-              onClick={() => setUseWebSearch(!useWebSearch)}
-              disabled={isLoading}
-                style={{
-                  padding: '2px',
-                backgroundColor: useWebSearch ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0') : 'transparent',
-                color: useWebSearch ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
-                  border: 'none',
-                borderRadius: '6px',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.15s',
-                opacity: isLoading ? 0.5 : 1,
-                width: '24px',
-                height: '24px'
-              }}
-              onMouseEnter={(e) => {
-                if (!isLoading) {
-                  e.currentTarget.style.backgroundColor = useWebSearch 
-                    ? (theme === 'dark' ? '#454545' : '#d0d0d0')
-                    : (theme === 'dark' ? '#1d1d1d' : '#f5f5f5')
-                }
-                }}
-              onMouseLeave={(e) => {
-                if (!isLoading) {
-                  e.currentTarget.style.backgroundColor = useWebSearch 
-                    ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0')
-                    : 'transparent'
-                }
-              }}
-              title={useWebSearch ? "Web search enabled - AI can search the internet" : "Enable web search"}
-            >
-              <span 
-                className="material-symbols-outlined"
-                style={{
-                  fontVariationSettings: "'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24",
-                  fontSize: '17px'
-                }}
-              >
-                language
-              </span>
-              </button>
+            {/* Right side - Model name and Send button */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {/* Model name (text only, no container) */}
+              <div style={{ position: 'relative' }}>
+                <div 
+                  ref={modelNameRef}
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: '400',
+                    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                    color: secondaryTextColor,
+                    cursor: 'pointer',
+                    opacity: isLoading ? 0.5 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                  onClick={() => {
+                    setShowModelDropdown(!showModelDropdown)
+                    setShowSettingsModal(false)
+                    setShowPlusMenu(false)
+                  }}
+                  title={selectedModel === 'gemini-2.5-flash' ? 'Gemini 2.5 Flash - Faster responses' : 'Gemini 3 Pro - More capable'}
+                >
+                  <span>{selectedModel === 'gemini-2.5-flash' ? 'Flash 2.5' : 'Pro 3'}</span>
+                  <KeyboardArrowDownIcon style={{ fontSize: '14px' }} />
+                </div>
+                
+                {/* Model Dropdown Menu */}
+                {showModelDropdown && (
+                  <div
+                    ref={modelDropdownRef}
+                    style={{
+                      position: 'absolute',
+                      bottom: '100%',
+                      right: 0,
+                      marginBottom: '4px',
+                    backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+                    borderRadius: '8px',
+                    padding: '6px',
+                    minWidth: '200px',
+                    boxShadow: theme === 'dark'
+                      ? '0 -4px 16px rgba(0, 0, 0, 0.5), 0 -2px 4px rgba(0, 0, 0, 0.3)'
+                      : '0 -4px 16px rgba(0, 0, 0, 0.2), 0 -2px 4px rgba(0, 0, 0, 0.1)',
+                    zIndex: 10001,
+                    border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Model Options */}
+                  <button
+                    onClick={() => {
+                      setSelectedModel('gemini-2.5-flash')
+                      setShowModelDropdown(false)
+                    }}
+                    disabled={isLoading}
+                    style={{
+                      padding: '10px 14px',
+                      backgroundColor: selectedModel === 'gemini-2.5-flash' 
+                        ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                        : 'transparent',
+                      color: selectedModel === 'gemini-2.5-flash'
+                        ? (theme === 'dark' ? '#ffffff' : '#202124')
+                        : (theme === 'dark' ? '#d6d6d6' : '#202124'),
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
+                      fontSize: '13px',
+                      fontWeight: selectedModel === 'gemini-2.5-flash' ? '400' : '300',
+                      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                      textAlign: 'left',
+                      transition: 'all 0.15s',
+                      opacity: isLoading ? 0.5 : 1,
+                      width: '100%'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isLoading && selectedModel !== 'gemini-2.5-flash') {
+                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isLoading && selectedModel !== 'gemini-2.5-flash') {
+                        e.currentTarget.style.backgroundColor = 'transparent'
+                      }
+                    }}
+                  >
+                    Gemini 2.5 Flash
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      setSelectedModel('gemini-2.5-pro')
+                      setShowModelDropdown(false)
+                    }}
+                    disabled={isLoading}
+                    style={{
+                      padding: '10px 14px',
+                      backgroundColor: selectedModel === 'gemini-2.5-pro' 
+                        ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                        : 'transparent',
+                      color: selectedModel === 'gemini-2.5-pro'
+                        ? (theme === 'dark' ? '#ffffff' : '#202124')
+                        : (theme === 'dark' ? '#d6d6d6' : '#202124'),
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
+                      fontSize: '13px',
+                      fontWeight: selectedModel === 'gemini-2.5-pro' ? '400' : '300',
+                      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                      textAlign: 'left',
+                      transition: 'all 0.15s',
+                      opacity: isLoading ? 0.5 : 1,
+                      width: '100%'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isLoading && selectedModel !== 'gemini-2.5-pro') {
+                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isLoading && selectedModel !== 'gemini-2.5-pro') {
+                        e.currentTarget.style.backgroundColor = 'transparent'
+                      }
+                    }}
+                  >
+                    Gemini 3 Pro
+                  </button>
+                  
+                  {/* Divider */}
+                  <div style={{
+                    height: '1px',
+                    backgroundColor: theme === 'dark' ? '#333' : '#e0e0e0',
+                    margin: '6px 0'
+                  }} />
+                  
+                  {/* API Keys Option */}
+                  <button
+                    onClick={() => {
+                      setShowModelDropdown(false)
+                      setShowSettingsModal(true)
+                    }}
+                    disabled={isLoading}
+                    style={{
+                      padding: '10px 14px',
+                      backgroundColor: 'transparent',
+                      color: theme === 'dark' ? '#d6d6d6' : '#202124',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
+                      fontSize: '13px',
+                      fontWeight: '300',
+                      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                      textAlign: 'left',
+                      transition: 'all 0.15s',
+                      opacity: isLoading ? 0.5 : 1,
+                      width: '100%'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.backgroundColor = 'transparent'
+                      }
+                    }}
+                  >
+                    API Keys
+                  </button>
+                </div>
+              )}
+              </div>
               
-              {/* File Upload Button */}
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading}
-                title="Upload image or PDF"
-                style={{
-                  padding: '2px',
-                  backgroundColor: 'transparent',
-                  color: secondaryTextColor,
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.15s',
-                  opacity: isLoading ? 0.5 : 1,
-                  width: '24px',
-                  height: '24px'
-                }}
-                onMouseEnter={(e) => {
-                  if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1d1d1d' : '#f5f5f5'
-                    e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#424242'
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = 'transparent'
-                    e.currentTarget.style.color = secondaryTextColor
-                  }
-                }}
-              >
-                <CropOriginalIcon style={{ fontSize: '17px' }} />
-              </button>
-              
-              {/* @ Icon Button */}
-              <button
-                disabled={isLoading}
-                title="@"
-                style={{
-                  padding: '2px',
-                  backgroundColor: 'transparent',
-                  color: secondaryTextColor,
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.15s',
-                  opacity: isLoading ? 0.5 : 1,
-                  width: '24px',
-                  height: '24px'
-                }}
-                onMouseEnter={(e) => {
-                  if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1d1d1d' : '#f5f5f5'
-                    e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#424242'
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = 'transparent'
-                    e.currentTarget.style.color = secondaryTextColor
-                  }
-                }}
-              >
-                <AlternateEmailIcon style={{ fontSize: '17px' }} />
-              </button>
-              
-              {/* API Keys Button */}
-              <button
-                ref={settingsButtonRef}
-                onClick={() => setShowSettingsModal(!showSettingsModal)}
-                disabled={isLoading}
-                title="API Keys"
-                style={{
-                  padding: '2px',
-                  backgroundColor: showSettingsModal ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0') : 'transparent',
-                  color: showSettingsModal ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.15s',
-                  opacity: isLoading ? 0.5 : 1,
-                  width: '24px',
-                  height: '24px'
-                }}
-                onMouseEnter={(e) => {
-                  if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = showSettingsModal 
-                      ? (theme === 'dark' ? '#454545' : '#d0d0d0')
-                      : (theme === 'dark' ? '#1d1d1d' : '#f5f5f5')
-                    e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#424242'
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = showSettingsModal 
-                      ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0')
-                      : 'transparent'
-                    e.currentTarget.style.color = showSettingsModal ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor
-                  }
-                }}
-              >
-                <VpnKeyIcon style={{ fontSize: '17px' }} />
-              </button>
-              
-              {/* Send button */}
+              {/* Send button with grey container */}
               <button
                 onClick={handleSend}
                 disabled={isLoading || (!input.trim() && attachments.length === 0)}
                 style={{
-                  padding: '2px',
-                  backgroundColor: isLoading || (!input.trim() && attachments.length === 0) ? 'transparent' : (theme === 'dark' ? '#3a3a3a' : '#e0e0e0'),
-                  color: isLoading || (!input.trim() && attachments.length === 0) ? secondaryTextColor : (theme === 'dark' ? '#d6d6d6' : '#424242'),
+                  padding: '4px 8px',
+                  backgroundColor: isLoading || (!input.trim() && attachments.length === 0) 
+                    ? (theme === 'dark' ? '#282828' : '#e0e0e0')
+                    : (theme === 'dark' ? '#505050' : '#e8e8e8'),
+                  color: isLoading || (!input.trim() && attachments.length === 0) 
+                    ? secondaryTextColor 
+                    : (theme === 'dark' ? '#ffffff' : '#202124'),
                   border: 'none',
                   borderRadius: '6px',
                   cursor: isLoading || (!input.trim() && attachments.length === 0) ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  transition: 'all 0.15s',
                   opacity: isLoading ? 0.5 : 1,
                   width: '24px',
                   height: '24px'
                 }}
                 onMouseEnter={(e) => {
                   if (!isLoading && (input.trim() || attachments.length > 0)) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#454545' : '#d0d0d0'
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#5a5a5a' : '#f0f0f0'
                   } else if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1d1d1d' : '#f5f5f5'
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#282828' : '#e0e0e0'
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!isLoading && (input.trim() || attachments.length > 0)) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#3a3a3a' : '#e0e0e0'
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#505050' : '#e8e8e8'
                   } else if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = 'transparent'
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#282828' : '#e0e0e0'
                   }
                 }}
                 title="Send"
               >
-                <ArrowUpwardIcon style={{ fontSize: '19px', transform: 'translateY(1px)' }} />
+                <ArrowUpwardIcon style={{ 
+                  fontSize: '19px', 
+                  transform: 'translateY(0px)', 
+                  color: isLoading || (!input.trim() && attachments.length === 0) 
+                    ? secondaryTextColor 
+                    : (theme === 'dark' ? '#ffffff' : '#202124')
+                }} />
               </button>
             </div>
           </div>
