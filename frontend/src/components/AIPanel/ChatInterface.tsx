@@ -930,117 +930,79 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                         }}>
                           <div style={{
                             position: 'relative',
-                            backgroundColor: theme === 'dark' ? '#1e1e1e' : '#f8f9fa',
-                            border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`,
+                            backgroundColor: theme === 'dark' ? '#000000' : '#f8f9fa',
                             borderRadius: '8px',
                             overflow: 'hidden'
                           }}>
+                            {/* Language name overlay - top left */}
                             {language && (
                               <div style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                padding: '8px 12px',
-                                backgroundColor: theme === 'dark' ? '#252525' : '#f0f0f0',
-                                borderBottom: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`,
-                                fontSize: '12px',
-                                color: secondaryTextColor,
-                                fontWeight: 500
+                                position: 'absolute',
+                                top: '8px',
+                                left: '12px',
+                                zIndex: 2,
+                                fontSize: '11px',
+                                color: theme === 'dark' ? '#8e8e93' : '#6e6e73',
+                                fontWeight: 500,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                                pointerEvents: 'none'
                               }}>
-                                <span style={{ textTransform: 'uppercase' }}>{language}</span>
-                                <button
-                                  onClick={() => handleCopyCode(codeString, blockId)}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    padding: '4px 8px',
-                                    backgroundColor: 'transparent',
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    color: secondaryTextColor,
-                                    cursor: 'pointer',
-                                    fontSize: '12px',
-                                    fontFamily: 'inherit',
-                                    transition: 'all 0.2s'
-                                  }}
-                                  onMouseEnter={(e) => {
-                                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#3a3a3a' : '#e0e0e0'
-                                    e.currentTarget.style.color = textColor
-                                  }}
-                                  onMouseLeave={(e) => {
-                                    e.currentTarget.style.backgroundColor = 'transparent'
-                                    e.currentTarget.style.color = secondaryTextColor
-                                  }}
-                                >
-                                  {isCopied ? (
-                                    <>
-                                      <CheckIcon style={{ fontSize: '14px' }} />
-                                      <span>Copied</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <ContentCopyIcon style={{ fontSize: '14px' }} />
-                                      <span>Copy</span>
-                                    </>
-                                  )}
-                                </button>
+                                {language}
                               </div>
                             )}
-                            {!language && (
-                              <button
-                                onClick={() => handleCopyCode(codeString, blockId)}
-                                style={{
-                                  position: 'absolute',
-                                  top: '8px',
-                                  right: '8px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  padding: '6px 10px',
-                                  backgroundColor: theme === 'dark' ? 'rgba(30, 30, 30, 0.8)' : 'rgba(248, 249, 250, 0.9)',
-                                  border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`,
-                                  borderRadius: '6px',
-                                  color: secondaryTextColor,
-                                  cursor: 'pointer',
-                                  fontSize: '12px',
-                                  fontFamily: 'inherit',
-                                  transition: 'all 0.2s',
-                                  zIndex: 1
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#3a3a3a' : '#e0e0e0'
-                                  e.currentTarget.style.color = textColor
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(30, 30, 30, 0.8)' : 'rgba(248, 249, 250, 0.9)'
-                                  e.currentTarget.style.color = secondaryTextColor
-                                }}
-                              >
-                                {isCopied ? (
-                                  <>
-                                    <CheckIcon style={{ fontSize: '14px' }} />
-                                    <span>Copied</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <ContentCopyIcon style={{ fontSize: '14px' }} />
-                                    <span>Copy</span>
-                                  </>
-                                )}
-                              </button>
-                            )}
+                            {/* Copy button overlay - top right */}
+                            <button
+                              onClick={() => handleCopyCode(codeString, blockId)}
+                              style={{
+                                position: 'absolute',
+                                top: '8px',
+                                right: '14px',
+                                zIndex: 2,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: 0,
+                                backgroundColor: 'transparent',
+                                border: 'none',
+                                color: theme === 'dark' ? '#d1d1d6' : secondaryTextColor,
+                                cursor: 'pointer',
+                                fontSize: '12px',
+                                fontFamily: 'inherit',
+                                transition: 'opacity 0.2s'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.opacity = '0.7'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.opacity = '1'
+                              }}
+                            >
+                              {isCopied ? (
+                                <>
+                                  <CheckIcon style={{ fontSize: '14px' }} />
+                                  <span>Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <ContentCopyIcon style={{ fontSize: '14px' }} />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
+                            {/* Code content */}
                             <SyntaxHighlighter
                               language={language || 'text'}
                               style={theme === 'dark' ? vscDarkPlus : vs}
                               customStyle={{
                                 margin: 0,
-                                padding: language ? '16px' : '16px',
+                                padding: '16px',
+                                paddingTop: language ? '40px' : '16px',
                                 fontSize: '13px',
                                 lineHeight: '1.5',
                                 fontFamily: '"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace',
-                                backgroundColor: 'transparent',
-                                borderRadius: language ? '0 0 8px 8px' : '8px'
+                                backgroundColor: theme === 'dark' ? '#000000' : '#f8f9fa',
+                                borderRadius: '8px'
                               }}
                               PreTag="div"
                             >

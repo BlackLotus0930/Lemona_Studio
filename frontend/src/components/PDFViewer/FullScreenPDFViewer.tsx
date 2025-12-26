@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useImperativeHandle, forwardRef, useLayoutEffect } from 'react'
+import { useState, useEffect, useRef, useImperativeHandle, forwardRef, useLayoutEffect, useCallback } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import { Document } from '@shared/types'
 import * as pdfjsLib from 'pdfjs-dist'
@@ -6,6 +6,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 // This is the recommended way for Vite and ensures proper worker initialization
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { documentApi } from '../../services/desktop-api'
+import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore'
 
 // Set worker source for pdf.js - use local worker file
 // This avoids CSP violations and works offline
@@ -39,10 +40,12 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     const [isPageInputOpen, setIsPageInputOpen] = useState(false)
     const [pageInputValue, setPageInputValue] = useState('')
     const pageInputRef = useRef<HTMLInputElement>(null)
+    const [isScrollMode, setIsScrollMode] = useState(false)
     
     // Canvas refs
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
+    const scrollCanvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map())
     const [navBarLeft, setNavBarLeft] = useState<string | null>(null)
     const navBarLeftRef = useRef<string | null>(null) // Track previous position to avoid unnecessary updates
     const renderTaskRef = useRef<any>(null) // Track current render task to cancel if needed
@@ -222,6 +225,64 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
         renderTaskRef.current = null
       }
     }
+
+    // Render all pages for scroll mode
+    const renderAllPages = useCallback(async () => {
+      if (!pdfDocument || totalPages === 0) {
+        setLoading(false)
+        return
+      }
+
+      // Check if all canvases are available
+      let allCanvasesReady = true
+      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+        if (!scrollCanvasRefs.current.get(pageNum)) {
+          allCanvasesReady = false
+          break
+        }
+      }
+
+      // If canvases aren't ready yet, don't set loading (they'll render when ready)
+      if (!allCanvasesReady) {
+        return
+      }
+
+      setLoading(true)
+      try {
+        const devicePixelRatio = window.devicePixelRatio || 1
+        
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+          const canvas = scrollCanvasRefs.current.get(pageNum)
+          if (!canvas) continue
+
+          const page = await pdfDocument.getPage(pageNum)
+          const context = canvas.getContext('2d', { alpha: false })
+          
+          if (!context) continue
+
+          const viewport = page.getViewport({ scale })
+          
+          canvas.style.width = viewport.width + 'px'
+          canvas.style.height = viewport.height + 'px'
+          canvas.width = viewport.width * devicePixelRatio
+          canvas.height = viewport.height * devicePixelRatio
+          
+          context.scale(devicePixelRatio, devicePixelRatio)
+          
+          const renderContext = {
+            canvasContext: context,
+            viewport: viewport,
+          }
+          
+          await page.render(renderContext as any).promise
+        }
+        
+        setLoading(false)
+      } catch (err) {
+        setError(true)
+        setLoading(false)
+      }
+    }, [pdfDocument, totalPages, scale])
 
     // Cleanup: Cancel any ongoing render tasks on unmount
     useEffect(() => {
@@ -441,12 +502,29 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
       }
     }, [document?.id, document?.content])
 
-    // Render page when currentPage or scale changes
+    // Render page when currentPage or scale changes (only in page mode)
     useEffect(() => {
-      if (pdfDocument && currentPage > 0) {
+      if (pdfDocument && currentPage > 0 && !isScrollMode) {
         renderPage(currentPage)
       }
-    }, [currentPage, scale, pdfDocument])
+    }, [currentPage, scale, pdfDocument, isScrollMode])
+
+    // Render all pages when scroll mode is enabled or scale changes in scroll mode
+    useEffect(() => {
+      if (pdfDocument && totalPages > 0 && isScrollMode) {
+        // Small delay to ensure canvases are mounted
+        const timer = setTimeout(() => {
+          renderAllPages()
+        }, 100)
+        return () => {
+          clearTimeout(timer)
+          setLoading(false)
+        }
+      } else if (!isScrollMode) {
+        // Clear loading when switching back to page mode
+        setLoading(false)
+      }
+    }, [isScrollMode, renderAllPages])
 
     // Navigate to page
     const navigateToPage = (pageNumber: number) => {
@@ -690,31 +768,57 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
       >
         {/* PDF Canvas */}
         {!error ? (
-          <div style={{ position: 'relative' }}>
-            {loading && (
-              <div
+          isScrollMode ? (
+            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+                <canvas
+                  key={pageNum}
+                  ref={(el) => {
+                    if (el) {
+                      scrollCanvasRefs.current.set(pageNum, el)
+                    } else {
+                      scrollCanvasRefs.current.delete(pageNum)
+                    }
+                  }}
+                  style={{
+                    display: 'block',
+                    boxShadow: theme === 'dark' 
+                      ? '0 4px 12px rgba(0, 0, 0, 0.5)' 
+                      : '0 4px 12px rgba(0, 0, 0, 0.1)',
+                    backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fff',
+                    filter: theme === 'dark' ? 'brightness(0.85)' : 'none',
+                  }}
+                />
+              ))}
+            </div>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              {loading && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    color: theme === 'dark' ? '#D6D6DD' : '#5f6368',
+                  }}
+                >
+                  Loading PDF...
+                </div>
+              )}
+              <canvas
+                ref={canvasRef}
                 style={{
-                  position: 'absolute',
-                  top: '50%',
-                  left: '50%',
-                  transform: 'translate(-50%, -50%)',
-                  color: theme === 'dark' ? '#858585' : '#5f6368',
+                  display: 'block',
+                  boxShadow: theme === 'dark' 
+                    ? '0 4px 12px rgba(0, 0, 0, 0.5)' 
+                    : '0 4px 12px rgba(0, 0, 0, 0.1)',
+                  backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fff',
+                  filter: theme === 'dark' ? 'brightness(0.85)' : 'none',
                 }}
-              >
-                Loading PDF...
-              </div>
-            )}
-            <canvas
-              ref={canvasRef}
-              style={{
-                display: 'block',
-                boxShadow: theme === 'dark' 
-                  ? '0 4px 12px rgba(0, 0, 0, 0.5)' 
-                  : '0 4px 12px rgba(0, 0, 0, 0.1)',
-                backgroundColor: '#fff',
-              }}
-            />
-          </div>
+              />
+            </div>
+          )
         ) : (
           <div
             style={{
@@ -740,15 +844,13 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
           <div
               style={{
                 position: 'fixed',
-                bottom: '24px',
+                bottom: '16px',
                 left: navBarLeft,
                 transform: 'translateX(-50%)',
-                backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+                backgroundColor: theme === 'dark' ? 'rgba(30, 30, 30, 0.30)' : 'rgba(255, 255, 255, 0.30)',
                 borderRadius: '12px',
-                padding: '6px 10px',
-                boxShadow: theme === 'dark' 
-                  ? '0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
-                  : '0 8px 24px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.08)',
+                padding: '4px 8px',
+                boxShadow: 'none',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
@@ -762,7 +864,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
               onClick={goToPreviousPage}
               disabled={currentPage <= 1}
               style={{
-                padding: '6px 8px',
+                padding: '4px 6px',
                 backgroundColor: 'transparent',
                 color: currentPage <= 1 
                   ? (theme === 'dark' ? '#4a4a4a' : '#c0c0c0')
@@ -775,21 +877,25 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: '28px',
-                height: '28px',
+                width: '24px',
+                height: '24px',
                 transition: 'all 0.15s ease',
                 opacity: currentPage <= 1 ? 0.5 : 1,
+                outline: 'none',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.outline = 'none'
               }}
               onMouseEnter={(e) => {
                 if (currentPage > 1) {
-                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                  e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
                 }
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = 'transparent'
               }}
             >
-              <span style={{ fontSize: '18px', lineHeight: 1 }}>←</span>
+              <span style={{ fontSize: '18px', lineHeight: 1, opacity: 1 }}>←</span>
             </button>
 
             {/* Page Info - Clickable to input page number */}
@@ -807,13 +913,13 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                   style={{
                     width: '60px',
                     padding: '4px 8px',
-                    backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa',
+                    backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.03)',
                     borderRadius: '6px',
                     color: theme === 'dark' ? '#D6D6DD' : '#202124',
                     fontSize: '12px',
                     fontWeight: 500,
                     textAlign: 'center',
-                    border: `1px solid ${theme === 'dark' ? '#3a3a3a' : '#c0c0c0'}`,
+                    border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
                     outline: 'none',
                   }}
                 />
@@ -828,25 +934,11 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
               <div
                 onClick={handlePageInputClick}
                 style={{
-                  padding: '6px 12px',
-                  backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa',
-                  borderRadius: '8px',
                   color: theme === 'dark' ? '#D6D6DD' : '#202124',
                   fontSize: '12px',
                   fontWeight: 500,
-                  minWidth: '90px',
-                  textAlign: 'center',
-                  border: `1px solid ${theme === 'dark' ? '#2d2d2d' : '#e0e0e0'}`,
                   cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f0f0f0'
-                  e.currentTarget.style.borderColor = theme === 'dark' ? '#3a3a3a' : '#c0c0c0'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#252525' : '#f8f9fa'
-                  e.currentTarget.style.borderColor = theme === 'dark' ? '#2d2d2d' : '#e0e0e0'
+                  opacity: 1,
                 }}
               >
                 {currentPage} of {totalPages}
@@ -858,7 +950,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
               onClick={goToNextPage}
               disabled={currentPage >= totalPages}
               style={{
-                padding: '6px 8px',
+                padding: '4px 6px',
                 backgroundColor: 'transparent',
                 color: currentPage >= totalPages
                   ? (theme === 'dark' ? '#4a4a4a' : '#c0c0c0')
@@ -871,29 +963,33 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: '28px',
-                height: '28px',
+                width: '24px',
+                height: '24px',
                 transition: 'all 0.15s ease',
                 opacity: currentPage >= totalPages ? 0.5 : 1,
+                outline: 'none',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.outline = 'none'
               }}
               onMouseEnter={(e) => {
                 if (currentPage < totalPages) {
-                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                  e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
                 }
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = 'transparent'
               }}
             >
-              <span style={{ fontSize: '18px', lineHeight: 1 }}>→</span>
+              <span style={{ fontSize: '18px', lineHeight: 1, opacity: 1 }}>→</span>
             </button>
 
             {/* Divider */}
             <div 
               style={{ 
-                width: '1px', 
-                height: '20px', 
-                backgroundColor: theme === 'dark' ? '#2d2d2d' : '#dadce0',
+                width: '0.8px', 
+                height: '16px', 
+                backgroundColor: theme === 'dark' ? 'rgba(45, 45, 45, 0.1)' : 'rgba(218, 220, 224, 0.4)',
                 margin: '0 4px',
               }} 
             />
@@ -902,7 +998,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
             <button
               onClick={() => setScale(Math.max(0.5, scale - 0.25))}
               style={{
-                padding: '6px 8px',
+                padding: '4px 6px',
                 backgroundColor: 'transparent',
                 color: theme === 'dark' ? '#D6D6DD' : '#202124',
                 border: 'none',
@@ -913,32 +1009,32 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: '28px',
-                height: '28px',
+                width: '24px',
+                height: '24px',
                 transition: 'all 0.15s ease',
+                outline: 'none',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.outline = 'none'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = 'transparent'
               }}
             >
-              −
+              <span style={{ opacity: 1 }}>−</span>
             </button>
 
             {/* Zoom Percentage */}
             <div
               style={{
-                padding: '6px 10px',
-                backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa',
-                borderRadius: '8px',
                 color: theme === 'dark' ? '#D6D6DD' : '#202124',
                 fontSize: '12px',
                 fontWeight: 500,
-                minWidth: '55px',
                 textAlign: 'center',
-                border: `1px solid ${theme === 'dark' ? '#2d2d2d' : '#e0e0e0'}`,
+                opacity: 1,
               }}
             >
               {Math.round(scale * 100)}%
@@ -948,7 +1044,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
             <button
               onClick={() => setScale(Math.min(3, scale + 0.25))}
               style={{
-                padding: '6px 8px',
+                padding: '4px 6px',
                 backgroundColor: 'transparent',
                 color: theme === 'dark' ? '#D6D6DD' : '#202124',
                 border: 'none',
@@ -959,18 +1055,73 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: '28px',
-                height: '28px',
+                width: '24px',
+                height: '24px',
                 transition: 'all 0.15s ease',
+                outline: 'none',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.outline = 'none'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = 'transparent'
               }}
             >
-              +
+              <span style={{ opacity: 1 }}>+</span>
+            </button>
+
+            {/* Divider */}
+            <div 
+              style={{ 
+                width: '0.8px', 
+                height: '16px', 
+                backgroundColor: theme === 'dark' ? 'rgba(45, 45, 45, 0.1)' : 'rgba(218, 220, 224, 0.4)',
+                margin: '0 4px',
+              }} 
+            />
+
+            {/* Scroll Mode Toggle Button */}
+            <button
+              onClick={() => {
+                setIsScrollMode(!isScrollMode)
+                setLoading(false)
+              }}
+              style={{
+                padding: '4px 6px',
+                backgroundColor: isScrollMode 
+                  ? (theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)')
+                  : 'transparent',
+                color: theme === 'dark' ? '#D6D6DD' : '#202124',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: 400,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '24px',
+                height: '24px',
+                transition: 'all 0.15s ease',
+                outline: 'none',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.outline = 'none'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = isScrollMode 
+                  ? (theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)')
+                  : 'transparent'
+              }}
+              title={isScrollMode ? 'Switch to page mode' : 'Switch to scroll mode'}
+            >
+              <UnfoldMoreIcon style={{ fontSize: '18px', opacity: 1 }} />
             </button>
           </div>
         )}
