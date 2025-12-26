@@ -326,7 +326,7 @@ export default function Toolbar({
   const [, forceUpdate] = useState({})
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [showExportModal, setShowExportModal] = useState(false)
-  const [showMathDialog, setShowMathDialog] = useState(false)
+  const [showMathMenu, setShowMathMenu] = useState(false)
   const [showLinkDialog, setShowLinkDialog] = useState(false)
   const [mathFormula, setMathFormula] = useState('E=mc^2')
   const [linkUrl, setLinkUrl] = useState('')
@@ -340,6 +340,7 @@ export default function Toolbar({
   const alignMenuRef = useRef<HTMLDivElement>(null)
   const spacingMenuRef = useRef<HTMLDivElement>(null)
   const graphMenuRef = useRef<HTMLDivElement>(null)
+  const mathMenuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fontSizeMenuRef = useRef<HTMLDivElement>(null)
   // Refs for dropdown menu divs (not buttons)
@@ -351,6 +352,7 @@ export default function Toolbar({
   const alignDropdownRef = useRef<HTMLDivElement>(null)
   const spacingDropdownRef = useRef<HTMLDivElement>(null)
   const graphDropdownRef = useRef<HTMLDivElement>(null)
+  const mathDropdownRef = useRef<HTMLDivElement>(null)
 
   // Function to close all menus except the one specified
   const closeAllMenusExcept = (except: string | null) => {
@@ -362,6 +364,7 @@ export default function Toolbar({
     if (except !== 'align') setShowAlignMenu(false)
     if (except !== 'spacing') setShowSpacingMenu(false)
     if (except !== 'graph') setShowGraphMenu(false)
+    if (except !== 'math') setShowMathMenu(false)
   }
 
   // Update toolbar when editor selection changes
@@ -493,11 +496,12 @@ export default function Toolbar({
       const isInsideAlignMenu = alignMenuRef.current?.contains(target) || alignDropdownRef.current?.contains(target)
       const isInsideSpacingMenu = spacingMenuRef.current?.contains(target) || spacingDropdownRef.current?.contains(target)
       const isInsideGraphMenu = graphMenuRef.current?.contains(target) || graphDropdownRef.current?.contains(target)
+      const isInsideMathMenu = mathMenuRef.current?.contains(target) || mathDropdownRef.current?.contains(target)
       
       // Close menus if click is outside all menus and toolbar
       if (!isInsideToolbar && !isInsideStyleMenu && !isInsideFontMenu && 
           !isInsideFontSizeMenu && !isInsideColorMenu && !isInsideHighlightMenu &&
-          !isInsideAlignMenu && !isInsideSpacingMenu && !isInsideGraphMenu) {
+          !isInsideAlignMenu && !isInsideSpacingMenu && !isInsideGraphMenu && !isInsideMathMenu) {
         closeAllMenusExcept(null)
       }
     }
@@ -927,8 +931,12 @@ export default function Toolbar({
   }
 
   const handleInsertMath = () => {
-    setMathFormula('E=mc^2')
-    setShowMathDialog(true)
+    const newState = !showMathMenu
+    closeAllMenusExcept(newState ? 'math' : null)
+    setShowMathMenu(newState)
+    if (newState) {
+      setMathFormula('E=mc^2')
+    }
   }
 
   const handleMathSubmit = () => {
@@ -936,19 +944,15 @@ export default function Toolbar({
       // @ts-ignore - Math extension command
       editor.chain().focus().setMath(mathFormula.trim(), false).run()
     }
-    setShowMathDialog(false)
+    setShowMathMenu(false)
   }
 
-  const handleMathCancel = () => {
-    setShowMathDialog(false)
-  }
-
-  // Focus input when dialog opens
+  // Focus input when menu opens
   useEffect(() => {
-    if (showMathDialog && mathInputRef.current) {
+    if (showMathMenu && mathInputRef.current) {
       setTimeout(() => mathInputRef.current?.focus(), 100)
     }
-  }, [showMathDialog])
+  }, [showMathMenu])
 
   useEffect(() => {
     if (showLinkDialog && linkInputRef.current) {
@@ -1864,18 +1868,111 @@ export default function Toolbar({
       </div>
 
       {/* Insert Math Formula */}
-      <button
-        onMouseDown={(e) => {
-          e.preventDefault()
-          handleInsertMath()
-        }}
-        style={buttonStyle}
-        title="Insert math formula (inline)"
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        <FunctionsIcon style={{ fontSize: '20px' }} />
-      </button>
+      <div ref={mathMenuRef} style={{ position: 'relative' }}>
+        <button
+          onMouseDown={(e) => {
+            e.preventDefault()
+            handleInsertMath()
+          }}
+          style={showMathMenu ? activeButtonStyle : buttonStyle}
+          title="Insert math formula (inline)"
+          onMouseEnter={(e) => {
+            if (!showMathMenu) {
+              e.currentTarget.style.backgroundColor = toolbarHoverBg
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!showMathMenu) {
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }
+          }}
+        >
+          <FunctionsIcon style={{ fontSize: '20px' }} />
+        </button>
+        {showMathMenu && (() => {
+          const rect = mathMenuRef.current?.getBoundingClientRect()
+          const dropdownWidth = 300
+          const buttonCenter = rect ? rect.left + rect.width / 2 : 0
+          return (
+            <div ref={mathDropdownRef} style={{
+              position: 'fixed',
+              top: rect ? `${rect.bottom + 4}px` : '100%',
+              left: rect ? `${buttonCenter - dropdownWidth / 2}px` : 0,
+              backgroundColor: dropdownBg,
+              border: `1px solid ${dropdownBorder}`,
+              borderRadius: '12px',
+              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              zIndex: 10010,
+              padding: '12px',
+              width: `${dropdownWidth}px`,
+            }}>
+              <div style={{ marginBottom: '8px', fontSize: '13px', fontWeight: 500, color: dropdownTextColor }}>
+                Enter LaTeX Formula
+              </div>
+              <input
+                ref={mathInputRef}
+                type="text"
+                value={mathFormula}
+                onChange={(e) => setMathFormula(e.target.value)}
+                placeholder="E.g., E=mc^2, \\frac{a}{b}"
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  fontSize: '13px',
+                  border: `1px solid ${dropdownBorder}`,
+                  borderRadius: '4px',
+                  backgroundColor: theme === 'dark' ? '#2a2a2a' : '#ffffff',
+                  color: dropdownTextColor,
+                  outline: 'none',
+                  fontFamily: 'monospace',
+                  marginBottom: '8px',
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleMathSubmit()
+                  } else if (e.key === 'Escape') {
+                    setShowMathMenu(false)
+                  }
+                }}
+              />
+              <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => setShowMathMenu(false)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '13px',
+                    border: `1px solid ${dropdownBorder}`,
+                    borderRadius: '4px',
+                    backgroundColor: 'transparent',
+                    color: dropdownTextColor,
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = dropdownHoverBg}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleMathSubmit}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '13px',
+                    border: 'none',
+                    borderRadius: '4px',
+                    backgroundColor: '#1a73e8',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1557b0'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#1a73e8'}
+                >
+                  Insert
+                </button>
+              </div>
+            </div>
+          )
+        })()}
+      </div>
 
       <div style={dividerStyle} />
 
@@ -2158,105 +2255,6 @@ export default function Toolbar({
         </>
       )}
 
-      {/* Math Formula Input Dialog */}
-      {showMathDialog && (
-        <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: theme === 'dark' ? 'rgba(0, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000,
-          }}
-          onClick={handleMathCancel}
-        >
-          <div
-            style={{
-              backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
-              borderRadius: '8px',
-              padding: '24px',
-              minWidth: '400px',
-              maxWidth: '500px',
-              boxShadow: theme === 'dark' 
-                ? '0 8px 32px rgba(0, 0, 0, 0.5)' 
-                : '0 8px 32px rgba(0, 0, 0, 0.2)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                handleMathCancel()
-              } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                handleMathSubmit()
-              }
-            }}
-          >
-            <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 500, color: theme === 'dark' ? '#ffffff' : '#202124' }}>
-              Enter LaTeX Formula
-            </div>
-            <input
-              ref={mathInputRef}
-              type="text"
-              value={mathFormula}
-              onChange={(e) => setMathFormula(e.target.value)}
-              placeholder="E.g., E=mc^2, \\frac{a}{b}"
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                fontSize: '14px',
-                border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
-                borderRadius: '4px',
-                backgroundColor: theme === 'dark' ? '#2a2a2a' : '#ffffff',
-                color: theme === 'dark' ? '#ffffff' : '#202124',
-                outline: 'none',
-                fontFamily: 'monospace',
-                marginBottom: '16px',
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleMathSubmit()
-                } else if (e.key === 'Escape') {
-                  handleMathCancel()
-                }
-              }}
-            />
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button
-                onClick={handleMathCancel}
-                style={{
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                  border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
-                  borderRadius: '4px',
-                  backgroundColor: 'transparent',
-                  color: theme === 'dark' ? '#cccccc' : '#202124',
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleMathSubmit}
-                style={{
-                  padding: '8px 16px',
-                  fontSize: '14px',
-                  border: 'none',
-                  borderRadius: '4px',
-                  backgroundColor: '#1a73e8',
-                  color: '#ffffff',
-                  cursor: 'pointer',
-                }}
-              >
-                Insert
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Link URL Input Dialog */}
       {showLinkDialog && (
