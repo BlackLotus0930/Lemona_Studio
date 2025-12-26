@@ -157,11 +157,11 @@ export function setupIPC() {
 
   // Stream chat - uses webContents.send to stream chunks
   // Chat always uses Gemini (not Ollama)
-  ipcMain.handle('ai:streamChat', async (event, apiKey: string, message: string, documentContent?: string, documentId?: string, chatHistory?: any[], useWebSearch?: boolean, modelName?: string) => {
+  ipcMain.handle('ai:streamChat', async (event, apiKey: string, message: string, documentContent?: string, documentId?: string, chatHistory?: any[], useWebSearch?: boolean, modelName?: string, attachments?: any[]) => {
     const webContents = event.sender
     const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     
-    console.log(`[Stream] Starting stream ${streamId} (model: ${modelName || 'gemini-2.5-flash'}, web search: ${useWebSearch ? 'enabled' : 'disabled'})`)
+    console.log(`[Stream] Starting stream ${streamId} (model: ${modelName || 'gemini-2.5-flash'}, web search: ${useWebSearch ? 'enabled' : 'disabled'}, attachments: ${attachments?.length || 0})`)
     
     try {
       // Get projectId from document if documentId is provided
@@ -174,9 +174,9 @@ export function setupIPC() {
       // Start streaming in background
       ;(async () => {
         try {
-          console.log(`[Stream] Calling geminiService.streamChat with ${chatHistory?.length || 0} history messages...`)
+          console.log(`[Stream] Calling geminiService.streamChat with ${chatHistory?.length || 0} history messages, ${attachments?.length || 0} attachments...`)
           let chunkCount = 0
-          for await (const chunk of geminiService.streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName)) {
+          for await (const chunk of geminiService.streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments)) {
             chunkCount++
             webContents.send('ai:streamChunk', streamId, chunk)
           }

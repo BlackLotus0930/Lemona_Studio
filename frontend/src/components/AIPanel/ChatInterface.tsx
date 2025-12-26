@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { AIChatMessage } from '@shared/types'
+import { AIChatMessage, ChatAttachment } from '@shared/types'
 import { aiApi, chatApi } from '../../services/api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -8,6 +8,14 @@ import { useTheme } from '../../contexts/ThemeContext'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 // @ts-ignore
 import VpnKeyIcon from '@mui/icons-material/VpnKey'
+// @ts-ignore
+import CropOriginalIcon from '@mui/icons-material/CropOriginal'
+// @ts-ignore
+import AlternateEmailIcon from '@mui/icons-material/AlternateEmail'
+// @ts-ignore
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf'
+// @ts-ignore
+import CloseIcon from '@mui/icons-material/Close'
 
 interface ChatInterfaceProps {
   documentId?: string
@@ -58,11 +66,14 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const currentAssistantMessageIdRef = useRef<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const inputContainerRef = useRef<HTMLDivElement>(null)
+  const unifiedContainerRef = useRef<HTMLDivElement>(null)
   const previousMessageCountRef = useRef<number>(0)
   const hasRestoredScrollRef = useRef<boolean>(false)
   const lastStreamingContentLengthRef = useRef<number>(0)
   const streamingScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [inputContainerWidth, setInputContainerWidth] = useState<number | null>(null)
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
   
   // Load Google API key from localStorage on mount
   useEffect(() => {
@@ -236,14 +247,16 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   // Measure input container width to match user message width
   useEffect(() => {
     const updateWidth = () => {
-      if (inputContainerRef.current) {
-        // Get the inner container (the one with padding: '8px 12px')
-        const innerContainer = inputContainerRef.current.querySelector('div[style*="padding"]') as HTMLElement
-        if (innerContainer) {
-          // Get the width of the inner container
-          const width = innerContainer.offsetWidth
-          setInputContainerWidth(width)
-        }
+      // Use the unified container ref directly for accurate width measurement
+      // This container represents the actual input box, not affected by attachments preview
+      if (unifiedContainerRef.current) {
+        const width = unifiedContainerRef.current.offsetWidth
+        setInputContainerWidth(width)
+      } else if (inputContainerRef.current) {
+        // Fallback: use the input container width minus padding
+        const containerWidth = inputContainerRef.current.offsetWidth
+        const padding = 12 + 14 // left + right padding
+        setInputContainerWidth(containerWidth - padding)
       }
     }
     
@@ -256,7 +269,9 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
       updateWidth()
     })
     
-    if (inputContainerRef.current) {
+    if (unifiedContainerRef.current) {
+      resizeObserver.observe(unifiedContainerRef.current)
+    } else if (inputContainerRef.current) {
       resizeObserver.observe(inputContainerRef.current)
     }
     
@@ -265,7 +280,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
       window.removeEventListener('resize', updateWidth)
       resizeObserver.disconnect()
     }
-  }, [])
+  }, [attachments]) // Recalculate when attachments change
 
   // Show scrollbar when textarea content overflows
   useEffect(() => {
@@ -441,18 +456,117 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     }
   }, [])
 
+  // Helper function to process files and add as attachments
+  const processFiles = async (files: FileList | File[]): Promise<ChatAttachment[]> => {
+    const newAttachments: ChatAttachment[] = []
+    const fileArray = Array.from(files)
+
+    for (const file of fileArray) {
+      const fileType = file.type
+      const isImage = fileType.startsWith('image/')
+      const isPDF = fileType === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+
+      if (!isImage && !isPDF) {
+        console.warn(`Unsupported file type: ${fileType}`)
+        continue
+      }
+
+      try {
+        // Read file as base64
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => {
+            const result = reader.result as string
+            // Remove data URL prefix (e.g., "data:image/png;base64,")
+            const base64Data = result.includes(',') ? result.split(',')[1] : result
+            resolve(base64Data)
+          }
+          reader.onerror = reject
+          reader.readAsDataURL(file)
+        })
+
+        const attachment: ChatAttachment = {
+          id: `att_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          type: isImage ? 'image' : 'pdf',
+          name: file.name || (isImage ? 'pasted-image.png' : 'pasted-file.pdf'),
+          data: base64,
+          mimeType: fileType,
+        }
+
+        newAttachments.push(attachment)
+      } catch (error) {
+        console.error('Failed to read file:', error)
+      }
+    }
+
+    return newAttachments
+  }
+
+  // Handle file selection
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    if (!files || files.length === 0) return
+
+    const newAttachments = await processFiles(files)
+
+    if (newAttachments.length > 0) {
+      setAttachments(prev => [...prev, ...newAttachments])
+    }
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  // Handle paste event
+  const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const clipboardData = event.clipboardData
+    if (!clipboardData) return
+
+    const items = clipboardData.items
+    const files: File[] = []
+
+    // Check for files in clipboard
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.kind === 'file') {
+        const file = item.getAsFile()
+        if (file) {
+          files.push(file)
+        }
+      }
+    }
+
+    // If files found, process them as attachments
+    if (files.length > 0) {
+      event.preventDefault() // Prevent default paste behavior
+      const newAttachments = await processFiles(files)
+      if (newAttachments.length > 0) {
+        setAttachments(prev => [...prev, ...newAttachments])
+      }
+    }
+  }
+
+  // Remove attachment
+  const handleRemoveAttachment = (attachmentId: string) => {
+    setAttachments(prev => prev.filter(att => att.id !== attachmentId))
+  }
+
   const handleSend = async () => {
-    if (!input.trim() || isLoading || !documentId || !chatId) return
+    if ((!input.trim() && attachments.length === 0) || isLoading || !documentId || !chatId) return
 
     const userMessage: AIChatMessage = {
       id: `msg_${Date.now()}`,
       role: 'user',
       content: input,
       timestamp: new Date().toISOString(),
+      attachments: attachments.length > 0 ? [...attachments] : undefined,
     }
 
     setMessages(prev => [...prev, userMessage])
     setInput('')
+    setAttachments([]) // Clear attachments after sending
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -472,7 +586,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     try {
       // Pass chat history (excluding the just-added user message) for conversation continuity
       const chatHistoryForAPI = messages.filter(msg => msg.id !== userMessage.id)
-      const response = await aiApi.streamChat(input, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel)
+      const response = await aiApi.streamChat(input, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined)
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
 
@@ -617,6 +731,62 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                 }}
               >
                 {message.content}
+                {message.attachments && message.attachments.length > 0 && (
+                  <div style={{
+                    marginTop: '8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
+                  }}>
+                    {message.attachments.map((att) => (
+                      <div key={att.id} style={{
+                        borderRadius: '6px',
+                        overflow: 'hidden',
+                        border: `1px solid ${theme === 'dark' ? '#313131' : '#dadce0'}`,
+                        width: '60px',
+                        height: '60px',
+                        flexShrink: 0
+                      }}>
+                        {att.type === 'image' ? (
+                          <img 
+                            src={`data:${att.mimeType || 'image/png'};base64,${att.data}`}
+                            alt={att.name}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              display: 'block',
+                              objectFit: 'cover'
+                            }}
+                          />
+                        ) : (
+                          <div style={{
+                            padding: '4px',
+                            backgroundColor: theme === 'dark' ? '#2d2d2d' : '#f5f5f5',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            height: '100%',
+                            width: '100%'
+                          }}>
+                            <PictureAsPdfIcon style={{ fontSize: '20px', color: theme === 'dark' ? '#d6d6d6' : '#202124', marginBottom: '2px' }} />
+                            <span style={{ 
+                              fontSize: '8px', 
+                              color: textColor,
+                              textAlign: 'center',
+                              wordBreak: 'break-word',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical'
+                            }}>{att.name}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             {message.role === 'assistant' && (
@@ -764,51 +934,122 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
           padding: '12px 14px',
           backgroundColor: brighterBg
         }}>
+        {/* Attachments Preview */}
+        {attachments.length > 0 && (
+          <div style={{
+            marginBottom: '8px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '8px'
+          }}>
+            {attachments.map((att) => (
+              <div
+                key={att.id}
+                style={{
+                  position: 'relative',
+                  borderRadius: '6px',
+                  overflow: 'hidden',
+                  border: `1px solid ${borderColor}`,
+                  backgroundColor: theme === 'dark' ? '#1d1d1d' : '#f8f8f8',
+                  width: '60px',
+                  height: '60px',
+                  flexShrink: 0
+                }}
+              >
+                {att.type === 'image' ? (
+                  <img
+                    src={`data:${att.mimeType || 'image/png'};base64,${att.data}`}
+                    alt={att.name}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      display: 'block'
+                    }}
+                  />
+                ) : (
+                  <div style={{
+                    padding: '4px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '100%',
+                    width: '100%'
+                  }}>
+                    <PictureAsPdfIcon style={{ fontSize: '20px', color: theme === 'dark' ? '#d6d6d6' : '#202124', marginBottom: '2px' }} />
+                    <span style={{
+                      fontSize: '8px',
+                      color: textColor,
+                      textAlign: 'center',
+                      wordBreak: 'break-word',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical'
+                    }}>
+                      {att.name}
+                    </span>
+                  </div>
+                )}
+                <button
+                  onClick={() => handleRemoveAttachment(att.id)}
+                  style={{
+                    position: 'absolute',
+                    top: '4px',
+                    right: '4px',
+                    padding: '2px',
+                    border: 'none',
+                    borderRadius: '50%',
+                    backgroundColor: theme === 'dark' ? 'rgba(0, 0, 0, 0.7)' : 'rgba(255, 255, 255, 0.9)',
+                    color: textColor,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '20px',
+                    height: '20px',
+                    transition: 'background-color 0.15s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 1)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(0, 0, 0, 0.7)' : 'rgba(255, 255, 255, 0.9)'
+                  }}
+                >
+                  <CloseIcon style={{ fontSize: '14px' }} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        
         {/* Unified Container - Text input and buttons together */}
-        <div style={{
-          padding: '4px 6px',
-          backgroundColor: inputBg,
-          borderRadius: '8px',
-          border: `1px solid ${isInputFocused ? (theme === 'dark' ? '#3e3e42' : '#bdc1c6') : borderColor}`,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          transition: 'border-color 0.2s',
-          position: 'relative'
-        }}>
-          {/* Settings button - bottom left */}
-          <button
-            ref={settingsButtonRef}
-            onClick={() => setShowSettingsModal(!showSettingsModal)}
-            title="API Keys"
-            style={{
-              position: 'absolute',
-              bottom: '8px',
-              left: '10px',
-              padding: '4px',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: showSettingsModal ? '#858585' : (theme === 'dark' ? 'rgba(255, 255, 255, 0)' : 'rgba(0, 0, 0, 0)'),
-              transition: 'color 0.2s',
-              zIndex: 10,
-            }}
-            onMouseEnter={(e) => {
-              if (!showSettingsModal) {
-                e.currentTarget.style.color = '#858585'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!showSettingsModal) {
-                e.currentTarget.style.color = theme === 'dark' ? 'rgba(255, 255, 255, 0)' : 'rgba(0, 0, 0, 0)'
-              }
-            }}
-          >
-            <VpnKeyIcon style={{ fontSize: '16px'}} />
-          </button>
+        <div 
+          ref={unifiedContainerRef}
+          style={{
+            padding: '4px 6px',
+            backgroundColor: inputBg,
+            borderRadius: '8px',
+            border: `1px solid ${isInputFocused ? (theme === 'dark' ? '#3e3e42' : '#bdc1c6') : borderColor}`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            transition: 'border-color 0.2s',
+            position: 'relative'
+          }}>
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,.pdf"
+            multiple
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+          />
+          
 
               {/* Text Input Section - On Top */}
               <textarea
@@ -817,6 +1058,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                 onChange={(e) => setInput(e.target.value)}
                 onFocus={() => setIsInputFocused(true)}
                 onBlur={() => setIsInputFocused(false)}
+                onPaste={handlePaste}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
@@ -858,14 +1100,14 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                 }}
               />
           
-          {/* Controls Section - Model selector, web search toggle, and send button */}
+          {/* Controls Section - Left side: Model selector, Right side: Web search, File upload, @, API key, Send button */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'flex-end',
+            justifyContent: 'space-between',
             gap: '6px'
           }}>
-            {/* Model Selector */}
+            {/* Left side - Model Selector */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -926,24 +1168,30 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
               </button>
             </div>
             
-            {/* Web Search Toggle */}
+            {/* Right side - Web Search, File upload, @, API key, Send button */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}>
+              {/* Web Search Toggle */}
               <button
               onClick={() => setUseWebSearch(!useWebSearch)}
               disabled={isLoading}
                 style={{
-                  padding: '4px',
+                  padding: '2px',
                 backgroundColor: useWebSearch ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0') : 'transparent',
                 color: useWebSearch ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
                   border: 'none',
-                borderRadius: '8px',
+                borderRadius: '6px',
                 cursor: isLoading ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                 justifyContent: 'center',
                 transition: 'all 0.15s',
                 opacity: isLoading ? 0.5 : 1,
-                width: '28px',
-                height: '28px'
+                width: '24px',
+                height: '24px'
               }}
               onMouseEnter={(e) => {
                 if (!isLoading) {
@@ -965,41 +1213,153 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                 className="material-symbols-outlined"
                 style={{
                   fontVariationSettings: "'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24",
-                  fontSize: '18px'
+                  fontSize: '17px'
                 }}
               >
                 language
               </span>
               </button>
               
-              {/* Send button */}
+              {/* File Upload Button */}
               <button
-                onClick={handleSend}
-                disabled={isLoading || !input.trim()}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoading}
+                title="Upload image or PDF"
                 style={{
-                  padding: '4px',
-                  backgroundColor: isLoading || !input.trim() ? 'transparent' : (theme === 'dark' ? '#3a3a3a' : '#e0e0e0'),
-                  color: isLoading || !input.trim() ? secondaryTextColor : (theme === 'dark' ? '#d6d6d6' : '#424242'),
+                  padding: '2px',
+                  backgroundColor: 'transparent',
+                  color: secondaryTextColor,
                   border: 'none',
-                  borderRadius: '8px',
-                  cursor: isLoading || !input.trim() ? 'not-allowed' : 'pointer',
+                  borderRadius: '6px',
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   transition: 'all 0.15s',
                   opacity: isLoading ? 0.5 : 1,
-                  width: '28px',
-                  height: '28px'
+                  width: '24px',
+                  height: '24px'
                 }}
                 onMouseEnter={(e) => {
-                  if (!isLoading && input.trim()) {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1d1d1d' : '#f5f5f5'
+                    e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#424242'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = 'transparent'
+                    e.currentTarget.style.color = secondaryTextColor
+                  }
+                }}
+              >
+                <CropOriginalIcon style={{ fontSize: '17px' }} />
+              </button>
+              
+              {/* @ Icon Button */}
+              <button
+                disabled={isLoading}
+                title="@"
+                style={{
+                  padding: '2px',
+                  backgroundColor: 'transparent',
+                  color: secondaryTextColor,
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s',
+                  opacity: isLoading ? 0.5 : 1,
+                  width: '24px',
+                  height: '24px'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1d1d1d' : '#f5f5f5'
+                    e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#424242'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = 'transparent'
+                    e.currentTarget.style.color = secondaryTextColor
+                  }
+                }}
+              >
+                <AlternateEmailIcon style={{ fontSize: '17px' }} />
+              </button>
+              
+              {/* API Keys Button */}
+              <button
+                ref={settingsButtonRef}
+                onClick={() => setShowSettingsModal(!showSettingsModal)}
+                disabled={isLoading}
+                title="API Keys"
+                style={{
+                  padding: '2px',
+                  backgroundColor: showSettingsModal ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0') : 'transparent',
+                  color: showSettingsModal ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s',
+                  opacity: isLoading ? 0.5 : 1,
+                  width: '24px',
+                  height: '24px'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = showSettingsModal 
+                      ? (theme === 'dark' ? '#454545' : '#d0d0d0')
+                      : (theme === 'dark' ? '#1d1d1d' : '#f5f5f5')
+                    e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#424242'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = showSettingsModal 
+                      ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0')
+                      : 'transparent'
+                    e.currentTarget.style.color = showSettingsModal ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor
+                  }
+                }}
+              >
+                <VpnKeyIcon style={{ fontSize: '17px' }} />
+              </button>
+              
+              {/* Send button */}
+              <button
+                onClick={handleSend}
+                disabled={isLoading || (!input.trim() && attachments.length === 0)}
+                style={{
+                  padding: '2px',
+                  backgroundColor: isLoading || (!input.trim() && attachments.length === 0) ? 'transparent' : (theme === 'dark' ? '#3a3a3a' : '#e0e0e0'),
+                  color: isLoading || (!input.trim() && attachments.length === 0) ? secondaryTextColor : (theme === 'dark' ? '#d6d6d6' : '#424242'),
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: isLoading || (!input.trim() && attachments.length === 0) ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s',
+                  opacity: isLoading ? 0.5 : 1,
+                  width: '24px',
+                  height: '24px'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isLoading && (input.trim() || attachments.length > 0)) {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#454545' : '#d0d0d0'
                   } else if (!isLoading) {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1d1d1d' : '#f5f5f5'
                   }
                 }}
                 onMouseLeave={(e) => {
-                  if (!isLoading && input.trim()) {
+                  if (!isLoading && (input.trim() || attachments.length > 0)) {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#3a3a3a' : '#e0e0e0'
                   } else if (!isLoading) {
                     e.currentTarget.style.backgroundColor = 'transparent'
@@ -1007,8 +1367,9 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                 }}
                 title="Send"
               >
-                <ArrowUpwardIcon style={{ fontSize: '20px' }} />
+                <ArrowUpwardIcon style={{ fontSize: '19px', transform: 'translateY(1px)' }} />
               </button>
+            </div>
           </div>
         </div>
       </div>

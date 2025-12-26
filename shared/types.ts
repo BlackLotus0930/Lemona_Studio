@@ -44,11 +44,20 @@ export interface Section {
   order: number;
 }
 
+export interface ChatAttachment {
+  id: string;
+  type: 'image' | 'pdf';
+  name: string;
+  data: string; // base64 encoded data or file path
+  mimeType?: string; // for images: image/png, image/jpeg, etc.
+}
+
 export interface AIChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  attachments?: ChatAttachment[]; // Optional attachments (images or PDFs)
 }
 
 export interface AIQuestion {

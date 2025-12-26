@@ -1,6 +1,6 @@
 // Desktop Gemini Service - Uses Google Generative AI
-import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai'
-import { AIChatMessage, AIQuestion, AutocompleteSuggestion } from '../../../shared/types.js'
+import { GoogleGenerativeAI, GenerativeModel, Part } from '@google/generative-ai'
+import { AIChatMessage, AIQuestion, AutocompleteSuggestion, ChatAttachment } from '../../../shared/types.js'
 import { projectService } from './projectService.js'
 import { documentService } from './documentService.js'
 
@@ -150,7 +150,8 @@ export const geminiService = {
     projectId?: string,
     chatHistory?: AIChatMessage[],
     useWebSearch?: boolean,
-    modelName?: string
+    modelName?: string,
+    attachments?: ChatAttachment[]
   ): AsyncGenerator<string> {
     const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
     const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory)
@@ -159,18 +160,73 @@ export const geminiService = {
       id: `msg_${Date.now()}`,
       role: 'user',
       content: message,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      attachments: attachments
     })
+    
+    // Build parts array for the current message
+    const parts: Part[] = []
+    
+    // Add attachments first (images and PDFs)
+    if (attachments && attachments.length > 0) {
+      for (const attachment of attachments) {
+        if (attachment.type === 'image') {
+          parts.push({
+            inlineData: {
+              data: attachment.data,
+              mimeType: attachment.mimeType || 'image/png'
+            }
+          })
+        } else if (attachment.type === 'pdf') {
+          // For PDFs, Gemini API supports file data
+          parts.push({
+            inlineData: {
+              data: attachment.data,
+              mimeType: 'application/pdf'
+            }
+          })
+        }
+      }
+    }
+    
+    // Add text message (even if empty, we need at least one part)
+    parts.push({ text: message || '' })
+    
     try {
       const chatConfig: any = {
         systemInstruction: {
           parts: [{ text: systemInstruction }],
           role: "user"
         },
-        history: conversationHistory.slice(0, -1).map(msg => ({
-          role: msg.role === 'user' ? 'user' : 'model',
-          parts: [{ text: msg.content }]
-        }))
+        history: conversationHistory.slice(0, -1).map(msg => {
+          const msgParts: Part[] = []
+          // Add attachments from history
+          if (msg.attachments && msg.attachments.length > 0) {
+            for (const attachment of msg.attachments) {
+              if (attachment.type === 'image') {
+                msgParts.push({
+                  inlineData: {
+                    data: attachment.data,
+                    mimeType: attachment.mimeType || 'image/png'
+                  }
+                })
+              } else if (attachment.type === 'pdf') {
+                msgParts.push({
+                  inlineData: {
+                    data: attachment.data,
+                    mimeType: 'application/pdf'
+                  }
+                })
+              }
+            }
+          }
+          // Add text content (always add, even if empty, to ensure at least one part)
+          msgParts.push({ text: msg.content || '' })
+          return {
+            role: msg.role === 'user' ? 'user' : 'model',
+            parts: msgParts
+          }
+        })
       }
       
       // Add Google Search tool if enabled
@@ -181,7 +237,7 @@ export const geminiService = {
       }
       
       const chat = aiModel.startChat(chatConfig)
-      const result = await chat.sendMessageStream(message)
+      const result = await chat.sendMessageStream(parts)
       for await (const chunk of result.stream) {
         try {
           const chunkText = chunk.text()

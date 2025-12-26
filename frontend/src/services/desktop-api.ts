@@ -60,7 +60,7 @@ export const aiApi = {
   },
   getStatus: () =>
     invokeOrFetch('ai:getStatus'),
-  streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string, provider?: 'gemini' | 'ollama' | 'auto'): Promise<Response> => {
+  streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string, attachments?: any[]): Promise<Response> => {
     if (!isElectron) {
       throw new Error('Streaming not available in web mode')
     }
@@ -72,7 +72,7 @@ export const aiApi = {
       async start(controller) {
         try {
           // Start stream and get streamId
-          const { streamId } = await window.electron!.invoke('ai:streamChat', apiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, provider)
+          const { streamId } = await window.electron!.invoke('ai:streamChat', apiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, attachments)
           console.log('[Desktop API] Stream started with ID:', streamId)
           
           // Note: preload script strips the event, so callbacks receive args directly
