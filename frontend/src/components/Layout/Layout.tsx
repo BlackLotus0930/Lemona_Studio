@@ -508,13 +508,61 @@ export default function Layout() {
           const newSize = currentSize > 0 ? 0 : 14
           fileExplorerPanelRef.current.resize(newSize)
         }
+        return
+      }
+      
+      // Check if Ctrl+W (or Cmd+W on Mac) - close current tab
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'w' || e.key === 'W') && !e.shiftKey) {
+        // Don't close if typing in an input field or textarea
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+          return
+        }
+        
+        e.preventDefault()
+        e.stopPropagation()
+        
+        // Close the active tab if there is one and there's more than one tab
+        if (activeTabId && openTabs.length > 1) {
+          const docIdToClose = activeTabId
+          
+          setOpenTabs(prevTabs => {
+            const newTabs = prevTabs.filter(tab => tab.id !== docIdToClose)
+            
+            // Clear scroll position for the closed tab
+            try {
+              localStorage.removeItem(`documentScroll_${docIdToClose}`)
+              localStorage.removeItem(`pdfPage_${docIdToClose}`)
+            } catch (error) {
+              console.error('Failed to clear scroll position:', error)
+            }
+            
+            // Remove PDF Viewer ref when tab is closed
+            pdfViewerRefsMap.current.delete(docIdToClose)
+            
+            // Switch to another tab
+            if (newTabs.length > 0) {
+              const closedIndex = prevTabs.findIndex(tab => tab.id === docIdToClose)
+              const targetIndex = closedIndex > 0 ? closedIndex - 1 : 0
+              const targetTab = newTabs[targetIndex] || newTabs[0]
+              setActiveTabId(targetTab.id)
+              navigate(`/document/${targetTab.id}`)
+            } else {
+              // No tabs left, navigate to document list
+              setActiveTabId(null)
+              navigate('/documents')
+            }
+            
+            return newTabs
+          })
+        }
+        return
       }
     }
 
     // Use capture phase to catch events before they reach the editor
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [searchQuery, document])
+  }, [searchQuery, document, activeTabId, openTabs])
 
   const loadDocuments = async () => {
     // Note: documents are already cleared in useEffect when projectId changes
