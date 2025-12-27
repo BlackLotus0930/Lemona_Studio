@@ -66,6 +66,7 @@ function setupCSP() {
   const cspDirectives = [
     "default-src 'self'",
     "script-src 'self'" + (isDev ? " 'unsafe-eval' 'unsafe-inline' http://localhost:5173" : ""),
+    "worker-src 'self' blob:", // Allow workers from 'self' and blob URLs (required for PDF.js)
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data: blob: https:",

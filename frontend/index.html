@@ -7,7 +7,7 @@
     <!-- Content Security Policy - Note: Electron will override this via session API, but this provides fallback -->
     <!-- In production, unsafe-eval and unsafe-inline are blocked for better security -->
     <!-- frame-ancestors is ignored in meta tags, only works in HTTP headers (set via Electron session API) -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com; frame-src 'self' blob: data:; object-src 'self' blob: data:; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com; frame-src 'self' blob: data:; object-src 'self' blob: data:; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;" />
     <!-- Theme initialization - must load synchronously before any rendering -->
     <!-- This runs before React loads to prevent white flash on startup -->
     <script src="/theme-init.js"></script>
