@@ -96,6 +96,9 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [copiedCodeBlocks, setCopiedCodeBlocks] = useState<Set<string>>(new Set())
+  // Store scroll positions per chat ID
+  const scrollPositionsRef = useRef<Map<string, number>>(new Map())
+  const previousChatIdRef = useRef<string | null>(null)
   
   // Load Google API key from localStorage on mount
   useEffect(() => {
@@ -231,19 +234,35 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  // Reset scroll state when documentId or chatId changes
-  // Keep scroll position unchanged when switching files - don't auto-scroll
+  // Save scroll position when leaving a chat
   useEffect(() => {
     if (!documentId || !chatId || !scrollContainerRef.current) return
 
+    // Save scroll position of previous chat before switching
+    if (previousChatIdRef.current && previousChatIdRef.current !== chatId && scrollContainerRef.current) {
+      const scrollTop = scrollContainerRef.current.scrollTop
+      scrollPositionsRef.current.set(previousChatIdRef.current, scrollTop)
+    }
+
+    // Reset state for new chat
     hasRestoredScrollRef.current = false
     previousMessageCountRef.current = 0
 
-    // Don't auto-scroll when switching files - maintain current scroll position
-    // Just mark as restored so new messages can still auto-scroll if user is near bottom
+    // Update previous chat ID
+    previousChatIdRef.current = chatId
+    
+    // Mark as restored after a delay (scroll will be restored after messages load)
     setTimeout(() => {
       hasRestoredScrollRef.current = true
     }, 150)
+    
+    // Cleanup: save scroll position when component unmounts or documentId changes
+    return () => {
+      if (previousChatIdRef.current && scrollContainerRef.current) {
+        const scrollTop = scrollContainerRef.current.scrollTop
+        scrollPositionsRef.current.set(previousChatIdRef.current, scrollTop)
+      }
+    }
   }, [documentId, chatId])
 
   // Auto-scroll to bottom only when new messages are added (not on initial load)
@@ -394,6 +413,17 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
         addedMessageIdsRef.current = new Set(messages.map(msg => msg.id))
         // Reset notification flag if chat already has messages
         hasNotifiedFirstMessage.current = messages.length > 0
+        
+        // Restore scroll position after messages are loaded
+        const savedScrollPosition = scrollPositionsRef.current.get(chatId)
+        if (savedScrollPosition !== undefined && scrollContainerRef.current) {
+          // Use requestAnimationFrame to ensure DOM is fully updated
+          requestAnimationFrame(() => {
+            if (scrollContainerRef.current) {
+              scrollContainerRef.current.scrollTop = savedScrollPosition
+            }
+          })
+        }
       } catch (error) {
         console.error('Failed to load chat messages:', error)
         setMessages([])
@@ -424,7 +454,10 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
           }
         }, 600) // Slightly longer than transition duration (400ms) to allow fade-out
 
-        // Removed scroll position saving - AI panel maintains consistent state across files
+        // Save scroll position for current chat
+        if (chatId) {
+          scrollPositionsRef.current.set(chatId, container.scrollTop)
+        }
       }
     }
 

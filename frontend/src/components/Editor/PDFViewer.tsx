@@ -66,6 +66,11 @@ const PDFViewerComponent = ({ node, selected }: ReactNodeViewProps) => {
     }
   }, [pdfSrc])
 
+  // Don't render anything if there's no valid PDF source
+  if (!pdfSrc || typeof pdfSrc !== 'string' || pdfSrc.trim() === '' || error) {
+    return null
+  }
+
   return (
     <NodeViewWrapper
       className={`pdf-viewer-wrapper ${selected ? 'selected' : ''}`}
@@ -94,34 +99,19 @@ const PDFViewerComponent = ({ node, selected }: ReactNodeViewProps) => {
         <span>📄</span>
         <span>{fileName}</span>
       </div>
-      {!error && pdfSrc && typeof pdfSrc === 'string' && pdfSrc.trim() !== '' ? (
-        <iframe
-          src={pdfSrc}
-          style={{
-            width: '100%',
-            height: '600px',
-            border: 'none',
-            display: 'block',
-          }}
-          onError={() => {
-            setError(true)
-          }}
-          title={fileName}
-        />
-      ) : (
-        <div
-          style={{
-            padding: '40px',
-            textAlign: 'center',
-            color: theme === 'dark' ? '#858585' : '#5f6368',
-          }}
-        >
-          <p>Unable to display PDF preview.</p>
-          <p style={{ fontSize: '12px', marginTop: '8px' }}>
-            {pdfSrc ? 'The PDF file is available in the file explorer.' : 'PDF source is not available.'}
-          </p>
-        </div>
-      )}
+      <iframe
+        src={pdfSrc}
+        style={{
+          width: '100%',
+          height: '600px',
+          border: 'none',
+          display: 'block',
+        }}
+        onError={() => {
+          setError(true)
+        }}
+        title={fileName}
+      />
     </NodeViewWrapper>
   )
 }
