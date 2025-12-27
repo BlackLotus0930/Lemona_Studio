@@ -93,7 +93,7 @@ export default function ChatHistoryDropdown({
       const rect = anchorElement.getBoundingClientRect()
       setPosition({
         top: rect.bottom + 4,
-        left: rect.left - 200 + rect.width / 2 // Center relative to button, offset left
+        left: rect.left - 150 + rect.width / 2 // Center relative to button, offset left
       })
     }
   }, [isOpen, anchorElement])
