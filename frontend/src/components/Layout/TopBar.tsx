@@ -8,7 +8,7 @@ import { Document } from '@shared/types'
 const isElectron = typeof window !== 'undefined' && window.electron !== undefined
 
 interface TopBarProps {
-  onExport?: (format: 'pdf' | 'docx', filename?: string, documentIds?: string[]) => void
+  onExport?: (format: 'pdf' | 'docx', filename?: string, documentIds?: string[], usePageBreaks?: boolean) => void
   documentTitle?: string
   documentId?: string
   onTitleUpdate?: (title: string) => void

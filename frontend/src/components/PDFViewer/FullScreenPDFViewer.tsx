@@ -8,6 +8,45 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { documentApi } from '../../services/desktop-api'
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore'
 
+// Polyfill for URL.parse if it doesn't exist (PDF.js may try to use it)
+// URL.parse is not a standard Web API, but PDF.js might expect it in some contexts
+// This polyfill provides a compatible interface for PDF.js annotation parsing
+if (typeof URL !== 'undefined' && !(URL as any).parse) {
+  (URL as any).parse = (url: string, parseQueryString?: boolean) => {
+    try {
+      const urlObj = new URL(url, window.location.href)
+      // Return an object that mimics Node.js url.parse format for compatibility
+      return {
+        href: urlObj.href,
+        protocol: urlObj.protocol,
+        host: urlObj.host,
+        hostname: urlObj.hostname,
+        port: urlObj.port,
+        pathname: urlObj.pathname,
+        search: urlObj.search,
+        hash: urlObj.hash,
+        // Additional properties that PDF.js might expect
+        query: parseQueryString ? Object.fromEntries(urlObj.searchParams) : urlObj.search,
+        path: urlObj.pathname + urlObj.search,
+      }
+    } catch {
+      // If URL parsing fails, return a minimal object with the original URL
+      return {
+        href: url,
+        protocol: '',
+        host: '',
+        hostname: '',
+        port: '',
+        pathname: url,
+        search: '',
+        hash: '',
+        query: parseQueryString ? {} : '',
+        path: url,
+      }
+    }
+  }
+}
+
 // Set worker source for pdf.js - use local worker file
 // This avoids CSP violations and works offline
 // Using ?url import ensures Vite properly handles the worker file
@@ -447,9 +486,11 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
             }
 
             // Load PDF document
+            // Configure PDF.js to reduce console output
             const loadingTask = pdfjsLib.getDocument({
               data: pdfData,
               useSystemFonts: true,
+              verbosity: 0, // Reduce console output
             })
             
             const pdf = await loadingTask.promise
@@ -623,6 +664,26 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     // Handle keyboard shortcuts
     useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
+        // Only handle keyboard shortcuts when PDF viewer is active
+        // Check if the event target is within the PDF viewer container
+        const target = e.target as HTMLElement
+        const isInPDFViewer = containerRef.current?.contains(target) || false
+        
+        // Don't handle keyboard shortcuts if:
+        // 1. Target is an input element (including search inputs)
+        // 2. Target is in a contentEditable element (TipTap editor)
+        // 3. Target is in a textarea
+        // 4. Event is not within PDF viewer container
+        if (
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          target.isContentEditable ||
+          target.closest('[contenteditable="true"]') !== null ||
+          !isInPDFViewer
+        ) {
+          return
+        }
+        
         // Ctrl+F or Cmd+F to toggle search
         if ((e.ctrlKey || e.metaKey) && e.key === 'f' && !e.shiftKey) {
           e.preventDefault()
@@ -635,11 +696,10 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
               inlineSearchInputRef.current?.select()
             }, 50)
           }
+          return
         }
         
-        // Arrow keys for navigation (when search is not focused)
-        if (e.target instanceof HTMLInputElement) return
-        
+        // Arrow keys for navigation (only when PDF viewer is focused)
         if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
           e.preventDefault()
           goToPreviousPage()

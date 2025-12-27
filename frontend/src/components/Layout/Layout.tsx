@@ -2151,7 +2151,7 @@ export default function Layout() {
     }
   }, [])
 
-  const handleExport = async (format: 'pdf' | 'docx', filename?: string, documentIds?: string[]) => {
+  const handleExport = async (format: 'pdf' | 'docx', filename?: string, documentIds?: string[], usePageBreaks?: boolean) => {
     // If documentIds provided, use them; otherwise fall back to current document
     const idsToExport = documentIds && documentIds.length > 0 ? documentIds : (document ? [document.id] : [])
     
@@ -2170,7 +2170,8 @@ export default function Layout() {
         exportData = await exportApi.export(idsToExport[0], format, exportFilename)
       } else {
         // Multiple documents - merge into one file (WYSIWYG)
-        exportData = await exportApi.exportMultiple(idsToExport, format, exportFilename)
+        console.log('[Layout] Calling exportMultiple with usePageBreaks:', usePageBreaks, 'type:', typeof usePageBreaks)
+        exportData = await exportApi.exportMultiple(idsToExport, format, exportFilename, usePageBreaks)
       }
       
       // Convert array back to Buffer/Blob

@@ -449,7 +449,7 @@ Rephrased text:`;
             throw error;
         }
     });
-    ipcMain.handle('export:exportMultiple', async (_, documentIds, format, filename) => {
+    ipcMain.handle('export:exportMultiple', async (_, documentIds, format, filename, usePageBreaks) => {
         try {
             if (!format || !['pdf', 'docx'].includes(format)) {
                 throw new Error('Invalid format. Must be pdf or docx');
@@ -457,7 +457,10 @@ Rephrased text:`;
             if (!documentIds || documentIds.length === 0) {
                 throw new Error('No documents selected');
             }
-            const fileBuffer = await exportService.exportMultipleDocuments(documentIds, format);
+            // Ensure usePageBreaks is explicitly boolean (default to true if undefined)
+            const shouldUsePageBreaks = usePageBreaks !== undefined ? usePageBreaks : true;
+            console.log('[IPC] export:exportMultiple - usePageBreaks:', usePageBreaks, 'shouldUsePageBreaks:', shouldUsePageBreaks);
+            const fileBuffer = await exportService.exportMultipleDocuments(documentIds, format, shouldUsePageBreaks);
             return Array.from(fileBuffer); // Convert Buffer to array for IPC
         }
         catch (error) {

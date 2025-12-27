@@ -76,7 +76,7 @@ interface ToolbarProps {
   editor: Editor | null
   onToggleSearch?: () => void
   isSearchActive?: boolean
-  onExport?: (format: 'pdf' | 'docx', filename?: string, documentIds?: string[]) => void
+  onExport?: (format: 'pdf' | 'docx', filename?: string, documentIds?: string[], usePageBreaks?: boolean) => void
   documents?: Document[]
   projectName?: string
   documentTitle?: string

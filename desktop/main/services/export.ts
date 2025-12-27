@@ -680,7 +680,8 @@ export const exportService = {
     }
   },
 
-  async exportMultipleDocuments(documentIds: string[], format: 'pdf' | 'docx'): Promise<Buffer> {
+  async exportMultipleDocuments(documentIds: string[], format: 'pdf' | 'docx', usePageBreaks: boolean = true): Promise<Buffer> {
+    console.log('[Export Service] exportMultipleDocuments - usePageBreaks:', usePageBreaks, 'type:', typeof usePageBreaks)
     if (documentIds.length === 0) {
       throw new Error('No documents selected')
     }
@@ -706,9 +707,9 @@ export const exportService = {
     })
 
     if (format === 'pdf') {
-      return this.exportMultipleToPDF(documents)
+      return this.exportMultipleToPDF(documents, usePageBreaks)
     } else {
-      return this.exportMultipleToDOCX(documents)
+      return this.exportMultipleToDOCX(documents, usePageBreaks)
     }
   },
 
@@ -790,7 +791,7 @@ export const exportService = {
     }
   },
 
-  async exportMultipleToPDF(documents: Document[]): Promise<Buffer> {
+  async exportMultipleToPDF(documents: Document[], usePageBreaks: boolean = true): Promise<Buffer> {
     const browser = await puppeteer.launch({
       headless: true,
       args: [
@@ -811,9 +812,16 @@ export const exportService = {
         const content = JSON.parse(doc.content)
         const bodyHTML = tipTapToHTML(content)
         
-        // Add page break between documents (except before the first)
+        // Add separator between documents (except before the first)
         if (index > 0) {
-          combinedHTML += '<div class="page-break"></div>'
+          if (usePageBreaks) {
+            console.log('[Export Service] Adding page break between documents')
+            combinedHTML += '<div class="page-break"></div>'
+          } else {
+            console.log('[Export Service] Adding spacing instead of page break')
+            // Add spacing instead of page break (total 3em spacing)
+            combinedHTML += '<div style="margin-top: 1.5em; margin-bottom: 1.5em;"></div>'
+          }
         }
         
         combinedHTML += bodyHTML
@@ -1268,7 +1276,7 @@ export const exportService = {
     return await Packer.toBuffer(doc)
   },
 
-  async exportMultipleToDOCX(documents: Document[]): Promise<Buffer> {
+  async exportMultipleToDOCX(documents: Document[], usePageBreaks: boolean = true): Promise<Buffer> {
     // Combine all documents into one
     const allElements: (Paragraph | Table)[] = []
 
@@ -1524,11 +1532,21 @@ export const exportService = {
     // Process each document
     documents.forEach((document, index) => {
       if (index > 0) {
-        allElements.push(
-          new Paragraph({
-            children: [new PageBreak()],
-          })
-        )
+        if (usePageBreaks) {
+          allElements.push(
+            new Paragraph({
+              children: [new PageBreak()],
+            })
+          )
+        } else {
+          // Add spacing paragraph instead of page break (total 600 twips spacing)
+          allElements.push(
+            new Paragraph({
+              children: [new TextRun('')],
+              spacing: { after: 600 },
+            })
+          )
+        }
       }
 
       const content = JSON.parse(document.content)

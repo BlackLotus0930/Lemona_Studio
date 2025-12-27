@@ -28,6 +28,7 @@ export default function ExportModal({
   const [showFileDropdown, setShowFileDropdown] = useState(false)
   const [downloadFilename, setDownloadFilename] = useState(projectName)
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set())
+  const [usePageBreaks, setUsePageBreaks] = useState(true) // Default to true to maintain current behavior
   const shareMenuRef = useRef<HTMLDivElement>(null)
   const fileDropdownRef = useRef<HTMLDivElement>(null)
   const fileSelectButtonRef = useRef<HTMLButtonElement>(null)
@@ -62,6 +63,13 @@ export default function ExportModal({
       setDownloadFilename(projectName)
     }
   }, [isOpen, projectName])
+
+  // Reset usePageBreaks to default when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setUsePageBreaks(true) // Reset to default (true) when modal opens
+    }
+  }, [isOpen])
 
   // Close dropdown when clicking outside of it
   useEffect(() => {
@@ -158,9 +166,10 @@ export default function ExportModal({
     if (selectedDocumentIds.size === 0) return
     
     const selectedIds = Array.from(selectedDocumentIds)
+    console.log('[ExportModal] Exporting with usePageBreaks:', usePageBreaks, 'type:', typeof usePageBreaks)
     onClose()
     setShowFileDropdown(false)
-    onExport(format, downloadFilename, selectedIds)
+    onExport(format, downloadFilename, selectedIds, usePageBreaks)
   }
 
   const dropdownBorder = '#212121'
@@ -496,6 +505,67 @@ export default function ExportModal({
             : `${selectedDocumentIds.size} files will be merged into one document`
           }
         </div>
+
+        {/* Page Break Option - only show when multiple files are selected */}
+        {selectedDocumentIds.size > 1 && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '8px 0'
+          }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setUsePageBreaks(!usePageBreaks)
+              }}
+              style={{
+                width: '18px',
+                height: '18px',
+                border: `1px solid ${dropdownBorder}`,
+                borderRadius: '4px',
+                backgroundColor: usePageBreaks ? brandBlue : 'transparent',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 0,
+                outline: 'none',
+                transition: 'background-color 0.15s, border-color 0.15s'
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = brandBlue
+                e.currentTarget.style.boxShadow = `0 0 0 3px ${brandBlue}${theme === 'dark' ? '20' : '15'}`
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = dropdownBorder
+                e.currentTarget.style.boxShadow = 'none'
+              }}
+            >
+              {usePageBreaks && (
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </button>
+            <label style={{
+              fontSize: '13px',
+              color: dropdownTextColor,
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+              cursor: 'pointer',
+              userSelect: 'none'
+            }}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setUsePageBreaks(!usePageBreaks)
+            }}>
+              Use page breaks between files
+            </label>
+          </div>
+        )}
 
         {/* Export Buttons */}
         <div style={{

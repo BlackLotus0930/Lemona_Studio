@@ -466,7 +466,7 @@ Rephrased text:`
     }
   })
 
-  ipcMain.handle('export:exportMultiple', async (_, documentIds: string[], format: 'pdf' | 'docx', filename?: string) => {
+  ipcMain.handle('export:exportMultiple', async (_, documentIds: string[], format: 'pdf' | 'docx', filename?: string, usePageBreaks?: boolean) => {
     try {
       if (!format || !['pdf', 'docx'].includes(format)) {
         throw new Error('Invalid format. Must be pdf or docx')
@@ -474,7 +474,10 @@ Rephrased text:`
       if (!documentIds || documentIds.length === 0) {
         throw new Error('No documents selected')
       }
-      const fileBuffer = await exportService.exportMultipleDocuments(documentIds, format)
+      // Ensure usePageBreaks is explicitly boolean (default to true if undefined)
+      const shouldUsePageBreaks = usePageBreaks !== undefined ? usePageBreaks : true
+      console.log('[IPC] export:exportMultiple - usePageBreaks:', usePageBreaks, 'shouldUsePageBreaks:', shouldUsePageBreaks)
+      const fileBuffer = await exportService.exportMultipleDocuments(documentIds, format, shouldUsePageBreaks)
       return Array.from(fileBuffer) // Convert Buffer to array for IPC
     } catch (error) {
       console.error('IPC export:exportMultiple error:', error)
