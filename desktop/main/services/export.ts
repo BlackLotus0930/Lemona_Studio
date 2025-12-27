@@ -819,8 +819,8 @@ export const exportService = {
             combinedHTML += '<div class="page-break"></div>'
           } else {
             console.log('[Export Service] Adding spacing instead of page break')
-            // Add spacing instead of page break (total 3em spacing)
-            combinedHTML += '<div style="margin-top: 1.5em; margin-bottom: 1.5em;"></div>'
+            // Add spacing instead of page break (total ~2em spacing)
+            combinedHTML += '<div style="margin-top: 1em; margin-bottom: 1em;"></div>'
           }
         }
         
@@ -1539,11 +1539,11 @@ export const exportService = {
             })
           )
         } else {
-          // Add spacing paragraph instead of page break (total 600 twips spacing)
+          // Add spacing paragraph instead of page break (total ~400 twips spacing)
           allElements.push(
             new Paragraph({
               children: [new TextRun('')],
-              spacing: { after: 600 },
+              spacing: { after: 400 },
             })
           )
         }
