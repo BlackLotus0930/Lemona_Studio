@@ -72,7 +72,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const [googleApiKey, setGoogleApiKey] = useState('')
   const [modalPosition, setModalPosition] = useState({ top: 0, left: 0 })
   const modelDropdownRef = useRef<HTMLDivElement>(null)
-  const modelNameRef = useRef<HTMLDivElement>(null)
+  const modelNameRef = useRef<HTMLButtonElement>(null)
   const plusMenuRef = useRef<HTMLDivElement>(null)
   const plusButtonRef = useRef<HTMLButtonElement>(null)
   const styleMenuRef = useRef<HTMLDivElement>(null)
@@ -1783,31 +1783,52 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
             
             {/* Right side - Model name and Send button */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              {/* Model name (text only, no container) */}
+              {/* Model name container */}
               <div style={{ position: 'relative' }}>
-                <div 
+                <button
                   ref={modelNameRef}
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: '400',
-                    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                    color: secondaryTextColor,
-                    cursor: 'pointer',
-                    opacity: isLoading ? 0.5 : 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
                   onClick={() => {
                     setShowModelDropdown(!showModelDropdown)
                     setShowSettingsModal(false)
                     setShowPlusMenu(false)
                   }}
+                  disabled={isLoading}
+                  style={{
+                    padding: '2px',
+                    backgroundColor: showModelDropdown ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0') : 'transparent',
+                    color: showModelDropdown ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: isLoading ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.15s',
+                    opacity: isLoading ? 0.5 : 1,
+                    fontSize: '11px',
+                    fontWeight: '400',
+                    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                    gap: '4px'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isLoading) {
+                      e.currentTarget.style.backgroundColor = showModelDropdown 
+                        ? (theme === 'dark' ? '#454545' : '#d0d0d0')
+                        : (theme === 'dark' ? '#1d1d1d' : '#f5f5f5')
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isLoading) {
+                      e.currentTarget.style.backgroundColor = showModelDropdown 
+                        ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0')
+                        : 'transparent'
+                    }
+                  }}
                   title={selectedModel === 'gemini-2.5-flash' ? 'Gemini 2.5 Flash - Faster responses' : 'Gemini 3 Pro - More capable'}
                 >
                   <span>{selectedModel === 'gemini-2.5-flash' ? 'Flash 2.5' : 'Pro 3'}</span>
                   <KeyboardArrowDownIcon style={{ fontSize: '14px' }} />
-                </div>
+                </button>
                 
                 {/* Model Dropdown Menu */}
                 {showModelDropdown && (
@@ -1818,22 +1839,22 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                       bottom: '100%',
                       right: 0,
                       marginBottom: '4px',
-                    backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
-                    borderRadius: '8px',
-                    padding: '6px',
-                    minWidth: '200px',
-                    boxShadow: theme === 'dark'
-                      ? '0 -4px 16px rgba(0, 0, 0, 0.5), 0 -2px 4px rgba(0, 0, 0, 0.3)'
-                      : '0 -4px 16px rgba(0, 0, 0, 0.2), 0 -2px 4px rgba(0, 0, 0, 0.1)',
-                    zIndex: 10001,
-                    border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px',
-                    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                >
+                      backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+                      borderRadius: '8px',
+                      padding: '6px',
+                      minWidth: '180px',
+                      boxShadow: theme === 'dark'
+                        ? '0 -4px 16px rgba(0, 0, 0, 0.5), 0 -2px 4px rgba(0, 0, 0, 0.3)'
+                        : '0 -4px 16px rgba(0, 0, 0, 0.2), 0 -2px 4px rgba(0, 0, 0, 0.1)',
+                      zIndex: 10001,
+                      border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '2px',
+                      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
                   {/* Model Options */}
                   <button
                     onClick={() => {
