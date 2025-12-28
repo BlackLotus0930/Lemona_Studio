@@ -2,6 +2,7 @@ import { Editor } from '@tiptap/react'
 import { useState, useEffect, useRef } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import ExportModal from '../Layout/ExportModal'
+import KeyboardShortcutsModal from '../Layout/KeyboardShortcutsModal'
 import { Document } from '@shared/types'
 // @ts-ignore
 import ShareIcon from '@mui/icons-material/Share'
@@ -14,11 +15,11 @@ import DarkModeIcon from '@mui/icons-material/DarkMode'
 // @ts-ignore
 import LightModeIcon from '@mui/icons-material/LightMode'
 // @ts-ignore
+import KeyboardIcon from '@mui/icons-material/Keyboard'
+// @ts-ignore
 import UndoIcon from '@mui/icons-material/Undo'
 // @ts-ignore
 import RedoIcon from '@mui/icons-material/Redo'
-// @ts-ignore
-import LocalPrintshopIcon from '@mui/icons-material/LocalPrintshop'
 // @ts-ignore
 import FormatBoldIcon from '@mui/icons-material/FormatBold'
 // @ts-ignore
@@ -326,6 +327,8 @@ export default function Toolbar({
   const [, forceUpdate] = useState({})
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [showExportModal, setShowExportModal] = useState(false)
+  const [showKeyboardShortcutsModal, setShowKeyboardShortcutsModal] = useState(false)
+  const keyboardShortcutsButtonRef = useRef<HTMLButtonElement>(null)
   const [showMathMenu, setShowMathMenu] = useState(false)
   const [showLinkDialog, setShowLinkDialog] = useState(false)
   const [mathFormula, setMathFormula] = useState('E=mc^2')
@@ -1114,20 +1117,6 @@ export default function Toolbar({
         <RedoIcon style={{ fontSize: '20px' }} />
       </button>
 
-      {/* Print */}
-      <button
-        onMouseDown={(e) => {
-          e.preventDefault()
-          window.print()
-        }}
-        style={buttonStyle}
-        title="Print"
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        <LocalPrintshopIcon style={{ fontSize: '20px' }} />
-      </button>
-
       {/* Theme Toggle */}
       <button 
         style={buttonStyle}
@@ -1141,6 +1130,26 @@ export default function Toolbar({
         ) : (
           <LightModeIcon style={{ fontSize: '18px' }} />
         )}
+      </button>
+
+      {/* Keyboard Shortcuts */}
+      <button
+        ref={keyboardShortcutsButtonRef}
+        style={showKeyboardShortcutsModal ? activeButtonStyle : buttonStyle}
+        title="Keyboard shortcuts"
+        onClick={() => setShowKeyboardShortcutsModal(!showKeyboardShortcutsModal)}
+        onMouseEnter={(e) => {
+          if (!showKeyboardShortcutsModal) {
+            e.currentTarget.style.backgroundColor = toolbarHoverBg
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!showKeyboardShortcutsModal) {
+            e.currentTarget.style.backgroundColor = 'transparent'
+          }
+        }}
+      >
+        <KeyboardIcon style={{ fontSize: '18px' }} />
       </button>
 
       <div style={{ ...dividerStyle, marginLeft: '7px' }} />
@@ -2261,7 +2270,6 @@ export default function Toolbar({
         </>
       )}
 
-
       {/* Link URL Input Dialog */}
       {showLinkDialog && (
         <div
@@ -2360,6 +2368,13 @@ export default function Toolbar({
           </div>
         </div>
       )}
+
+      {/* Keyboard Shortcuts Modal */}
+      <KeyboardShortcutsModal
+        isOpen={showKeyboardShortcutsModal}
+        onClose={() => setShowKeyboardShortcutsModal(false)}
+        triggerRef={keyboardShortcutsButtonRef}
+      />
     </div>
   )
 }

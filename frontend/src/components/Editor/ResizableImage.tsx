@@ -60,7 +60,7 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
               setIsLoading(false)
             }
           })
-          .catch((error) => {
+          .catch(() => {
             // If loading fails, set empty to show broken image
             setImageSrc('')
             setIsLoading(false)

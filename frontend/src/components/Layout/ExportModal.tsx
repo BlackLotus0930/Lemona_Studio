@@ -7,7 +7,7 @@ import CheckBoxIcon from '@mui/icons-material/CheckBox'
 import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank'
 
 interface ExportModalProps {
-  onExport: (format: 'pdf' | 'docx', filename?: string, documentIds?: string[]) => void
+  onExport: (format: 'pdf' | 'docx', filename?: string, documentIds?: string[], usePageBreaks?: boolean) => void
   documents: Document[]
   projectName: string
   documentTitle?: string
