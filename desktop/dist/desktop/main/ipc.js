@@ -583,17 +583,10 @@ Rephrased text:`;
     // DOCX parsing and splitting
     ipcMain.handle('docx:parse', async (_, filePath) => {
         try {
-            console.log('[DOCX Parse] Starting parse for file:', filePath);
             const result = await parseDocx(filePath);
-            console.log('[DOCX Parse] Parse completed:', {
-                hasChapters: result.hasChapters,
-                chaptersCount: result.chapters.length,
-                chapters: result.chapters.map(c => ({ title: c.title, level: c.level }))
-            });
             return result;
         }
         catch (error) {
-            console.error('[DOCX Parse] Error parsing DOCX:', error);
             throw error;
         }
     });
