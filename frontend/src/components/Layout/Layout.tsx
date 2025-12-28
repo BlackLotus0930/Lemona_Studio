@@ -2428,6 +2428,14 @@ export default function Layout() {
                   searchQueryProp={searchQuery}
                   onDocumentsUpdated={loadDocuments}
                   onDocumentChange={setDocument}
+                  onDocumentFolderChange={(documentId, folder) => {
+                    // Optimistically update document folder without full refresh
+                    setDocuments((prevDocs) => 
+                      prevDocs.map(doc => 
+                        doc.id === documentId ? { ...doc, folder, updatedAt: new Date().toISOString() } : doc
+                      )
+                    )
+                  }}
                   onSelectedFolderChange={setSelectedFolder}
                   onFileUploaded={async (newDoc, isBatchUpload = false) => {
                     // Optimistically add the new document to the list without full reload

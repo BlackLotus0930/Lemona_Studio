@@ -28,6 +28,7 @@ interface FileExplorerProps {
   searchQueryProp?: string // External search query to sync with local state
   onDocumentsUpdated?: () => void // Callback when documents are updated (e.g., after replace all)
   onDocumentChange?: (doc: Document | null) => void // Callback to update current document in editor
+  onDocumentFolderChange?: (documentId: string, folder: 'library' | 'project') => void // Callback for optimistic folder updates
 }
 
 interface FileItem {
@@ -54,6 +55,7 @@ function FileExplorer({
   searchQueryProp,
   onDocumentsUpdated,
   onDocumentChange,
+  onDocumentFolderChange,
 }: FileExplorerProps) {
   const { theme } = useTheme()
   
@@ -64,7 +66,6 @@ function FileExplorer({
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number; item: FileItem } | null>(null)
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null)
   const [dragOverItemId, setDragOverItemId] = useState<string | null>(null)
-  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null) // Track which folder is being dragged over
   const [dragOverFileItemId, setDragOverFileItemId] = useState<string | null>(null) // Track which file item is being dragged over for external files
   const [dragOverEndZone, setDragOverEndZone] = useState<boolean>(false) // Track if dragging over the end drop zone of project folder
   const [dropPosition, setDropPosition] = useState<'above' | 'below' | null>(null) // Track drop position relative to item
@@ -682,7 +683,6 @@ function FileExplorer({
   const handleFolderDrop = async (e: React.DragEvent, folderId: 'library' | 'project') => {
     e.preventDefault()
     e.stopPropagation()
-    setDragOverFolderId(null)
     setDragOverFileItemId(null)
 
     const files = Array.from(e.dataTransfer.files)
@@ -711,13 +711,12 @@ function FileExplorer({
   }
 
   // Handle drag over folder
-  const handleFolderDragOver = (e: React.DragEvent, folderId: string) => {
+  const handleFolderDragOver = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     
     // Check if dragging files (not internal items)
     if (e.dataTransfer.types.includes('Files')) {
-      setDragOverFolderId(folderId)
       e.dataTransfer.dropEffect = 'copy'
     }
   }
@@ -726,7 +725,6 @@ function FileExplorer({
   const handleFolderDragLeave = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    setDragOverFolderId(null)
   }
 
   // Helper function to get folder ID for a file item
@@ -796,8 +794,16 @@ function FileExplorer({
           }}
           onDragOver={(e) => {
             if (isFolder) {
-              // Handle external file drag over folder
-              handleFolderDragOver(e, item.id)
+              // Handle drag over folder (both external files and internal files)
+              if (e.dataTransfer.types.includes('Files')) {
+                // External file drag over folder
+                handleFolderDragOver(e)
+              } else if (draggedItemId) {
+                // Internal file drag over folder - allow drop
+                e.preventDefault()
+                e.stopPropagation()
+                e.dataTransfer.dropEffect = 'move'
+              }
             } else {
               // Check if dragging external files
               if (e.dataTransfer.types.includes('Files')) {
@@ -831,7 +837,11 @@ function FileExplorer({
           }}
           onDragLeave={(e) => {
             if (isFolder) {
-              handleFolderDragLeave(e)
+              // Only clear drag over state if we're not moving to a child element
+              const relatedTarget = e.relatedTarget as Node | null
+              if (!e.currentTarget.contains(relatedTarget)) {
+                handleFolderDragLeave(e)
+              }
             } else {
               // Only clear drag over state if we're not moving to a child element
               const relatedTarget = e.relatedTarget as Node | null
@@ -848,9 +858,39 @@ function FileExplorer({
             e.preventDefault()
             e.stopPropagation()
             if (isFolder) {
-              // Handle external file drop on folder
+              // Handle drop on folder
               const folderId = item.id === 'library' ? 'library' : 'project'
-              handleFolderDrop(e, folderId)
+              
+              // Check if dropping external files
+              if (e.dataTransfer.types.includes('Files')) {
+                // Handle external file drop on folder
+                handleFolderDrop(e, folderId)
+              } else if (draggedItemId) {
+                // Handle internal file drop on folder - move file to this folder
+                const draggedItem = fileTree.flatMap(f => f.children || []).find(f => f.id === draggedItemId)
+                if (draggedItem && draggedItem.document) {
+                  const currentFolder = draggedItem.document.folder || 'project'
+                  const documentId = draggedItem.document.id
+                  // Only move if folder is different
+                  if (currentFolder !== folderId) {
+                    // Optimistically update UI first
+                    if (onDocumentFolderChange) {
+                      onDocumentFolderChange(documentId, folderId)
+                    }
+                    
+                    // Then update backend
+                    documentApi.updateFolder(documentId, folderId)
+                      .catch((error) => {
+                        console.error('Failed to move document to folder:', error)
+                        alert('Failed to move file to folder')
+                        // Revert optimistic update on error
+                        if (onDocumentFolderChange) {
+                          onDocumentFolderChange(documentId, currentFolder)
+                        }
+                      })
+                  }
+                }
+              }
             } else if (!isFolder) {
               // Check if dropping external files
               if (e.dataTransfer.types.includes('Files')) {
@@ -860,30 +900,52 @@ function FileExplorer({
                   handleFolderDrop(e, folderId)
                 }
                 setDragOverFileItemId(null)
-              } else if (draggedItemId && draggedItemId !== item.id && onReorderDocuments) {
-                // Handle internal item reorder
+              } else if (draggedItemId && draggedItemId !== item.id) {
+                // Handle internal item drop on file
                 const draggedItem = fileTree.flatMap(f => f.children || []).find(f => f.id === draggedItemId)
                 const dropItem = fileTree.flatMap(f => f.children || []).find(f => f.id === item.id)
                 
-                if (draggedItem && dropItem) {
-                  // Get all files from the same folder as drop target
-                  const folder = fileTree.find(f => f.children?.some(c => c.id === item.id))
-                  if (folder && folder.children) {
-                    const folderFiles = [...folder.children]
-                    const draggedIndex = folderFiles.findIndex(f => f.id === draggedItemId)
-                    const dropIndex = folderFiles.findIndex(f => f.id === item.id)
+                if (draggedItem && dropItem && draggedItem.document && dropItem.document) {
+                  const draggedFolder = draggedItem.document.folder || 'project'
+                  const dropFolder = dropItem.document.folder || 'project'
+                  const draggedDocumentId = draggedItem.document.id
+                  
+                  // Check if moving between folders
+                  if (draggedFolder !== dropFolder) {
+                    // Move to target folder
+                    if (onDocumentFolderChange) {
+                      onDocumentFolderChange(draggedDocumentId, dropFolder)
+                    }
                     
-                    if (draggedIndex !== -1 && dropIndex !== -1) {
-                      const newOrder = [...folderFiles]
-                      const [draggedItem] = newOrder.splice(draggedIndex, 1)
-                      newOrder.splice(dropIndex, 0, draggedItem)
-                      
-                      const documentIds = newOrder.map(f => f.id).filter(id => {
-                        const fileItem = folderFiles.find(f => f.id === id)
-                        return fileItem?.document
+                    documentApi.updateFolder(draggedDocumentId, dropFolder)
+                      .catch((error) => {
+                        console.error('Failed to move document to folder:', error)
+                        alert('Failed to move file to folder')
+                        // Revert optimistic update on error
+                        if (onDocumentFolderChange) {
+                          onDocumentFolderChange(draggedDocumentId, draggedFolder)
+                        }
                       })
+                  } else if (onReorderDocuments) {
+                    // Same folder - handle reorder
+                    const folder = fileTree.find(f => f.children?.some(c => c.id === item.id))
+                    if (folder && folder.children) {
+                      const folderFiles = [...folder.children]
+                      const draggedIndex = folderFiles.findIndex(f => f.id === draggedItemId)
+                      const dropIndex = folderFiles.findIndex(f => f.id === item.id)
                       
-                      onReorderDocuments(documentIds)
+                      if (draggedIndex !== -1 && dropIndex !== -1) {
+                        const newOrder = [...folderFiles]
+                        const [draggedItem] = newOrder.splice(draggedIndex, 1)
+                        newOrder.splice(dropIndex, 0, draggedItem)
+                        
+                        const documentIds = newOrder.map(f => f.id).filter(id => {
+                          const fileItem = folderFiles.find(f => f.id === id)
+                          return fileItem?.document
+                        })
+                        
+                        onReorderDocuments(documentIds)
+                      }
                     }
                   }
                 }
@@ -903,7 +965,6 @@ function FileExplorer({
             paddingBottom: '4px',
             cursor: 'pointer',
             backgroundColor: isSelected ? selectedBg : 
-              (isFolder && dragOverFolderId === item.id) ? hoverBg :
               (!isFolder && dragOverFileItemId === item.id) ? hoverBg :
               dragOverItemId === item.id ? hoverBg : 'transparent',
             color: itemTextColor,
@@ -1030,7 +1091,63 @@ function FileExplorer({
         
         {/* Render children if folder is expanded */}
         {isFolder && isExpanded && item.children && (
-          <div>
+          <div
+            onDragOver={(e) => {
+              // Allow dropping files anywhere in the folder area
+              if (draggedItemId) {
+                e.preventDefault()
+                e.stopPropagation()
+                e.dataTransfer.dropEffect = 'move'
+              } else if (e.dataTransfer.types.includes('Files')) {
+                // External files
+                e.preventDefault()
+                e.stopPropagation()
+                e.dataTransfer.dropEffect = 'copy'
+              }
+            }}
+            onDragLeave={() => {
+              // Allow drag leave to propagate naturally
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              const folderId = item.id === 'library' ? 'library' : 'project'
+              
+              // Check if dropping external files
+              if (e.dataTransfer.types.includes('Files')) {
+                // Handle external file drop in folder area
+                handleFolderDrop(e, folderId)
+              } else if (draggedItemId) {
+                // Handle internal file drop in folder area - move file to this folder
+                const draggedItem = fileTree.flatMap(f => f.children || []).find(f => f.id === draggedItemId)
+                if (draggedItem && draggedItem.document) {
+                  const currentFolder = draggedItem.document.folder || 'project'
+                  const documentId = draggedItem.document.id
+                  // Only move if folder is different
+                  if (currentFolder !== folderId) {
+                    // Optimistically update UI first
+                    if (onDocumentFolderChange) {
+                      onDocumentFolderChange(documentId, folderId)
+                    }
+                    
+                    // Then update backend
+                    documentApi.updateFolder(documentId, folderId)
+                      .catch((error) => {
+                        console.error('Failed to move document to folder:', error)
+                        alert('Failed to move file to folder')
+                        // Revert optimistic update on error
+                        if (onDocumentFolderChange) {
+                          onDocumentFolderChange(documentId, currentFolder)
+                        }
+                      })
+                  }
+                }
+              }
+            }}
+            style={{
+              backgroundColor: 'transparent',
+            }}
+          >
             {item.children.map(child => renderFileItem(child, indentLevel + 1))}
             
             {/* End drop zone for project folder only - allows dropping at the end */}

@@ -71,6 +71,15 @@ export function setupIPC() {
             throw error;
         }
     });
+    ipcMain.handle('document:updateFolder', async (_, id, folder) => {
+        try {
+            return await documentService.updateFolder(id, folder);
+        }
+        catch (error) {
+            console.error('IPC document:updateFolder error:', error);
+            throw error;
+        }
+    });
     ipcMain.handle('document:delete', async (_, id) => {
         try {
             return await documentService.delete(id);

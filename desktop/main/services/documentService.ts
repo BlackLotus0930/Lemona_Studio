@@ -164,6 +164,21 @@ export const documentService = {
     return document
   },
 
+  async updateFolder(id: string, folder: 'library' | 'project'): Promise<Document | null> {
+    const document = await this.getById(id)
+    if (!document) {
+      return null
+    }
+
+    document.folder = folder
+    document.updatedAt = new Date().toISOString()
+
+    const filePath = getDocumentPath(id)
+    await fs.writeFile(filePath, JSON.stringify(document, null, 2))
+    
+    return document
+  },
+
   async delete(id: string): Promise<boolean> {
     try {
       // First, get the document to find associated file

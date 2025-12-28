@@ -29,6 +29,7 @@ export const documentApi = {
   create: (title: string, folder?: 'library' | 'project') => invokeOrFetch('document:create', title, folder),
   update: (id: string, content: string) => invokeOrFetch('document:update', id, content),
   updateTitle: (id: string, title: string) => invokeOrFetch('document:updateTitle', id, title),
+  updateFolder: (id: string, folder: 'library' | 'project') => invokeOrFetch('document:updateFolder', id, folder),
   delete: (id: string) => invokeOrFetch('document:delete', id),
   list: () => invokeOrFetch('document:getAll'),
   uploadFile: (filePath: string, fileName: string, folder: 'library' | 'project') => 

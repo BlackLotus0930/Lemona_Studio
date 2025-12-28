@@ -131,6 +131,17 @@ export const documentService = {
         await fs.writeFile(filePath, JSON.stringify(document, null, 2));
         return document;
     },
+    async updateFolder(id, folder) {
+        const document = await this.getById(id);
+        if (!document) {
+            return null;
+        }
+        document.folder = folder;
+        document.updatedAt = new Date().toISOString();
+        const filePath = getDocumentPath(id);
+        await fs.writeFile(filePath, JSON.stringify(document, null, 2));
+        return document;
+    },
     async delete(id) {
         try {
             // First, get the document to find associated file
