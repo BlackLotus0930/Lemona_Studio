@@ -125,7 +125,7 @@ function FileExplorer({
           <mark
             key={index}
             style={{
-              backgroundColor: theme === 'dark' ? '#4a5568' : '#fef08a',
+              backgroundColor: theme === 'dark' ? '#4a5568' : '#fde047',
               color: 'inherit',
               padding: '0 2px',
               borderRadius: '2px'

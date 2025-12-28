@@ -862,7 +862,7 @@ export default function Layout() {
     try {
       const { state, dispatch } = editor.view
       const { tr, doc } = state
-      const searchHighlightColors = ['#FFEB3B', '#FDD835', '#fef08a', '#4a5568', '#e3f2fd', '#5a6b7d']
+      const searchHighlightColors = ['#FFEB3B', '#FDD835', '#fef08a', '#4a5568', '#e3f2fd', '#5a6b7d', '#90caf9']
       const highlightMarkType = state.schema.marks.highlight
       
       if (!highlightMarkType) return
@@ -927,7 +927,7 @@ export default function Layout() {
       
       // Apply highlight marks to all matches
       // Use a distinct color for search highlights (slightly bluish yellow for light mode, bluish gray for dark mode)
-      const highlightColor = theme === 'dark' ? '#5a6b7d' : '#e3f2fd'
+      const highlightColor = theme === 'dark' ? '#5a6b7d' : '#90caf9'
       
       matches.forEach(({ from, to }) => {
         tr.addMark(from, to, state.schema.marks.highlight.create({ color: highlightColor }))

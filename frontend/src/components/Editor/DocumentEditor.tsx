@@ -394,8 +394,9 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
             if (mark.type.name === 'highlight') {
               const color = mark.attrs?.color
               // Use specific colors to identify inline search highlights (distinct from global search)
-              // All matches: #6b7280, Current match: #6366f1
-              if (color === '#fde047' || color === '#6b7280' || color === '#6366f1') {
+              // Dark mode: All matches: #6b7280, Current match: #6366f1
+              // Light mode: All matches: #93c5fd, Current match: #818cf8
+              if (color === '#fde047' || color === '#6b7280' || color === '#6366f1' || color === '#93c5fd' || color === '#818cf8') {
                 const from = pos
                 const to = pos + node.nodeSize
                 tr.removeMark(from, to, mark.type)
@@ -572,10 +573,10 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       
       const { state, dispatch } = editor.view
       const { tr } = state
-      // Use dark gray for all matches
-      const allMatchesColor = '#6b7280'
+      // Use theme-aware colors for matches
+      const allMatchesColor = theme === 'dark' ? '#6b7280' : '#93c5fd'
       // Use purple/indigo for current match
-      const currentMatchColor = '#6366f1'
+      const currentMatchColor = theme === 'dark' ? '#6366f1' : '#818cf8'
       
       matchesToHighlight.forEach(({ from, to }, index) => {
         // Use different color for current match

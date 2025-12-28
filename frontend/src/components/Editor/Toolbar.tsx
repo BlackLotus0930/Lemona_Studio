@@ -1060,7 +1060,7 @@ export default function Toolbar({
         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
-        <HomeIcon style={{ fontSize: '20px' }} />
+        <HomeIcon style={{ fontSize: '19px' }} />
       </button>
 
       {/* Search */}
@@ -1078,7 +1078,7 @@ export default function Toolbar({
           }
         }}
       >
-        <SearchIcon style={{ fontSize: '19px', transform: 'translateY(1px)' }} />
+        <SearchIcon style={{ fontSize: '18px', transform: 'translateY(1px)' }} />
       </button>
 
       {/* Undo/Redo */}
