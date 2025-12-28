@@ -2259,8 +2259,12 @@ export default function Layout() {
       {/* Separator line between topbar and toolbar */}
       <div style={{
         width: '100%',
-        height: '1px',
-        backgroundColor: borderColor
+        height: 0,
+        borderTop: `1px solid ${borderColor}`,
+        margin: 0,
+        padding: 0,
+        flexShrink: 0,
+        boxSizing: 'border-box'
       }} />
       
       {/* Toolbar - Independent, full width - Always visible */}
@@ -2319,8 +2323,12 @@ export default function Layout() {
       {/* Separator line between toolbar and editor */}
       <div style={{
         width: '100%',
-        height: '1px',
-        backgroundColor: borderColor
+        height: 0,
+        borderTop: `1px solid ${borderColor}`,
+        margin: 0,
+        padding: 0,
+        flexShrink: 0,
+        boxSizing: 'border-box'
       }} />
       
       {/* Content Area - Horizontal split with FileExplorer sidebar */}
