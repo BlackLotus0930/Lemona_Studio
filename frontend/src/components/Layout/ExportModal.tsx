@@ -172,7 +172,8 @@ export default function ExportModal({
     onExport(format, downloadFilename, selectedIds, usePageBreaks)
   }
 
-  const dropdownBorder = '#212121'
+  const dropdownBg = theme === 'dark' ? '#181818' : '#ffffff'
+  const dropdownBorder = theme === 'dark' ? '#212121' : '#dadce0'
   const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const dropdownHoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'
   const brandBlue = theme === 'dark' ? '#6ba8c7' : '#5a9ec7'
@@ -190,7 +191,7 @@ export default function ExportModal({
         position: 'fixed',
         top: rect ? `${rect.bottom + 4}px` : '100%',
         right: rect ? `${window.innerWidth - rect.right}px` : '24px',
-        backgroundColor: '#181818',
+        backgroundColor: dropdownBg,
         border: `1px solid ${dropdownBorder}`,
         borderRadius: '12px',
         boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
@@ -260,7 +261,7 @@ export default function ExportModal({
               borderRadius: '6px',
               fontSize: '14px',
               color: dropdownTextColor,
-              backgroundColor: '#181818',
+              backgroundColor: dropdownBg,
               outline: 'none',
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
               transition: 'border-color 0.15s, box-shadow 0.15s'
@@ -303,7 +304,7 @@ export default function ExportModal({
               borderRadius: '6px',
               fontSize: '14px',
               color: dropdownTextColor,
-              backgroundColor: '#181818',
+              backgroundColor: dropdownBg,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -353,7 +354,7 @@ export default function ExportModal({
                   top: buttonRect ? `${buttonRect.bottom + 4}px` : '100%',
                   left: buttonRect ? `${buttonRect.left}px` : 0,
                   width: buttonRect ? `${buttonRect.width}px` : '100%',
-                  backgroundColor: '#181818',
+                  backgroundColor: dropdownBg,
                   border: `1px solid ${dropdownBorder}`,
                   borderRadius: '6px',
                   boxShadow: theme === 'dark' ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.15)',

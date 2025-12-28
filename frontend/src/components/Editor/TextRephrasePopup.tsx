@@ -312,8 +312,8 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
               height: '20px',
               padding: 0,
               backgroundColor: isLoading || !customPrompt.trim() 
-                ? '#2a2a2a' 
-                : '#AEAEAE',
+                ? (theme === 'dark' ? '#2a2a2a' : '#e0e0e0')
+                : (theme === 'dark' ? '#AEAEAE' : '#9e9e9e'),
               border: 'none',
               borderRadius: '50%',
               cursor: isLoading || !customPrompt.trim() ? 'not-allowed' : 'pointer',
@@ -325,23 +325,25 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
             }}
             onMouseEnter={(e) => {
               if (!isLoading && customPrompt.trim()) {
-                e.currentTarget.style.backgroundColor = '#C0C0C0'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#C0C0C0' : '#808080'
               } else if (!isLoading) {
-                e.currentTarget.style.backgroundColor = '#353535'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#353535' : '#d0d0d0'
               }
             }}
             onMouseLeave={(e) => {
               if (!isLoading && customPrompt.trim()) {
-                e.currentTarget.style.backgroundColor = '#AEAEAE'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#AEAEAE' : '#9e9e9e'
               } else if (!isLoading) {
-                e.currentTarget.style.backgroundColor = '#2a2a2a'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#e0e0e0'
               }
             }}
             title="Send"
           >
             <ArrowUpwardIcon style={{ 
               fontSize: '12px',
-              color: isLoading || !customPrompt.trim() ? '#1D1D1D' : inputBg
+              color: isLoading || !customPrompt.trim() 
+                ? (theme === 'dark' ? '#1D1D1D' : '#9e9e9e')
+                : (theme === 'dark' ? inputBg : '#ffffff')
             }} />
           </button>
         </div>

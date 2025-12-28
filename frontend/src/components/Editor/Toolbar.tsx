@@ -1126,9 +1126,9 @@ export default function Toolbar({
         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
         {theme === 'light' ? (
-          <DarkModeIcon style={{ fontSize: '18px' }} />
+          <DarkModeIcon style={{ fontSize: '17px', transform: 'translateY(0.5px)' }} />
         ) : (
-          <LightModeIcon style={{ fontSize: '18px' }} />
+          <LightModeIcon style={{ fontSize: '17px', transform: 'translateY(0.5px)' }} />
         )}
       </button>
 
@@ -1149,7 +1149,7 @@ export default function Toolbar({
           }
         }}
       >
-        <KeyboardIcon style={{ fontSize: '18px' }} />
+        <KeyboardIcon style={{ fontSize: '19px' }} />
       </button>
 
       <div style={{ ...dividerStyle, marginLeft: '7px' }} />
@@ -2256,7 +2256,7 @@ export default function Toolbar({
             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
           >
-            <ShareIcon style={{ fontSize: '20px', color: theme === 'dark' ? '#B5B5B5' : '#4d4d4d' }} />
+            <ShareIcon style={{ fontSize: '20px', color: theme === 'dark' ? '#B5B5B5' : '#5a5a5a' }} />
           </button>
           <ExportModal
             isOpen={showExportModal}

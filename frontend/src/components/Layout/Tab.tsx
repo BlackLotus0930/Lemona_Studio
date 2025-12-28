@@ -36,7 +36,7 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
     : (theme === 'dark' ? '#858585' : '#5f6368')
   // Hover color same as selection color
   const tabHoverBg = theme === 'dark' ? '#1e1e1e' : '#ffffff'
-  const separatorColor = '#1E1E1E' // Fixed color for separator lines
+  const separatorColor = theme === 'dark' ? '#1E1E1E' : '#e0e0e0' // Theme-aware separator color
   const showCloseButton = canClose && (isActive || isHovered)
 
   const handleDragStart = (e: React.DragEvent) => {

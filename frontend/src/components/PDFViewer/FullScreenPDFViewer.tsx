@@ -844,7 +844,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                     display: 'block',
                     boxShadow: theme === 'dark' 
                       ? '0 4px 12px rgba(0, 0, 0, 0.5)' 
-                      : '0 4px 12px rgba(0, 0, 0, 0.1)',
+                      : '0 4px 16px rgba(0, 0, 0, 0.25)',
                     backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fff',
                     filter: theme === 'dark' ? 'brightness(0.85)' : 'none',
                   }}
@@ -872,7 +872,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                   display: 'block',
                   boxShadow: theme === 'dark' 
                     ? '0 4px 12px rgba(0, 0, 0, 0.5)' 
-                    : '0 4px 12px rgba(0, 0, 0, 0.1)',
+                    : '0 4px 16px rgba(0, 0, 0, 0.25)',
                   backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fff',
                   filter: theme === 'dark' ? 'brightness(0.85)' : 'none',
                 }}
@@ -907,10 +907,11 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                 bottom: '16px',
                 left: navBarLeft,
                 transform: 'translateX(-50%)',
-                backgroundColor: theme === 'dark' ? 'rgba(30, 30, 30, 0.30)' : 'rgba(255, 255, 255, 0.30)',
+                backgroundColor: theme === 'dark' ? 'rgba(30, 30, 30, 0.30)' : 'rgba(255, 255, 255, 0.90)',
                 borderRadius: '12px',
                 padding: '4px 8px',
-                boxShadow: 'none',
+                boxShadow: theme === 'dark' ? 'none' : '0 2px 8px rgba(0, 0, 0, 0.15)',
+                border: theme === 'dark' ? 'none' : '1px solid rgba(0, 0, 0, 0.1)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',

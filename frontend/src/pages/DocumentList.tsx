@@ -489,7 +489,7 @@ export default function DocumentList() {
             <h1 style={{ 
               fontSize: '32px', 
               fontWeight: 700, 
-              color: '#FFFFFF',
+              color: textColor,
               margin: 0,
               marginBottom: '4px',
               fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
@@ -776,7 +776,7 @@ export default function DocumentList() {
               <h2 style={{ 
                 fontSize: '28px', 
                 fontWeight: 600, 
-                color: '#ffffff',
+                color: textColor,
                 marginBottom: '28px',
                 fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                 textAlign: 'center',
@@ -1116,11 +1116,11 @@ export default function DocumentList() {
 
                   {/* Title and Date Section */}
                 <div style={{
-                    padding: '16px',
+                    padding: '12px 16px',
                     flex: 1,
                   display: 'flex',
                     flexDirection: 'column',
-                    gap: '6px',
+                    gap: '4px',
                     position: 'relative',
                     background: theme === 'dark' ? '#0a0a0a' : '#ffffff',
                     borderBottomLeftRadius: '12px',
@@ -1350,7 +1350,7 @@ export default function DocumentList() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px',
-                      marginTop: '3px',
+                      marginTop: '2px',
                       cursor: 'pointer',
                       fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                 }}>
