@@ -143,7 +143,17 @@ function calculateWordCountFromDocument(doc: Document): Omit<WordCountStats, 'pa
 }
 
 // Calculate workspace word count (all workspace documents)
-function calculateWorkspaceWordCount(documents: Document[]): WordCountStats {
+function calculateWorkspaceWordCount(documents: Document[] | undefined): WordCountStats {
+  // Ensure documents is an array
+  if (!documents || !Array.isArray(documents)) {
+    return {
+      pages: 0,
+      words: 0,
+      characters: 0,
+      charactersNoSpaces: 0,
+    }
+  }
+
   // Filter workspace documents (exclude library and README.md)
   const workspaceDocs = documents.filter(
     doc => (!doc.folder || doc.folder === 'project') && 
@@ -315,8 +325,10 @@ export default function WordCountModal({
 
         {/* Content */}
         <div style={{
-          padding: '20px',
+          paddingTop: '20px',
+          paddingRight: '20px',
           paddingBottom: '12px',
+          paddingLeft: '20px',
           display: 'flex',
           flexDirection: 'column',
           gap: '20px',

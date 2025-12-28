@@ -52,6 +52,38 @@ function saveActiveChatId(document: Document | null, chatId: string): void {
   }
 }
 
+// Helper functions to persist open chat tabs per project/document
+function getOpenChatTabsKey(document: Document | null): string | null {
+  if (!document) return null
+  // Use projectId if available, otherwise fall back to documentId
+  return document.projectId ? `openChatTabs_${document.projectId}` : `openChatTabs_doc_${document.id}`
+}
+
+function loadOpenChatTabs(document: Document | null): string[] {
+  const key = getOpenChatTabsKey(document)
+  if (!key) return []
+  try {
+    const saved = localStorage.getItem(key)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      return Array.isArray(parsed) ? parsed : []
+    }
+  } catch (error) {
+    console.error('Failed to load open chat tabs:', error)
+  }
+  return []
+}
+
+function saveOpenChatTabs(document: Document | null, chatIds: string[]): void {
+  const key = getOpenChatTabsKey(document)
+  if (!key) return
+  try {
+    localStorage.setItem(key, JSON.stringify(chatIds))
+  } catch (error) {
+    console.error('Failed to save open chat tabs:', error)
+  }
+}
+
 export default function AIPanel({ document, onClose }: AIPanelProps) {
   const { theme } = useTheme()
   const [chats, setChats] = useState<Chat[]>([
@@ -130,6 +162,9 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         // Load saved active chat ID from localStorage for this project/document
         const savedActiveChatId = loadActiveChatId(document)
         
+        // Load saved open chat tabs
+        const savedOpenTabs = loadOpenChatTabs(document)
+        
         // Prefer saved active chat ID, then ref, then current state
         const currentChatId = savedActiveChatId || (previousActiveChatIdRef && previousActiveChatIdRef.current) || activeChatId
         
@@ -147,9 +182,10 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
           setActiveChatId(chatIdToUse)
           previousActiveChatIdRef.current = chatIdToUse
           saveActiveChatId(document, chatIdToUse)
+          saveOpenChatTabs(document, [chatIdToUse])
         } else {
           // Load existing chats
-          const loadedChats: Chat[] = chatEntries.map(([chatId, messages], index) => {
+          const allLoadedChats: Chat[] = chatEntries.map(([chatId, messages], index) => {
             const messageArray = Array.isArray(messages) ? messages : []
             // Find first user message to generate name
             const firstUserMessage = messageArray.find((msg: any) => msg.role === 'user')
@@ -163,6 +199,29 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               messages: messageArray
             }
           })
+          
+          // Filter to only include chats that are in the saved open tabs list
+          // If no saved tabs exist (first time), include all chats
+          let openChatIds: string[]
+          if (savedOpenTabs.length === 0) {
+            // First time loading - include all chats
+            openChatIds = allLoadedChats.map(chat => chat.id)
+            // Ensure active chat is included
+            if (currentChatId && !openChatIds.includes(currentChatId)) {
+              openChatIds.push(currentChatId)
+            }
+            saveOpenChatTabs(document, openChatIds)
+          } else {
+            // Use saved open tabs, but ensure active chat is included
+            openChatIds = [...savedOpenTabs]
+            if (currentChatId && !openChatIds.includes(currentChatId)) {
+              openChatIds.push(currentChatId)
+              saveOpenChatTabs(document, openChatIds)
+            }
+          }
+          
+          // Filter loaded chats to only include open tabs
+          const loadedChats = allLoadedChats.filter(chat => openChatIds.includes(chat.id))
           
           // Always maintain the current activeChatId when switching files/tabs
           // Don't auto-switch to first chat - keep whatever chat is currently active
@@ -182,13 +241,29 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
             }
           }
           
-          setChats(loadedChats)
-          
-          // Restore the saved active chat ID (or first chat if saved one doesn't exist)
-          setActiveChatId(chatIdToUse)
-          // Keep ref in sync
-          previousActiveChatIdRef.current = chatIdToUse
-          saveActiveChatId(document, chatIdToUse)
+          // Ensure we have at least one chat open
+          if (loadedChats.length === 0) {
+            // If no open chats, create a default one
+            const defaultChat: Chat = {
+              id: chatIdToUse || 'chat_default',
+              name: 'Chat 1',
+              messages: []
+            }
+            setChats([defaultChat])
+            const finalChatId = chatIdToUse || 'chat_default'
+            setActiveChatId(finalChatId)
+            previousActiveChatIdRef.current = finalChatId
+            saveActiveChatId(document, finalChatId)
+            saveOpenChatTabs(document, [finalChatId])
+          } else {
+            setChats(loadedChats)
+            
+            // Restore the saved active chat ID (or first chat if saved one doesn't exist)
+            setActiveChatId(chatIdToUse)
+            // Keep ref in sync
+            previousActiveChatIdRef.current = chatIdToUse
+            saveActiveChatId(document, chatIdToUse)
+          }
         }
       } catch (error) {
         console.error('Failed to load chat history:', error)
@@ -198,6 +273,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         setActiveChatId(defaultChatId)
         previousActiveChatIdRef.current = defaultChatId
         saveActiveChatId(document, defaultChatId)
+        saveOpenChatTabs(document, [defaultChatId])
       }
     }
 
@@ -294,9 +370,14 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
       name: `Chat ${chats.length + 1}`,
       messages: []
     }
-    setChats([...chats, newChat])
+    const newChats = [...chats, newChat]
+    setChats(newChats)
     setActiveChatId(newChatId)
     previousActiveChatIdRef.current = newChatId // Update ref when creating new chat
+    
+    // Update persisted open tabs list
+    const newOpenTabs = newChats.map(c => c.id)
+    saveOpenChatTabs(document, newOpenTabs)
   }
 
   const handleCloseChat = (chatId: string, e?: React.MouseEvent) => {
@@ -312,6 +393,12 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
       // Remove the chat from tabs (but keep it in backend history)
       const newChats = chats.filter(c => c.id !== chatId)
       setChats(newChats)
+      
+      // Update persisted open tabs list
+      if (document) {
+        const newOpenTabs = newChats.map(c => c.id)
+        saveOpenChatTabs(document, newOpenTabs)
+      }
       
       // If the closed chat was active, switch to another one
       if (activeChatId === chatId) {
@@ -336,6 +423,9 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     if (!activeChat) return
     
     setChats([activeChat])
+    
+    // Update persisted open tabs list
+    saveOpenChatTabs(document, [activeChatId])
     
     // Delete other chats from backend
     chats.forEach(chat => {
@@ -369,6 +459,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     previousActiveChatIdRef.current = defaultChatId
     if (document) {
       saveActiveChatId(document, defaultChatId) // Persist when clearing all chats
+      saveOpenChatTabs(document, [defaultChatId]) // Persist open tabs
     }
     setShowMenu(false)
   }
@@ -881,7 +972,12 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                   messages: messageArray
                 }
                 
-                setChats([...chats, loadedChat])
+                const newChats = [...chats, loadedChat]
+                setChats(newChats)
+                
+                // Update persisted open tabs list
+                const newOpenTabs = newChats.map(c => c.id)
+                saveOpenChatTabs(document, newOpenTabs)
               } catch (error) {
                 console.error('Failed to load chat:', error)
               }
