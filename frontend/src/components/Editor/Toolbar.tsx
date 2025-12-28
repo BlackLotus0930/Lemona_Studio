@@ -961,12 +961,12 @@ export default function Toolbar({
   }, [showLinkDialog])
 
   const styles = [
-    { label: 'Title', value: 'title' },
-    { label: 'Subtitle', value: 'subtitle' },
-    { label: 'Normal text', value: 'normal' },
-    { label: 'Heading 1', value: 'h1' },
-    { label: 'Heading 2', value: 'h2' },
-    { label: 'Heading 3', value: 'h3' },
+    { label: 'Title', value: 'title', fontSize: '24px', fontWeight: 600 },
+    { label: 'Subtitle', value: 'subtitle', fontSize: '18px', fontWeight: 500 },
+    { label: 'Normal text', value: 'normal', fontSize: '14px', fontWeight: 400 },
+    { label: 'Heading 1', value: 'h1', fontSize: '20px', fontWeight: 600 },
+    { label: 'Heading 2', value: 'h2', fontSize: '18px', fontWeight: 600 },
+    { label: 'Heading 3', value: 'h3', fontSize: '16px', fontWeight: 600 },
   ]
 
   const fonts = ['Noto Sans SC', 'Inter', 'Open Sans', 'Roboto', 'Montserrat', 'Poppins']
@@ -1176,8 +1176,9 @@ export default function Toolbar({
               borderRadius: '12px',
               boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
               zIndex: 10010,
-              minWidth: '170px',
-              maxWidth: '170px'
+              minWidth: '200px',
+              maxWidth: '200px',
+              padding: '4px 0'
             }}>
             {styles.map((style) => {
               const isActive = isStyleActive(style.value)
@@ -1204,7 +1205,6 @@ export default function Toolbar({
                   style={{
                     padding: '8px 16px',
                     cursor: 'pointer',
-                    fontSize: '13px',
                     color: dropdownTextColor,
                     backgroundColor: isActive ? dropdownActiveBg : 'transparent',
                     display: 'flex',
@@ -1230,11 +1230,17 @@ export default function Toolbar({
                       fontSize: '16px',
                       fontWeight: 'bold',
                       width: '16px',
-                      display: 'inline-block'
+                      display: 'inline-block',
+                      flexShrink: 0
                     }}>✓</span>
                   )}
-                  {!isActive && <span style={{ width: '16px', display: 'inline-block' }}></span>}
-                  <span>{style.label}</span>
+                  {!isActive && <span style={{ width: '16px', display: 'inline-block', flexShrink: 0 }}></span>}
+                  <span style={{
+                    fontSize: style.fontSize,
+                    fontWeight: style.fontWeight,
+                    fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
+                    lineHeight: '1.3'
+                  }}>{style.label}</span>
                 </div>
               )
             })}

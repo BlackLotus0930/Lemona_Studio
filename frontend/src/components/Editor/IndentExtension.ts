@@ -35,7 +35,7 @@ export const IndentExtension = Extension.create({
 
   addOptions() {
     return {
-      types: ['paragraph', 'heading', 'listItem'],
+      types: ['paragraph', 'heading', 'listItem', 'title', 'subtitle'],
       indentSize: INDENT_SIZE,
       maxIndent: INDENT_LEVELS,
     }
@@ -100,10 +100,10 @@ export const IndentExtension = Extension.create({
         // Clamp indent level
         const indentLevel = Math.max(0, Math.min(level, this.options.maxIndent))
 
-        // Get all selected paragraphs/headings/list items
+        // Get all selected paragraphs/headings/list items/titles/subtitles
         const nodes: Array<{ pos: number; node: any }> = []
         state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
-          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem') {
+          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem' || node.type.name === 'title' || node.type.name === 'subtitle') {
             nodes.push({ pos, node })
           }
         })
@@ -114,17 +114,17 @@ export const IndentExtension = Extension.create({
           let paragraphPos = $pos.pos
           let paragraphNode = $pos.parent
 
-          // Find the paragraph/heading/listItem node
+          // Find the paragraph/heading/listItem/title/subtitle node
           for (let d = $pos.depth; d > 0; d--) {
             const node = $pos.node(d)
-            if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem') {
+            if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem' || node.type.name === 'title' || node.type.name === 'subtitle') {
               paragraphNode = node
               paragraphPos = $pos.start(d)
               break
             }
           }
 
-          if (paragraphNode && (paragraphNode.type.name === 'paragraph' || paragraphNode.type.name.startsWith('heading') || paragraphNode.type.name === 'listItem')) {
+          if (paragraphNode && (paragraphNode.type.name === 'paragraph' || paragraphNode.type.name.startsWith('heading') || paragraphNode.type.name === 'listItem' || paragraphNode.type.name === 'title' || paragraphNode.type.name === 'subtitle')) {
             nodes.push({ pos: paragraphPos, node: paragraphNode })
           }
         }
@@ -150,10 +150,10 @@ export const IndentExtension = Extension.create({
         const { selection } = state
         const { $from, $to } = selection
 
-        // Get all selected paragraphs/headings
+        // Get all selected paragraphs/headings/titles/subtitles
         const nodes: Array<{ pos: number; node: any; currentIndent: number }> = []
         state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
-          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading')) {
+          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'title' || node.type.name === 'subtitle') {
             const currentIndent = node.attrs.indent || 0
             nodes.push({ pos, node, currentIndent })
           }
@@ -165,17 +165,17 @@ export const IndentExtension = Extension.create({
           let paragraphPos = $pos.pos
           let paragraphNode = $pos.parent
 
-          // Find the paragraph/heading/listItem node
+          // Find the paragraph/heading/listItem/title/subtitle node
           for (let d = $pos.depth; d > 0; d--) {
             const node = $pos.node(d)
-            if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem') {
+            if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem' || node.type.name === 'title' || node.type.name === 'subtitle') {
               paragraphNode = node
               paragraphPos = $pos.start(d)
               break
             }
           }
 
-          if (paragraphNode && (paragraphNode.type.name === 'paragraph' || paragraphNode.type.name.startsWith('heading') || paragraphNode.type.name === 'listItem')) {
+          if (paragraphNode && (paragraphNode.type.name === 'paragraph' || paragraphNode.type.name.startsWith('heading') || paragraphNode.type.name === 'listItem' || paragraphNode.type.name === 'title' || paragraphNode.type.name === 'subtitle')) {
             const currentIndent = paragraphNode.attrs.indent || 0
             nodes.push({ pos: paragraphPos, node: paragraphNode, currentIndent })
           }
@@ -203,10 +203,10 @@ export const IndentExtension = Extension.create({
         const { selection } = state
         const { $from, $to } = selection
 
-        // Get all selected paragraphs/headings/list items
+        // Get all selected paragraphs/headings/list items/titles/subtitles
         const nodes: Array<{ pos: number; node: any; currentIndent: number }> = []
         state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
-          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem') {
+          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem' || node.type.name === 'title' || node.type.name === 'subtitle') {
             const currentIndent = node.attrs.indent || 0
             nodes.push({ pos, node, currentIndent })
           }
@@ -218,17 +218,17 @@ export const IndentExtension = Extension.create({
           let paragraphPos = $pos.pos
           let paragraphNode = $pos.parent
 
-          // Find the paragraph/heading/listItem node
+          // Find the paragraph/heading/listItem/title/subtitle node
           for (let d = $pos.depth; d > 0; d--) {
             const node = $pos.node(d)
-            if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem') {
+            if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem' || node.type.name === 'title' || node.type.name === 'subtitle') {
               paragraphNode = node
               paragraphPos = $pos.start(d)
               break
             }
           }
 
-          if (paragraphNode && (paragraphNode.type.name === 'paragraph' || paragraphNode.type.name.startsWith('heading') || paragraphNode.type.name === 'listItem')) {
+          if (paragraphNode && (paragraphNode.type.name === 'paragraph' || paragraphNode.type.name.startsWith('heading') || paragraphNode.type.name === 'listItem' || paragraphNode.type.name === 'title' || paragraphNode.type.name === 'subtitle')) {
             const currentIndent = paragraphNode.attrs.indent || 0
             nodes.push({ pos: paragraphPos, node: paragraphNode, currentIndent })
           }
@@ -256,21 +256,21 @@ export const IndentExtension = Extension.create({
         const { selection } = state
         const { $from } = selection
 
-        // Find the paragraph/heading block node (prefer paragraph over listItem)
+        // Find the paragraph/heading/title/subtitle block node (prefer paragraph over listItem)
         let blockNode = null
         let blockPos = null
         
-        // First, try to find a paragraph or heading directly
+        // First, try to find a paragraph, heading, title, or subtitle directly
         for (let d = $from.depth; d > 0; d--) {
           const node = $from.node(d)
-          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading')) {
+          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'title' || node.type.name === 'subtitle') {
             blockNode = node
             blockPos = $from.before(d)
             break
           }
         }
 
-        // If no paragraph/heading found, check if we're in a list item
+        // If no paragraph/heading/title/subtitle found, check if we're in a list item
         if (!blockNode) {
           for (let d = $from.depth; d > 0; d--) {
             const node = $from.node(d)
@@ -283,7 +283,7 @@ export const IndentExtension = Extension.create({
                 const resolvedPos = state.doc.resolve(listItemPos + 1)
                 for (let childD = resolvedPos.depth; childD > 0 && childD <= resolvedPos.depth + 2; childD++) {
                   const childNode = resolvedPos.node(childD)
-                  if (childNode.type.name === 'paragraph' || childNode.type.name.startsWith('heading')) {
+                  if (childNode.type.name === 'paragraph' || childNode.type.name.startsWith('heading') || childNode.type.name === 'title' || childNode.type.name === 'subtitle') {
                     blockNode = childNode
                     blockPos = resolvedPos.before(childD)
                     break
@@ -324,21 +324,21 @@ export const IndentExtension = Extension.create({
         const { selection } = state
         const { $from } = selection
 
-        // Find the paragraph/heading block node (prefer paragraph over listItem)
+        // Find the paragraph/heading/title/subtitle block node (prefer paragraph over listItem)
         let blockNode = null
         let blockPos = null
         
-        // First, try to find a paragraph or heading directly
+        // First, try to find a paragraph, heading, title, or subtitle directly
         for (let d = $from.depth; d > 0; d--) {
           const node = $from.node(d)
-          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading')) {
+          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'title' || node.type.name === 'subtitle') {
             blockNode = node
             blockPos = $from.before(d)
             break
           }
         }
 
-        // If no paragraph/heading found, check if we're in a list item
+        // If no paragraph/heading/title/subtitle found, check if we're in a list item
         if (!blockNode) {
           for (let d = $from.depth; d > 0; d--) {
             const node = $from.node(d)
@@ -351,7 +351,7 @@ export const IndentExtension = Extension.create({
                 const resolvedPos = state.doc.resolve(listItemPos + 1)
                 for (let childD = resolvedPos.depth; childD > 0 && childD <= resolvedPos.depth + 2; childD++) {
                   const childNode = resolvedPos.node(childD)
-                  if (childNode.type.name === 'paragraph' || childNode.type.name.startsWith('heading')) {
+                  if (childNode.type.name === 'paragraph' || childNode.type.name.startsWith('heading') || childNode.type.name === 'title' || childNode.type.name === 'subtitle') {
                     blockNode = childNode
                     blockPos = resolvedPos.before(childD)
                     break
@@ -414,9 +414,9 @@ export const IndentExtension = Extension.create({
           }
         }
 
-        // Check if we're in a paragraph, heading, or list item
+        // Check if we're in a paragraph, heading, title, subtitle, or list item
         const node = $from.parent
-        if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem') {
+        if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem' || node.type.name === 'title' || node.type.name === 'subtitle') {
           if (hasSelection) {
             // With selection: indent whole paragraph(s)
             return this.editor.commands.increaseIndent()
@@ -449,9 +449,9 @@ export const IndentExtension = Extension.create({
           }
         }
 
-        // Check if we're in a paragraph, heading, or list item
+        // Check if we're in a paragraph, heading, title, subtitle, or list item
         const node = $from.parent
-        if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem') {
+        if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem' || node.type.name === 'title' || node.type.name === 'subtitle') {
           if (hasSelection) {
             // With selection: outdent whole paragraph(s)
             return this.editor.commands.decreaseIndent()

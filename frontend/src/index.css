@@ -262,15 +262,15 @@ code {
 
 /* Heading font sizes */
 .ProseMirror h1 {
-  font-size: 24px;
-}
-
-.ProseMirror h2 {
   font-size: 20px;
 }
 
-.ProseMirror h3 {
+.ProseMirror h2 {
   font-size: 18px;
+}
+
+.ProseMirror h3 {
+  font-size: 16px;
 }
 
 .ProseMirror h4 {
@@ -291,6 +291,28 @@ code {
 .ProseMirror h4:first-child,
 .ProseMirror h5:first-child,
 .ProseMirror h6:first-child {
+  margin-top: 0;
+}
+
+/* Title and Subtitle styling */
+.ProseMirror p[data-type="title"] {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 0;
+  margin-bottom: 1.5em;
+}
+
+.ProseMirror p[data-type="subtitle"] {
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.3;
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+
+.ProseMirror p[data-type="title"]:first-child,
+.ProseMirror p[data-type="subtitle"]:first-child {
   margin-top: 0;
 }
 
@@ -524,7 +546,7 @@ code {
   position: relative;
   margin: 8px 0;
   max-width: 100%;
-  vertical-align: middle;
+  vertical-align: bottom;
 }
 
 .ProseMirror .resizable-image-wrapper.selected {
@@ -535,6 +557,9 @@ code {
   display: block;
   max-width: 100%;
   height: auto;
+  margin: 0;
+  padding: 0;
+  vertical-align: bottom;
 }
 
 /* Ensure cursor can be placed after images */

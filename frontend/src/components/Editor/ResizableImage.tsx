@@ -229,6 +229,23 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
     }
   }
 
+  const handleImageDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    if (typeof getPos !== 'function') return
+    
+    const imagePos = getPos()
+    
+    // Handle undefined case (Tiptap 3.x breaking change)
+    if (imagePos === undefined || imagePos < 0) return
+    
+    // Always select the image on double-click
+    const tr = editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, imagePos))
+    editor.view.dispatch(tr)
+    editor.commands.focus()
+  }
+
   return (
     <NodeViewWrapper
       ref={containerRef}
@@ -266,8 +283,12 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
             display: 'block',
             cursor: selected ? 'move' : 'pointer',
             userSelect: 'none',
+            margin: 0,
+            padding: 0,
+            verticalAlign: 'bottom',
           }}
           onClick={handleImageClick}
+          onDoubleClick={handleImageDoubleClick}
           draggable={false}
         />
       ) : (

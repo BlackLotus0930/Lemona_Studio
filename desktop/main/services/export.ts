@@ -183,7 +183,9 @@ function tipTapToHTML(content: any): string {
       const level = node.attrs?.level || 1
       const align = node.attrs?.textAlign || 'left'
       const content = node.content ? node.content.map(renderNode).join('') : ''
-      return `<h${level} style="text-align: ${align}; margin-top: 1em; margin-bottom: 0.5em; line-height: 1.3; font-weight: 600;">${content}</h${level}>`
+      // Font sizes: h1=20px, h2=18px, h3=16px
+      const fontSize = level === 1 ? '20px' : level === 2 ? '18px' : level === 3 ? '16px' : '14px'
+      return `<h${level} style="text-align: ${align}; margin-top: 1em; margin-bottom: 0.5em; line-height: 1.3; font-weight: 600; font-size: ${fontSize};">${content}</h${level}>`
     }
 
     if (node.type === 'title') {

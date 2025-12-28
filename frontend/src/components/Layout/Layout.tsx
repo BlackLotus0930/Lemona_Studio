@@ -1529,7 +1529,7 @@ export default function Layout() {
         },
       }),
       TextAlign.configure({
-        types: ['heading', 'paragraph'],
+        types: ['heading', 'paragraph', 'title', 'subtitle'],
       }),
       Placeholder.configure({
         placeholder: () => {
