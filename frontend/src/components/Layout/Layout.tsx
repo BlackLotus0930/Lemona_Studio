@@ -41,6 +41,7 @@ import AddIcon from '@mui/icons-material/Add'
 import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder'
 import TopBar from './TopBar'
 import { useNavigate, useParams } from 'react-router-dom'
+import WordCountModal from './WordCountModal'
 
 const AI_PANEL_STORAGE_KEY = 'aiPanelState'
 const FILE_EXPLORER_SIZE_STORAGE_KEY = 'fileExplorerSize'
@@ -177,6 +178,7 @@ export default function Layout() {
       return ''
     }
   }) // Track search query for highlighting
+  const [showWordCountModal, setShowWordCountModal] = useState(false) // Track word count modal visibility
   const lastContentRef = useRef<string>('') // Track last set content to avoid unnecessary updates
   const currentDocIdRef = useRef<string | null>(null) // Track current document ID
   const currentDocTitleRef = useRef<string | null>(null) // Track current document title for placeholder
@@ -518,6 +520,22 @@ export default function Layout() {
           const currentSize = fileExplorerPanelRef.current.getSize()
           const newSize = currentSize > 0 ? 0 : 14
           fileExplorerPanelRef.current.resize(newSize)
+        }
+        return
+      }
+      
+      // Check if Ctrl+Shift+C (or Cmd+Shift+C on Mac) - show word count modal
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+        // Don't show if typing in an input field or textarea
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+          return
+        }
+        // Only show word count for text documents (not PDFs)
+        const isPDF = document && document.title.toLowerCase().endsWith('.pdf')
+        if (!isPDF && editor) {
+          e.preventDefault()
+          e.stopPropagation()
+          setShowWordCountModal(true)
         }
         return
       }
@@ -1577,8 +1595,175 @@ export default function Layout() {
         return text
       },
       transformPastedHTML(html) {
-        // Preserve HTML structure when pasting
-        return html
+        // Process pasted HTML to normalize fonts and colors
+        if (!html) return html
+
+        // Available fonts in the editor
+        const availableFonts = ['Noto Sans SC', 'Inter', 'Open Sans', 'Roboto', 'Montserrat', 'Poppins']
+        
+        // Default text colors for each theme
+        const defaultTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
+        
+        // Parse the HTML
+        const parser = new DOMParser()
+        const doc = parser.parseFromString(html, 'text/html')
+        
+        // Helper function to check if a color is dark (for dark theme) or light (for light theme)
+        const isDarkColor = (color: string): boolean => {
+          if (!color) return false
+          
+          // Remove # if present
+          let hex = color.replace('#', '').trim()
+          
+          // Handle rgb/rgba
+          if (color.startsWith('rgb')) {
+            const match = color.match(/\d+/g)
+            if (match && match.length >= 3) {
+              const r = parseInt(match[0])
+              const g = parseInt(match[1])
+              const b = parseInt(match[2])
+              // Calculate luminance
+              const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+              return luminance < 0.5
+            }
+            return false
+          }
+          
+          // Handle hex colors
+          if (hex.length === 3) {
+            hex = hex.split('').map(c => c + c).join('')
+          }
+          
+          if (hex.length !== 6) return false
+          
+          const r = parseInt(hex.substr(0, 2), 16)
+          const g = parseInt(hex.substr(2, 2), 16)
+          const b = parseInt(hex.substr(4, 2), 16)
+          
+          // Calculate relative luminance
+          const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+          return luminance < 0.5
+        }
+        
+        // Helper function to normalize font family
+        const normalizeFontFamily = (fontFamily: string | null): string | null => {
+          if (!fontFamily) return null
+          
+          // Remove quotes and get first font
+          const font = fontFamily.replace(/['"]/g, '').split(',')[0].trim()
+          
+          // Check if it's one of our available fonts
+          const matchedFont = availableFonts.find(af => 
+            font.toLowerCase() === af.toLowerCase()
+          )
+          
+          // If not available, return null to use default
+          return matchedFont || null
+        }
+        
+        // Process all elements in the document
+        const processElement = (element: Element) => {
+          // Process style attribute
+          if (element.hasAttribute('style')) {
+            const style = element.getAttribute('style') || ''
+            const styleObj: Record<string, string> = {}
+            
+            // Parse style string
+            style.split(';').forEach(declaration => {
+              const [property, value] = declaration.split(':').map(s => s.trim())
+              if (property && value) {
+                styleObj[property] = value
+              }
+            })
+            
+            // Remove or normalize font-family
+            if (styleObj['font-family']) {
+              const normalizedFont = normalizeFontFamily(styleObj['font-family'])
+              if (normalizedFont) {
+                styleObj['font-family'] = normalizedFont
+              } else {
+                delete styleObj['font-family']
+              }
+            }
+            
+            // Handle color
+            if (styleObj.color) {
+              // In dark theme, if color is dark (like black), convert to light
+              // In light theme, if color is light (like white), convert to dark
+              if (theme === 'dark' && isDarkColor(styleObj.color)) {
+                styleObj.color = defaultTextColor
+              } else if (theme === 'light' && !isDarkColor(styleObj.color)) {
+                // Check if it's a very light color (like white)
+                const isVeryLight = styleObj.color.toLowerCase().includes('fff') || 
+                                   styleObj.color.toLowerCase() === 'white'
+                if (isVeryLight) {
+                  styleObj.color = defaultTextColor
+                }
+              }
+            }
+            
+            // Rebuild style string
+            const newStyle = Object.entries(styleObj)
+              .map(([prop, val]) => `${prop}: ${val}`)
+              .join('; ')
+            
+            if (newStyle) {
+              element.setAttribute('style', newStyle)
+            } else {
+              element.removeAttribute('style')
+            }
+          }
+          
+          // Process font-family attribute if present
+          if (element.hasAttribute('font-family')) {
+            const fontFamily = element.getAttribute('font-family')
+            const normalizedFont = normalizeFontFamily(fontFamily)
+            if (normalizedFont) {
+              element.setAttribute('font-family', normalizedFont)
+            } else {
+              element.removeAttribute('font-family')
+            }
+          }
+          
+          // Process color attribute if present
+          if (element.hasAttribute('color')) {
+            const color = element.getAttribute('color')
+            if (color && theme === 'dark' && isDarkColor(color)) {
+              element.setAttribute('color', defaultTextColor)
+            } else if (color && theme === 'light') {
+              const isVeryLight = color.toLowerCase().includes('fff') || 
+                                 color.toLowerCase() === 'white'
+              if (isVeryLight) {
+                element.setAttribute('color', defaultTextColor)
+              }
+            }
+          }
+          
+          // Handle old <font> tags with face attribute
+          if (element.tagName.toLowerCase() === 'font' && element.hasAttribute('face')) {
+            const fontFamily = element.getAttribute('face')
+            const normalizedFont = normalizeFontFamily(fontFamily)
+            if (normalizedFont) {
+              element.setAttribute('face', normalizedFont)
+            } else {
+              element.removeAttribute('face')
+            }
+          }
+          
+          // Recursively process children
+          Array.from(element.children).forEach(child => processElement(child))
+        }
+        
+        // Process body content (or the root element if it's a fragment)
+        const body = doc.body || doc.documentElement
+        
+        // Process the body element and all its descendants recursively
+        if (body) {
+          processElement(body)
+        }
+        
+        // Return the processed HTML
+        return body.innerHTML || html
       },
       // Fix cursor jumping to beginning of nested list items when clicking
       // This is a known issue with ProseMirror's hit testing on complex nested DOM structures
@@ -2646,6 +2831,15 @@ export default function Layout() {
           </button>
         )}
       </PanelGroup>
+      
+      {/* Word Count Modal */}
+      <WordCountModal
+        editor={editor}
+        documents={documents}
+        currentDocument={document}
+        isOpen={showWordCountModal}
+        onClose={() => setShowWordCountModal(false)}
+      />
     </div>
   )
 }
