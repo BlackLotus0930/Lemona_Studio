@@ -1,5 +1,6 @@
 import Image from '@tiptap/extension-image'
 import { NodeViewWrapper, ReactNodeViewRenderer, ReactNodeViewProps } from '@tiptap/react'
+import { NodeSelection } from 'prosemirror-state'
 import React, { useEffect, useRef, useState } from 'react'
 
 const ResizableImageComponent = ({ node, updateAttributes, selected, editor, getPos }: ReactNodeViewProps) => {
@@ -146,7 +147,6 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
       editor.commands.focus()
     } else {
       // Select the image node when clicked on left side
-      const { NodeSelection } = editor.view.state.selection.constructor as any
       const tr = editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, imagePos))
       editor.view.dispatch(tr)
     }

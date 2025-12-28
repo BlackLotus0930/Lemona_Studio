@@ -31,6 +31,7 @@ import { Title } from '../Editor/Title'
 import { Subtitle } from '../Editor/Subtitle'
 import { useTheme } from '../../contexts/ThemeContext'
 import { BulletList, OrderedList, ListItem } from '@tiptap/extension-list'
+import { IndentExtension } from '../Editor/IndentExtension'
 import { TextSelection } from 'prosemirror-state'
 // @ts-ignore
 import ChatIcon from '@mui/icons-material/Chat'
@@ -291,7 +292,17 @@ export default function Layout() {
 
   const loadDocument = async (docId: string) => {
     try {
-      const doc = await documentApi.get(docId)
+      // Retry logic for newly created documents
+      let doc = await documentApi.get(docId)
+      let retries = 3
+      
+      while (!doc && retries > 0) {
+        console.log(`Document ${docId} not found, retrying... (${retries} attempts left)`)
+        await new Promise(resolve => setTimeout(resolve, 200))
+        doc = await documentApi.get(docId)
+        retries--
+      }
+      
       if (!doc || !doc.id) {
         console.error('Document not found or invalid:', docId)
         setDocument(null)
@@ -1450,7 +1461,11 @@ export default function Layout() {
             // Tab to indent
             Tab: () => {
               if (this.editor.isActive('listItem')) {
-                return this.editor.commands.sinkListItem('listItem')
+                // Try to sink the list item (works for nested lists)
+                const result = this.editor.commands.sinkListItem('listItem')
+                // If sinkListItem fails (e.g., first item in list), return false
+                // so IndentExtension can handle it with paragraph indent
+                return result
               }
               return false
             },
@@ -1552,6 +1567,7 @@ export default function Layout() {
       PDFViewerExtension,
       TableExtension,
       ChartExtension,
+      IndentExtension,
     ],
     content: '', // Initialize with empty content, set it asynchronously after mount
     editorProps: {
@@ -2452,7 +2468,31 @@ export default function Layout() {
                     // Only navigate to the newly uploaded file if it's a single file upload
                     // This prevents flashing when uploading multiple PDFs
                     if (!isBatchUpload) {
-                      navigate(`/document/${newDoc.id}`)
+                      // Wait a bit to ensure document is fully saved before navigating
+                      // Retry getting the document to ensure it exists
+                      let retries = 3
+                      let docExists = false
+                      
+                      while (retries > 0 && !docExists) {
+                        try {
+                          await new Promise(resolve => setTimeout(resolve, 100))
+                          const verifyDoc = await documentApi.get(newDoc.id)
+                          if (verifyDoc && verifyDoc.id) {
+                            docExists = true
+                          }
+                        } catch (error) {
+                          console.warn('Document not ready yet, retrying...', error)
+                        }
+                        retries--
+                      }
+                      
+                      if (docExists) {
+                        navigate(`/document/${newDoc.id}`)
+                      } else {
+                        console.warn('Document not found after upload, navigating anyway:', newDoc.id)
+                        // Navigate anyway - loadDocument will handle the error
+                        navigate(`/document/${newDoc.id}`)
+                      }
                     }
                   }}
                 />

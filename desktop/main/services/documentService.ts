@@ -4,6 +4,7 @@ import { app } from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
 import { extractPDFTextAsync } from './pdfTextExtractor.js'
+import { parseDocx, convertHtmlToTipTap } from './docxParser.js'
 
 // Use Electron's userData directory for documents
 const DOCUMENTS_DIR = path.join(app.getPath('userData'), 'documents')
@@ -277,8 +278,45 @@ export const documentService = {
           }
         ]
       }
-    } else if (fileExt === 'docx' || fileExt === 'xlsx') {
-      // Office files - show file info and download option
+    } else if (fileExt === 'docx') {
+      // DOCX file - parse and convert to TipTap format
+      try {
+        const parseResult = await parseDocx(sourceFilePath)
+        // Convert HTML to TipTap JSON format
+        content = convertHtmlToTipTap(parseResult.fullContent)
+      } catch (error) {
+        // Fallback to file info if parsing fails
+        content = {
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: `📄 ${finalFileName}`,
+                  marks: [{ type: 'bold' }]
+                }
+              ]
+            },
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: `File type: DOCX\nUploaded to: ${folder === 'library' ? 'Library' : 'Workspace'}\n\nFailed to parse DOCX content. This file can be downloaded from the file explorer.`
+                }
+              ]
+            },
+            {
+              type: 'paragraph',
+              content: []
+            }
+          ]
+        }
+      }
+    } else if (fileExt === 'xlsx') {
+      // Excel files - show file info and download option
       content = {
         type: 'doc',
         content: [

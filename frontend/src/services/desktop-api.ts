@@ -37,6 +37,12 @@ export const documentApi = {
   getPDFFileContent: (documentId: string) => invokeOrFetch('pdf:getFileContent', documentId),
 }
 
+export const docxApi = {
+  parse: (filePath: string) => invokeOrFetch('docx:parse', filePath),
+  splitAndImport: (filePath: string, fileName: string, chapters: any[], split: boolean) =>
+    invokeOrFetch('docx:splitAndImport', filePath, fileName, chapters, split),
+}
+
 export const aiApi = {
   chat: (message: string, documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') => {
     const apiKey = getApiKey()

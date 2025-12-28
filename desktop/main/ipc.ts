@@ -6,6 +6,7 @@ import { geminiService } from './services/geminiService.js'
 import { projectService } from './services/projectService.js'
 import { exportService } from './services/export.js'
 import { extractPDFTextAsync } from './services/pdfTextExtractor.js'
+import { parseDocx, splitDocxIntoChapters } from './services/docxParser.js'
 import path from 'path'
 import { app } from 'electron'
 
@@ -572,6 +573,55 @@ Rephrased text:`
       return pdfText
     } catch (error) {
       console.error('IPC pdf:extractText error:', error)
+      throw error
+    }
+  })
+
+  // DOCX parsing and splitting
+  ipcMain.handle('docx:parse', async (_, filePath: string) => {
+    try {
+      const result = await parseDocx(filePath)
+      return result
+    } catch (error) {
+      throw error
+    }
+  })
+
+  ipcMain.handle('docx:splitAndImport', async (_, filePath: string, fileName: string, chapters: any[], split: boolean) => {
+    try {
+      if (split && chapters.length > 0) {
+        // Split into multiple files
+        const baseFileName = fileName.replace(/\.docx$/i, '')
+        const chapterDocs = await splitDocxIntoChapters(filePath, chapters, baseFileName)
+        
+        // Create documents for each chapter in workspace
+        const createdDocuments = []
+        for (const chapterDoc of chapterDocs) {
+          const doc = await documentService.create(chapterDoc.title, 'project')
+          await documentService.update(doc.id, chapterDoc.content)
+          createdDocuments.push(doc)
+        }
+        
+        // Save original file to library
+        const originalDoc = await documentService.uploadFile(filePath, fileName, 'library')
+        
+        return {
+          success: true,
+          split: true,
+          documents: createdDocuments,
+          originalDocument: originalDoc,
+        }
+      } else {
+        // Import as single file to workspace
+        const doc = await documentService.uploadFile(filePath, fileName, 'project')
+        return {
+          success: true,
+          split: false,
+          documents: [doc],
+          originalDocument: null,
+        }
+      }
+    } catch (error) {
       throw error
     }
   })

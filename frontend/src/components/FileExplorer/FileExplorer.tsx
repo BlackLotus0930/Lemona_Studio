@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { Document } from '@shared/types'
 import { useTheme } from '../../contexts/ThemeContext'
-import { documentApi } from '../../services/api'
+import { documentApi, docxApi } from '../../services/api'
+import DocxSplitModal from '../Layout/DocxSplitModal'
 import { memo } from 'react'
 // @ts-ignore
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
@@ -77,6 +78,15 @@ function FileExplorer({
   const [uploadQueueTrigger, setUploadQueueTrigger] = useState(0) // Trigger to re-run useEffect when queue changes
   const processingRef = useRef(false)
   const MAX_CONCURRENT_UPLOADS = 3 // Process max 3 files at a time
+  
+  // DOCX split modal state
+  const [docxSplitModal, setDocxSplitModal] = useState<{
+    isOpen: boolean
+    fileName: string
+    filePath: string
+    folderId: 'library' | 'project'
+    chapters: Array<{ title: string; content: string; startIndex: number; endIndex: number; level: number }>
+  } | null>(null)
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
@@ -615,9 +625,9 @@ function FileExplorer({
             // In Electron, when dragging from file system, file.path should be available
             const filePath = (file as any).path
 
-            let document: Document | null = null
+            let finalFilePath = filePath
 
-            if (!filePath) {
+            if (!finalFilePath) {
               // If no path, try to read file and save temporarily
               // This handles files dragged from browser or other sources
               const arrayBuffer = await file.arrayBuffer()
@@ -627,25 +637,62 @@ function FileExplorer({
               if ((window as any).electron) {
                 const tempPath = await (window as any).electron.invoke('file:saveTemp', Array.from(uint8Array), file.name)
                 if (tempPath) {
-                  document = await documentApi.uploadFile(tempPath, file.name, folderId)
+                  finalFilePath = tempPath
                 } else {
                   throw new Error('Failed to save temporary file')
                 }
               } else {
                 throw new Error('File path not available and Electron API not accessible')
               }
+            }
+
+            // Check if it's a DOCX file - if so, parse and show split modal
+            const fileExt = file.name.toLowerCase().split('.').pop()
+            if (fileExt === 'docx') {
+              try {
+                // Parse DOCX to detect chapters
+                const parseResult = await docxApi.parse(finalFilePath)
+                
+                // Show split modal if chapters detected
+                if (parseResult.hasChapters && parseResult.chapters.length > 0) {
+                  // Pause processing and show modal
+                  // The modal will handle the actual import via docxApi.splitAndImport
+                  setDocxSplitModal({
+                    isOpen: true,
+                    fileName: file.name,
+                    filePath: finalFilePath,
+                    folderId,
+                    chapters: parseResult.chapters,
+                  })
+                  // Return success but don't call onFileUploaded here - modal will handle it
+                  return { success: true, pending: true }
+                } else {
+                  // No chapters detected, import as single file
+                  const document = await documentApi.uploadFile(finalFilePath, file.name, folderId)
+                  if (document && onFileUploaded) {
+                    const isBatchUpload = totalFiles > 1
+                    onFileUploaded(document, isBatchUpload)
+                  }
+                  return { success: true, document }
+                }
+              } catch (parseError) {
+                // Fallback to regular upload if parsing fails
+                const document = await documentApi.uploadFile(finalFilePath, file.name, folderId)
+                if (document && onFileUploaded) {
+                  const isBatchUpload = totalFiles > 1
+                  onFileUploaded(document, isBatchUpload)
+                }
+                return { success: true, document }
+              }
             } else {
-              // File has a path (dragged from file system)
-              document = await documentApi.uploadFile(filePath, file.name, folderId)
+              // Non-DOCX file, upload normally
+              const document = await documentApi.uploadFile(finalFilePath, file.name, folderId)
+              if (document && onFileUploaded) {
+                const isBatchUpload = totalFiles > 1
+                onFileUploaded(document, isBatchUpload)
+              }
+              return { success: true, document }
             }
-
-            if (document && onFileUploaded) {
-              // Check if this is part of a batch upload (more than 1 file)
-              const isBatchUpload = totalFiles > 1
-              onFileUploaded(document, isBatchUpload)
-            }
-
-            return { success: true, document }
           } catch (error) {
             console.error('Failed to upload file:', error)
             return {
@@ -694,7 +741,6 @@ function FileExplorer({
     // Filter supported files
     const supportedFiles = files.filter(file => {
       if (!isSupportedFileType(file.name)) {
-        console.warn(`File type not supported: ${file.name}. Supported formats: .pdf, .png, .docx, .xlsx`)
         return false
       }
       return true
@@ -1757,6 +1803,39 @@ function FileExplorer({
 
       {/* Upload progress indicator */}
       {uploadProgressIndicator}
+
+      {/* DOCX Split Modal */}
+      {docxSplitModal && (
+        <DocxSplitModal
+          fileName={docxSplitModal.fileName}
+          chapters={docxSplitModal.chapters}
+          isOpen={docxSplitModal.isOpen}
+          onClose={() => {
+            setDocxSplitModal(null)
+          }}
+          onConfirm={async (split: boolean) => {
+            try {
+              const result = await docxApi.splitAndImport(
+                docxSplitModal.filePath,
+                docxSplitModal.fileName,
+                docxSplitModal.chapters,
+                split
+              )
+
+              if (result.success) {
+                // Call onFileUploaded for each created document
+                if (result.documents && onFileUploaded) {
+                  for (const doc of result.documents) {
+                    onFileUploaded(doc, result.documents.length > 1)
+                  }
+                }
+              }
+            } catch (error) {
+              throw error
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

@@ -260,6 +260,31 @@ code {
   font-weight: 600;
 }
 
+/* Heading font sizes */
+.ProseMirror h1 {
+  font-size: 24px;
+}
+
+.ProseMirror h2 {
+  font-size: 20px;
+}
+
+.ProseMirror h3 {
+  font-size: 18px;
+}
+
+.ProseMirror h4 {
+  font-size: 16px;
+}
+
+.ProseMirror h5 {
+  font-size: 14px;
+}
+
+.ProseMirror h6 {
+  font-size: 12px;
+}
+
 .ProseMirror h1:first-child,
 .ProseMirror h2:first-child,
 .ProseMirror h3:first-child,
