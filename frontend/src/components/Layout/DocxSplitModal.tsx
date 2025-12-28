@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
-import { Document } from '@shared/types'
 // @ts-ignore
 import CheckBoxIcon from '@mui/icons-material/CheckBox'
 // @ts-ignore
@@ -12,13 +11,6 @@ interface Chapter {
   startIndex: number
   endIndex: number
   level: number
-}
-
-interface StructuralBoundary {
-  index: number
-  text: string
-  signals: string[]
-  confidence: number
 }
 
 interface DocxSplitModalProps {
@@ -146,91 +138,52 @@ function DocxSplitModal({
               检测到 {chapters.length} 个章节：
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {chapters.map((chapter, index) => {
-                // Check if chapter has boundary info (from new detector)
-                const chapterWithBoundary = chapter as any
-                const confidence = chapterWithBoundary.confidence
-                const signals = chapterWithBoundary.signals || []
-                
-                return (
-                  <div
-                    key={index}
-                    style={{
-                      padding: '10px 12px',
-                      backgroundColor: theme === 'dark' ? '#252525' : '#ffffff',
-                      borderRadius: '6px',
-                      border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
-                      fontSize: '13px',
-                      color: theme === 'dark' ? '#e0e0e0' : '#202124',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
-                      <div
-                        style={{
-                          fontWeight: 500,
-                          color: theme === 'dark' ? '#ffffff' : '#202124',
-                          flex: 1,
-                        }}
-                      >
-                        {chapter.title}
-                      </div>
-                      {confidence !== undefined && (
-                        <div
-                          style={{
-                            fontSize: '11px',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            backgroundColor: confidence > 0.6 
-                              ? theme === 'dark' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(76, 175, 80, 0.1)'
-                              : theme === 'dark' ? 'rgba(255, 193, 7, 0.2)' : 'rgba(255, 193, 7, 0.1)',
-                            color: confidence > 0.6 
-                              ? theme === 'dark' ? '#81c784' : '#4caf50'
-                              : theme === 'dark' ? '#ffb74d' : '#ff9800',
-                            marginLeft: '8px',
-                          }}
-                        >
-                          {(confidence * 100).toFixed(0)}%
-                        </div>
-                      )}
-                    </div>
-                    {signals.length > 0 && (
-                      <div
-                        style={{
-                          fontSize: '11px',
-                          color: theme === 'dark' ? '#999' : '#666',
-                          marginBottom: '4px',
-                          display: 'flex',
-                          flexWrap: 'wrap',
-                          gap: '4px',
-                        }}
-                      >
-                        {signals.slice(0, 5).map((signal: string, i: number) => (
-                          <span
-                            key={i}
-                            style={{
-                              padding: '1px 4px',
-                              borderRadius: '3px',
-                              backgroundColor: theme === 'dark' ? '#333' : '#f0f0f0',
-                              fontSize: '10px',
-                            }}
-                          >
-                            {signal}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+              {chapters.map((chapter, index) => (
+                <div
+                  key={index}
+                  style={{
+                    padding: '10px 12px',
+                    backgroundColor: theme === 'dark' ? '#252525' : '#ffffff',
+                    borderRadius: '6px',
+                    border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+                    fontSize: '13px',
+                    color: theme === 'dark' ? '#e0e0e0' : '#202124',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
                     <div
                       style={{
-                        fontSize: '12px',
-                        color: theme === 'dark' ? '#999' : '#666',
+                        fontWeight: 500,
+                        color: theme === 'dark' ? '#ffffff' : '#202124',
+                        flex: 1,
                       }}
                     >
-                      {chapter.content.substring(0, 100)}
-                      {chapter.content.length > 100 ? '...' : ''}
+                      {chapter.title}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '11px',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        backgroundColor: theme === 'dark' ? 'rgba(76, 175, 80, 0.2)' : 'rgba(76, 175, 80, 0.1)',
+                        color: theme === 'dark' ? '#81c784' : '#4caf50',
+                        marginLeft: '8px',
+                      }}
+                    >
+                      H{chapter.level}
                     </div>
                   </div>
-                )
-              })}
+                  <div
+                    style={{
+                      fontSize: '12px',
+                      color: theme === 'dark' ? '#999' : '#666',
+                    }}
+                  >
+                    {chapter.content.substring(0, 100)}
+                    {chapter.content.length > 100 ? '...' : ''}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         ) : (
