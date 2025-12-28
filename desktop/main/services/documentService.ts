@@ -283,7 +283,8 @@ export const documentService = {
       try {
         const parseResult = await parseDocx(sourceFilePath)
         // Convert HTML to TipTap JSON format
-        content = convertHtmlToTipTap(parseResult.fullContent)
+        // Pass document ID to optimize large images by storing them separately
+        content = await convertHtmlToTipTap(parseResult.fullContent, id)
       } catch (error) {
         // Fallback to file info if parsing fails
         content = {
@@ -367,10 +368,15 @@ export const documentService = {
       }
     }
     
+    // Remove .docx extension from title if it's a DOCX file
+    const documentTitle = fileExt === 'docx' 
+      ? finalFileName.replace(/\.docx$/i, '')
+      : finalFileName
+    
     // Create document entry
     const document: Document = {
       id,
-      title: finalFileName,
+      title: documentTitle,
       content: JSON.stringify(content),
       createdAt: now,
       updatedAt: now,

@@ -35,6 +35,7 @@ export const documentApi = {
     invokeOrFetch('document:uploadFile', filePath, fileName, folder),
   extractPDFText: (documentId: string) => invokeOrFetch('pdf:extractText', documentId),
   getPDFFileContent: (documentId: string) => invokeOrFetch('pdf:getFileContent', documentId),
+  getImageFileContent: (documentId: string, imageId: string) => invokeOrFetch('image:getFileContent', documentId, imageId),
 }
 
 export const docxApi = {

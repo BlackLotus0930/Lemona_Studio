@@ -513,6 +513,36 @@ Rephrased text:`;
             throw error;
         }
     });
+    // Get image file content as base64 (for loading images stored separately from DOCX)
+    ipcMain.handle('image:getFileContent', async (_, documentId, imageId) => {
+        try {
+            const document = await documentService.getById(documentId);
+            if (!document) {
+                throw new Error(`Document ${documentId} not found`);
+            }
+            // Get file path - images are stored as documentId_imageId.ext
+            const FILES_DIR = path.join(app.getPath('userData'), 'files');
+            // Find the image file - it should match pattern: documentId_img_*.ext
+            const fs = await import('fs/promises');
+            const files = await fs.readdir(FILES_DIR);
+            const imageFile = files.find((f) => f.startsWith(`${documentId}_img_`) && f.includes(imageId));
+            if (!imageFile) {
+                throw new Error(`Image file not found for imageId: ${imageId}`);
+            }
+            const imagePath = path.join(FILES_DIR, imageFile);
+            const fileBuffer = await fs.readFile(imagePath);
+            // Determine content type from file extension
+            const ext = imageFile.split('.').pop()?.toLowerCase() || 'png';
+            const contentType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' :
+                ext === 'gif' ? 'image/gif' :
+                    ext === 'webp' ? 'image/webp' : 'image/png';
+            const base64 = fileBuffer.toString('base64');
+            return `data:${contentType};base64,${base64}`;
+        }
+        catch (error) {
+            throw error;
+        }
+    });
     // PDF text extraction handler
     ipcMain.handle('pdf:extractText', async (_, documentId) => {
         try {

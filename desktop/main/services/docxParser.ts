@@ -10,6 +10,7 @@ import { TextStyle } from '@tiptap/extension-text-style'
 import Underline from '@tiptap/extension-underline'
 import TextAlign from '@tiptap/extension-text-align'
 import { GenericStructuralBoundaryDetector, Paragraph, StructuralBoundary } from './structuralBoundaryDetector.js'
+import { app } from 'electron'
 
 export interface Chapter {
   title: string
@@ -52,9 +53,9 @@ export async function parseDocx(filePath: string): Promise<DocxParseResult> {
           "p[style-name='Heading 6'] => h6:fresh",
         ],
         convertImage: mammoth.images.imgElement((image: any) => {
-          // Convert images to base64 data URLs
+          // Convert images to base64 - we'll optimize large ones during post-processing
           return image.read('base64').then((imageBuffer: Buffer) => {
-            if (imageBuffer) {
+            if (imageBuffer && imageBuffer.length > 0) {
               const base64 = imageBuffer.toString('base64')
               const contentType = image.contentType || 'image/png'
               return {
@@ -336,7 +337,8 @@ export async function splitDocxIntoChapters(
   for (const chapter of allChapters) {
     // Create a document content from chapter HTML
     // Convert HTML to TipTap JSON format
-    const tipTapContent = convertHtmlToTipTap(chapter.content)
+    // Note: For split chapters, we don't have documentId yet, so images stay as base64
+    const tipTapContent = await convertHtmlToTipTap(chapter.content)
     
     // Clean chapter title for filename
     const cleanTitle = chapter.title.replace(/[<>:"/\\|?*]/g, '').trim()
@@ -352,10 +354,86 @@ export async function splitDocxIntoChapters(
 }
 
 /**
+ * Extract images from TipTap JSON and store them as separate files
+ * Returns the modified JSON with image references instead of base64
+ */
+async function extractAndStoreImages(tipTapContent: any, documentId: string): Promise<any> {
+  if (!tipTapContent || !tipTapContent.content) {
+    return tipTapContent
+  }
+
+  const FILES_DIR = path.join(app.getPath('userData'), 'files')
+  await fs.mkdir(FILES_DIR, { recursive: true })
+
+  // Recursively process nodes to find and replace images
+  function processNode(node: any): any {
+    if (!node) return node
+
+    // If this is an image node with base64 data
+    if (node.type === 'image' && node.attrs?.src) {
+      const src = node.attrs.src
+      
+      // Check if it's a base64 data URL and if it's large (>100KB base64 = ~75KB image)
+      if (src.startsWith('data:image/') && src.length > 100000) {
+        try {
+          // Extract base64 data
+          const matches = src.match(/^data:image\/(\w+);base64,(.+)$/)
+          if (matches) {
+            const imageType = matches[1] || 'png'
+            const base64Data = matches[2]
+            
+            // Convert base64 to buffer
+            const imageBuffer = Buffer.from(base64Data, 'base64')
+            
+            // Generate unique image ID
+            const imageId = `img_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            const imageFileName = `${imageId}.${imageType}`
+            const imagePath = path.join(FILES_DIR, `${documentId}_${imageFileName}`)
+            
+            // Save image file
+            fs.writeFile(imagePath, imageBuffer).catch(() => {
+              // Silently fail - if image save fails, keep base64
+            })
+            
+            // Replace with document reference
+            return {
+              ...node,
+              attrs: {
+                ...node.attrs,
+                src: `document://${documentId}/image/${imageId}`,
+                fileName: imageFileName,
+              }
+            }
+          }
+        } catch (error) {
+          // If extraction fails, keep original base64
+        }
+      }
+    }
+
+    // Recursively process children
+    if (node.content && Array.isArray(node.content)) {
+      return {
+        ...node,
+        content: node.content.map(processNode)
+      }
+    }
+
+    return node
+  }
+
+  return {
+    ...tipTapContent,
+    content: tipTapContent.content.map(processNode)
+  }
+}
+
+/**
  * Convert HTML content to TipTap JSON format using TipTap's official HTML parser
  * This uses @tiptap/html which properly handles all HTML structures
+ * For large files, images are extracted and stored separately
  */
-export function convertHtmlToTipTap(html: string): any {
+export async function convertHtmlToTipTap(html: string, documentId?: string): Promise<any> {
   if (!html || !html.trim()) {
     return {
       type: 'doc',
@@ -385,6 +463,16 @@ export function convertHtmlToTipTap(html: string): any {
     ]
     
     const result = generateJSON(html, extensions)
+    
+    // If documentId is provided and content is large, extract images to separate files
+    if (documentId && result.content) {
+      // Estimate content size (rough approximation)
+      const contentSize = JSON.stringify(result).length
+      // If content is larger than 5MB, extract large images
+      if (contentSize > 5 * 1024 * 1024) {
+        return await extractAndStoreImages(result, documentId)
+      }
+    }
     
     return result
   } catch (error) {

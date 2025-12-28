@@ -2,6 +2,7 @@ import Image from '@tiptap/extension-image'
 import { NodeViewWrapper, ReactNodeViewRenderer, ReactNodeViewProps } from '@tiptap/react'
 import { NodeSelection } from 'prosemirror-state'
 import React, { useEffect, useRef, useState } from 'react'
+import { documentApi } from '../../services/desktop-api'
 
 const ResizableImageComponent = ({ node, updateAttributes, selected, editor, getPos }: ReactNodeViewProps) => {
   const imgRef = useRef<HTMLImageElement>(null)
@@ -11,6 +12,82 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
   const [startPos, setStartPos] = useState({ x: 0, y: 0 })
   const [startSize, setStartSize] = useState({ width: 0, height: 0 })
   const [aspectRatio, setAspectRatio] = useState(1)
+  const [imageSrc, setImageSrc] = useState<string>('')
+  const [isLoading, setIsLoading] = useState(false)
+
+  // Load image from document:// reference if needed
+  useEffect(() => {
+    const src = node.attrs.src || ''
+    
+    // Don't set document:// URLs directly - they violate CSP
+    if (src.startsWith('document://')) {
+      setIsLoading(true)
+      // Parse document://documentId/image/imageId
+      const match = src.match(/^document:\/\/([^/]+)\/image\/(.+)$/)
+      if (match) {
+        const documentId = match[1]
+        const imageId = match[2]
+        
+        // Load image content asynchronously and convert to blob URL
+        documentApi.getImageFileContent(documentId, imageId)
+          .then((dataUrl) => {
+            // Convert data URL to blob URL for better performance and CSP compliance
+            try {
+              const base64Data = dataUrl.split(',')[1]
+              if (!base64Data) {
+                throw new Error('Invalid data URL')
+              }
+              
+              // Extract content type
+              const contentTypeMatch = dataUrl.match(/data:([^;]+);base64/)
+              const contentType = contentTypeMatch ? contentTypeMatch[1] : 'image/png'
+              
+              // Convert base64 to binary
+              const binaryString = atob(base64Data)
+              const bytes = new Uint8Array(binaryString.length)
+              for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i)
+              }
+              
+              // Create blob and blob URL
+              const blob = new Blob([bytes], { type: contentType })
+              const blobUrl = URL.createObjectURL(blob)
+              setImageSrc(blobUrl)
+              setIsLoading(false)
+            } catch (error) {
+              // Fallback to data URL if blob conversion fails
+              setImageSrc(dataUrl)
+              setIsLoading(false)
+            }
+          })
+          .catch((error) => {
+            // If loading fails, set empty to show broken image
+            setImageSrc('')
+            setIsLoading(false)
+          })
+      } else {
+        setImageSrc('')
+        setIsLoading(false)
+      }
+    } else if (src.startsWith('data:') || src.startsWith('blob:') || src.startsWith('http')) {
+      // Direct data/blob/http URLs are fine
+      setImageSrc(src)
+      setIsLoading(false)
+    } else {
+      // Empty or invalid URL
+      setImageSrc('')
+      setIsLoading(false)
+    }
+  }, [node.attrs.src])
+
+  // Cleanup blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (imageSrc.startsWith('blob:')) {
+        URL.revokeObjectURL(imageSrc)
+      }
+    }
+  }, [imageSrc])
 
   useEffect(() => {
     if (imgRef.current && imgRef.current.complete) {
@@ -21,7 +98,7 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
         setAspectRatio(naturalWidth / naturalHeight)
       }
     }
-  }, [node.attrs.src])
+  }, [imageSrc])
 
   const handleImageLoad = () => {
     if (imgRef.current) {
@@ -163,22 +240,51 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
         maxWidth: '100%',
       }}
     >
-      <img
-        ref={imgRef}
-        src={node.attrs.src}
-        alt=""
-        onLoad={handleImageLoad}
-        style={{
-          width: currentWidth ? `${currentWidth}px` : 'auto',
-          height: currentHeight ? `${currentHeight}px` : 'auto',
-          maxWidth: '100%',
-          display: 'block',
-          cursor: selected ? 'move' : 'pointer',
-          userSelect: 'none',
-        }}
-        onClick={handleImageClick}
-        draggable={false}
-      />
+      {isLoading ? (
+        <div style={{
+          width: currentWidth ? `${currentWidth}px` : '400px',
+          height: currentHeight ? `${currentHeight}px` : '300px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#f5f5f5',
+          color: '#999',
+          fontSize: '14px',
+        }}>
+          Loading image...
+        </div>
+      ) : imageSrc ? (
+        <img
+          ref={imgRef}
+          src={imageSrc}
+          alt=""
+          onLoad={handleImageLoad}
+          style={{
+            width: currentWidth ? `${currentWidth}px` : 'auto',
+            height: currentHeight ? `${currentHeight}px` : 'auto',
+            maxWidth: '100%',
+            display: 'block',
+            cursor: selected ? 'move' : 'pointer',
+            userSelect: 'none',
+          }}
+          onClick={handleImageClick}
+          draggable={false}
+        />
+      ) : (
+        <div style={{
+          width: currentWidth ? `${currentWidth}px` : '400px',
+          height: currentHeight ? `${currentHeight}px` : '300px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#f5f5f5',
+          color: '#999',
+          fontSize: '14px',
+          border: '1px dashed #ddd',
+        }}>
+          Image not available
+        </div>
+      )}
       {selected && (
         <>
           {/* Resize handles */}
