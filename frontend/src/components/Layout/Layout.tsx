@@ -186,6 +186,29 @@ export default function Layout() {
   const isNavigatingFromSearchRef = useRef<boolean>(false) // Track if we're navigating from search results
   const lastRestoredDocIdRef = useRef<string | null>(null) // Track last document ID we restored search state for
   
+  // Track manually renamed documents (persisted in localStorage)
+  const [manuallyRenamedDocs, setManuallyRenamedDocs] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('manuallyRenamedDocs')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        return new Set(Array.isArray(parsed) ? parsed : [])
+      }
+    } catch (error) {
+      console.error('Failed to load manually renamed docs from localStorage:', error)
+    }
+    return new Set<string>()
+  })
+  
+  // Save manually renamed docs to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('manuallyRenamedDocs', JSON.stringify(Array.from(manuallyRenamedDocs)))
+    } catch (error) {
+      console.error('Failed to save manually renamed docs to localStorage:', error)
+    }
+  }, [manuallyRenamedDocs])
+  
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
   const borderColor = theme === 'dark' ? '#232323' : '#dadce0'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#5f6368'
@@ -294,13 +317,14 @@ export default function Layout() {
 
   const loadDocument = async (docId: string) => {
     try {
-      // Retry logic for newly created documents
+      // Retry logic for newly created documents (increased retries and delay for file system sync)
       let doc = await documentApi.get(docId)
-      let retries = 3
+      let retries = 5 // Increased from 3 to 5
       
       while (!doc && retries > 0) {
         console.log(`Document ${docId} not found, retrying... (${retries} attempts left)`)
-        await new Promise(resolve => setTimeout(resolve, 200))
+        // Increased delay from 200ms to 300ms for better file system sync
+        await new Promise(resolve => setTimeout(resolve, 300))
         doc = await documentApi.get(docId)
         retries--
       }
@@ -421,9 +445,10 @@ export default function Layout() {
       })
       
       previousProjectIdRef.current = currentProjectId
-      loadDocuments()
+      // Pass the projectId explicitly to ensure we load the correct project's documents
+      loadDocuments(currentProjectId)
     }
-  }, [document?.projectId, activeTabId]) // Reload when project changes
+  }, [document?.projectId]) // Reload when project changes (removed activeTabId to prevent cross-project loading)
 
   // Set selected folder based on current document's folder
   useEffect(() => {
@@ -593,16 +618,19 @@ export default function Layout() {
     return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [searchQuery, document, activeTabId, openTabs])
 
-  const loadDocuments = async () => {
+  const loadDocuments = async (projectId?: string) => {
     // Note: documents are already cleared in useEffect when projectId changes
     // Note: project name is already loaded in useEffect for instant shell UI
     // Set loading state
     setIsLoadingDocuments(true)
     
     try {
-      // If document has projectId, load project's documents
-      if (document?.projectId) {
-        const docs = await projectApi.getDocuments(document.projectId)
+      // Use provided projectId or fall back to current document's projectId
+      const targetProjectId = projectId ?? document?.projectId
+      
+      // If we have a projectId, load project's documents
+      if (targetProjectId) {
+        const docs = await projectApi.getDocuments(targetProjectId)
         // Sort by order (creation order) instead of updatedAt
         const sortedDocs = docs.sort((a: any, b: any) => {
           if (a.order !== undefined && b.order !== undefined) {
@@ -1087,12 +1115,143 @@ export default function Layout() {
     }
   }
 
+  // Helper function to extract first line from TipTap content
+  const extractFirstLine = (content: any): string => {
+    if (!content || !content.content || !Array.isArray(content.content)) {
+      return ''
+    }
+    
+    // Find the first non-empty paragraph or heading
+    for (const node of content.content) {
+      if (node.type === 'paragraph' || node.type === 'heading') {
+        const extractText = (n: any): string => {
+          if (typeof n === 'string') return n
+          if (n.type === 'text') return n.text || ''
+          if (n.content && Array.isArray(n.content)) {
+            return n.content.map(extractText).join('')
+          }
+          return ''
+        }
+        const text = extractText(node).trim()
+        if (text) {
+          // Return first line (up to first newline or full text)
+          return text.split('\n')[0].trim()
+        }
+      }
+    }
+    
+    return ''
+  }
+  
+  // Helper function to check if title matches "Doc X" or "Section X" pattern
+  const isDefaultTitle = (title: string, folder?: 'library' | 'project'): boolean => {
+    const prefix = folder === 'library' ? 'Doc' : 'Section'
+    const pattern = new RegExp(`^${prefix} \\d+$`)
+    return pattern.test(title)
+  }
+  
+  // Helper function to ensure unique title by appending number suffix if needed
+  const ensureUniqueTitle = (baseTitle: string, docId: string, folder?: 'library' | 'project'): string => {
+    // Filter documents in the same folder and project
+    const sameFolderDocs = documents.filter(doc => {
+      // Same folder
+      const sameFolder = folder === 'library' 
+        ? doc.folder === 'library'
+        : (!doc.folder || doc.folder === 'project')
+      // Same project (or both have no project)
+      const sameProject = document?.projectId 
+        ? doc.projectId === document.projectId
+        : !doc.projectId
+      return sameFolder && sameProject && doc.id !== docId // Exclude current document
+    })
+    
+    const existingTitles = new Set(sameFolderDocs.map(doc => doc.title))
+    
+    // If title is unique, return it as-is
+    if (!existingTitles.has(baseTitle)) {
+      return baseTitle
+    }
+    
+    // Title exists, find next available number
+    let number = 1
+    let newTitle = `${baseTitle} (${number})`
+    
+    while (existingTitles.has(newTitle)) {
+      number++
+      newTitle = `${baseTitle} (${number})`
+    }
+    
+    return newTitle
+  }
+  
+  // Auto-update document title (doesn't mark as manually renamed)
+  // Use a ref to track pending title updates to prevent cascading updates
+  const pendingTitleUpdateRef = useRef<Set<string>>(new Set())
+  
+  const autoUpdateDocumentTitle = async (docId: string, newTitle: string, latestContent?: string) => {
+    // Prevent duplicate updates
+    if (pendingTitleUpdateRef.current.has(docId)) {
+      return
+    }
+    
+    pendingTitleUpdateRef.current.add(docId)
+    
+    try {
+      await documentApi.updateTitle(docId, newTitle)
+      
+      // Batch all state updates together to minimize re-renders
+      setDocuments(docs => {
+        const docExists = docs.some(doc => doc.id === docId)
+        if (!docExists) return docs // Don't update if doc doesn't exist (might be from different project)
+        return docs.map(doc => {
+          if (doc.id === docId) {
+            // Update title and content if provided
+            return latestContent 
+              ? { ...doc, title: newTitle, content: latestContent }
+              : { ...doc, title: newTitle }
+          }
+          return doc
+        })
+      })
+      
+      // Update current document title and content without reloading (preserves editor state)
+      if (document?.id === docId) {
+        // Update both title and content to ensure state matches what's saved
+        // This won't trigger the useEffect that updates editor content because we check contentChanged
+        setDocument(prevDoc => {
+          if (!prevDoc) return null
+          return latestContent
+            ? { ...prevDoc, title: newTitle, content: latestContent }
+            : { ...prevDoc, title: newTitle }
+        })
+        // Also update the tab if it's open
+        setOpenTabs(prevTabs => prevTabs.map(tab => {
+          if (tab.id === docId) {
+            return latestContent
+              ? { ...tab, title: newTitle, content: latestContent }
+              : { ...tab, title: newTitle }
+          }
+          return tab
+        }))
+      }
+    } catch (error) {
+      console.error('Failed to auto-update document title:', error)
+    } finally {
+      // Clear the pending flag after a short delay to allow the update to complete
+      setTimeout(() => {
+        pendingTitleUpdateRef.current.delete(docId)
+      }, 500)
+    }
+  }
+  
   const handleDocumentRename = async (docId: string, newTitle: string) => {
     try {
       await documentApi.updateTitle(docId, newTitle)
       setDocuments(docs => docs.map(doc => 
         doc.id === docId ? { ...doc, title: newTitle } : doc
       ))
+      // Mark document as manually renamed
+      setManuallyRenamedDocs(prev => new Set(prev).add(docId))
       // Update current document if it's the one being renamed
       if (document?.id === docId) {
         const updatedDoc = await documentApi.get(docId)
@@ -1329,6 +1488,8 @@ export default function Layout() {
         if (activeTabId === docId) {
           setActiveTabId(null)
         }
+        // Don't reload here - the useEffect watching document?.projectId will handle reloading
+        // when the project changes, and the local state update is sufficient for immediate UI update
       }
     } catch (error) {
       console.error('Failed to delete document:', error)
@@ -1383,7 +1544,7 @@ export default function Layout() {
     } catch (error) {
       console.error('Failed to reorder documents:', error)
       // On error, reload to get the correct state from server
-      await loadDocuments()
+      await loadDocuments(document?.projectId)
       alert('Failed to reorder documents. Please try again.')
     }
   }
@@ -1408,6 +1569,9 @@ export default function Layout() {
       
       const newDoc = await documentApi.create(newTitle, folder)
       
+      // Small delay to ensure file is fully written to disk before proceeding
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
       // If current document has projectId, add new doc to same project
       if (document?.projectId) {
         // Calculate order based on documents in the same folder
@@ -1420,19 +1584,44 @@ export default function Layout() {
           ? Math.max(...folderDocs.map(doc => doc.order ?? 0), -1) + 1
           : 0
         
-        // Optimistically update documents state to prevent flash
-        const newDocWithOrder = { ...newDoc, order: maxOrder, projectId: document.projectId }
-        setDocuments(prev => [...prev, newDocWithOrder])
-        
-        // Add document to project in the background (don't await to prevent blocking)
-        projectApi.addDocument(document.projectId, newDoc.id, maxOrder).catch(error => {
+        // Add document to project BEFORE navigating (await to ensure it's saved)
+        try {
+          await projectApi.addDocument(document.projectId, newDoc.id, maxOrder)
+          // Update document with projectId and order
+          const newDocWithOrder = { ...newDoc, order: maxOrder, projectId: document.projectId }
+          
+          // Update documents state after successful project addition
+          setDocuments(prev => [...prev, newDocWithOrder])
+        } catch (error) {
           console.error('Failed to add document to project:', error)
-          // On error, reload to sync with backend
-          loadDocuments()
-        })
+          // Still add to local state so user can see it, but reload to sync
+          const newDocWithOrder = { ...newDoc, order: maxOrder, projectId: document.projectId }
+          setDocuments(prev => [...prev, newDocWithOrder])
+          // Reload to sync with backend
+          loadDocuments(document.projectId).catch(err => {
+            console.error('Failed to reload documents:', err)
+          })
+        }
       } else {
         // Update documents state immediately so FileExplorer shows it
         setDocuments(prev => [...prev, newDoc])
+      }
+      
+      // Verify document exists before navigating (safeguard)
+      try {
+        const verifyDoc = await documentApi.get(newDoc.id)
+        if (!verifyDoc) {
+          throw new Error('Document not found after creation')
+        }
+      } catch (verifyError) {
+        console.error('Failed to verify document after creation:', verifyError)
+        // Wait a bit more and try once more
+        await new Promise(resolve => setTimeout(resolve, 200))
+        const verifyDocRetry = await documentApi.get(newDoc.id)
+        if (!verifyDocRetry) {
+          alert('Document was created but could not be verified. Please refresh and try again.')
+          return
+        }
       }
       
       navigate(`/document/${newDoc.id}`)
@@ -1904,11 +2093,58 @@ export default function Layout() {
         if (saveTimeoutRef.current) {
           clearTimeout(saveTimeoutRef.current)
         }
-        saveTimeoutRef.current = setTimeout(() => {
+        saveTimeoutRef.current = setTimeout(async () => {
           const content = JSON.stringify(editor.getJSON())
-          documentApi.update(document.id, content).catch((error: unknown) => {
+          
+          // Save content FIRST and wait for it to complete
+          try {
+            await documentApi.update(document.id, content)
+          } catch (error: unknown) {
             console.error('Failed to save document:', error)
-          })
+            return // Don't proceed with title update if content save failed
+          }
+          
+          // Auto-update file name from first line if:
+          // 1. Document hasn't been manually renamed
+          // 2. Document title matches default pattern (Doc X or Section X)
+          // 3. First line has content and is different from current title
+          // 4. Not currently updating this document's title (prevent cascading updates)
+          if (!manuallyRenamedDocs.has(document.id) && !pendingTitleUpdateRef.current.has(document.id)) {
+            // Get current document from state to ensure we have the latest title
+            const currentDoc = documents.find(d => d.id === document.id) || document
+            const currentTitle = currentDoc.title
+            const folder = currentDoc.folder || 'project'
+            
+            if (isDefaultTitle(currentTitle, folder)) {
+              const firstLine = extractFirstLine(editor.getJSON())
+              // Only update if first line has content and is different from current title
+              if (firstLine && firstLine.trim() && firstLine !== currentTitle) {
+                // Update title with first line (limit to reasonable length, remove leading/trailing whitespace)
+                const baseTitle = firstLine.trim().length > 100 
+                  ? firstLine.trim().substring(0, 100) 
+                  : firstLine.trim()
+                // Ensure title is unique by appending number suffix if needed
+                const newTitle = ensureUniqueTitle(baseTitle, document.id, folder)
+                // Only update if the new title is actually different
+                if (newTitle !== currentTitle) {
+                  // Update title AFTER content is saved
+                  // Pass the content that was just saved to ensure state stays in sync
+                  try {
+                    // Get latest content from editor (in case user typed more during the save delay)
+                    const latestContent = JSON.stringify(editor.getJSON())
+                    // Save latest content if it's different from what we just saved
+                    if (latestContent !== content) {
+                      await documentApi.update(document.id, latestContent)
+                    }
+                    // Now update title with the latest content to keep state in sync
+                    await autoUpdateDocumentTitle(document.id, newTitle, latestContent)
+                  } catch (error: unknown) {
+                    console.error('Failed to auto-update document title:', error)
+                  }
+                }
+              }
+            }
+          }
         }, 1000)
       }
     },
@@ -1934,7 +2170,10 @@ export default function Layout() {
     const documentChanged = currentDocIdRef.current !== document.id
     const contentChanged = lastContentRef.current !== document.content
     
+    // If only title changed (not content or ID), skip editor update to preserve editor state
     if (!documentChanged && !contentChanged) {
+      // Still update the title ref even if we skip editor update
+      currentDocTitleRef.current = document.title
       return
     }
     
@@ -2661,7 +2900,7 @@ export default function Layout() {
                         // Update optimistically instead of reloading to prevent deleted files from reappearing
                         // Only reload if absolutely necessary (e.g., order conflict)
                         if (err.message?.includes('order') || err.message?.includes('duplicate')) {
-                          loadDocuments()
+                          loadDocuments(document.projectId)
                         }
                       })
                     }

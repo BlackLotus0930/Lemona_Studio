@@ -195,6 +195,7 @@ code {
   outline: none;
   color: #202124;
   caret-color: #202124;
+  white-space: pre-wrap;
 }
 
 .dark-theme .ProseMirror {
