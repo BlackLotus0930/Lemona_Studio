@@ -1,106 +1,110 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import { aiApi } from '../../services/api'
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 
 interface TextRephrasePopupProps {
   selectedText: string
   position: { x: number; y: number }
   onReplace: (newText: string) => void
   onClose: () => void
-  onAddToChat?: (text: string) => void
+  onInputFocus?: (isFocused: boolean) => void
 }
 
-type Mode = 'buttons' | 'quick-edit'
+type ActionType = 'improve' | 'rephrase' | 'lengthen' | 'shorten' | 'custom'
 
-export default function TextRephrasePopup({ selectedText, position, onReplace, onClose, onAddToChat }: TextRephrasePopupProps) {
+export default function TextRephrasePopup({ selectedText, position, onReplace, onClose, onInputFocus }: TextRephrasePopupProps) {
   const { theme } = useTheme()
-  const [mode, setMode] = useState<Mode>('buttons')
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [activeAction, setActiveAction] = useState<ActionType>('improve')
   const [customPrompt, setCustomPrompt] = useState('')
-  const [rephrasedText, setRephrasedText] = useState<string | null>(null)
+  const [improvedText, setImprovedText] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const popupRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [adjustedPosition, setAdjustedPosition] = useState(() => {
+    // Initialize with adjusted position
+    const screenWidth = window.innerWidth
+    const rightMargin = 25
+    const estimatedWidth = isExpanded ? 360 : 120 // expanded modal width or compact button width
+    const maxX = screenWidth - estimatedWidth - rightMargin
+    return {
+      x: Math.min(position.x, maxX),
+      y: position.y
+    }
+  })
 
   const bgColor = theme === 'dark' ? '#1e1e1e' : '#ffffff'
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const borderColor = theme === 'dark' ? '#313131' : '#dadce0'
   const inputBg = theme === 'dark' ? '#1d1d1d' : '#ffffff'
-  const [isInputFocused, setIsInputFocused] = useState(false)
+  const buttonHoverBg = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+  const activeButtonBg = theme === 'dark' ? '#2a2a2a' : '#e8f0fe'
+  const activeButtonColor = theme === 'dark' ? '#4a9eff' : '#1a73e8'
 
-  const handleAddToChat = useCallback(() => {
-    if (onAddToChat) {
-      onAddToChat(selectedText)
+  // Adjust position to keep 25px from right edge
+  useEffect(() => {
+    const adjustPosition = () => {
+      const screenWidth = window.innerWidth
+      const rightMargin = 25
+      const popupWidth = isExpanded ? 360 : 120 // fixed width for expanded modal
+      const maxX = screenWidth - popupWidth - rightMargin
+      
+      const adjustedX = Math.min(position.x, maxX)
+      
+      setAdjustedPosition({
+        x: adjustedX,
+        y: position.y
+      })
     }
-    onClose()
-  }, [onAddToChat, selectedText, onClose])
+
+    // Adjust immediately
+    adjustPosition()
+    
+    // Also adjust on window resize
+    window.addEventListener('resize', adjustPosition)
+    
+    return () => {
+      window.removeEventListener('resize', adjustPosition)
+    }
+  }, [position, isExpanded])
 
   const handleReplace = useCallback(() => {
-    if (rephrasedText) {
-      onReplace(rephrasedText)
+    if (improvedText) {
+      onReplace(improvedText)
       onClose()
     }
-  }, [rephrasedText, onReplace, onClose])
+  }, [improvedText, onReplace, onClose])
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'l' || e.key === 'L') {
-          e.preventDefault()
-          handleAddToChat()
-        } else if (e.key === 'k' || e.key === 'K') {
-          e.preventDefault()
-          setMode('quick-edit')
-          setTimeout(() => inputRef.current?.focus(), 10)
-        } else if ((e.key === 'Enter' || e.key === 'Return') && rephrasedText) {
-          e.preventDefault()
-          handleReplace()
-        }
-      }
-      if (e.key === 'Escape') {
-        if (mode === 'quick-edit' && !rephrasedText) {
-          setMode('buttons')
-        } else {
-          onClose()
-        }
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [mode, rephrasedText, handleAddToChat, handleReplace, onClose])
-
-  // Close popup when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [onClose])
-
-  // Focus input when switching to quick-edit mode
-  useEffect(() => {
-    if (mode === 'quick-edit' && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 10)
-    }
-  }, [mode])
-
-  const handleQuickEdit = async () => {
-    if (!customPrompt.trim()) return
-
+  const processText = useCallback(async (action: ActionType, prompt?: string) => {
     setIsLoading(true)
     setError(null)
-    setRephrasedText(null)
+    setImprovedText(null)
 
     try {
-      const result = await aiApi.rephraseText(selectedText, customPrompt)
-      let rephrased = typeof result === 'string' ? result : (result.data || result)
+      let instruction = ''
+      switch (action) {
+        case 'improve':
+          instruction = 'Improve clarity and flow. Use the same language as the original text.'
+          break
+        case 'rephrase':
+          instruction = 'Rephrase this text while keeping the same meaning. Use the same language as the original text.'
+          break
+        case 'lengthen':
+          instruction = 'Make this text longer and more detailed while keeping the same meaning. Use the same language as the original text.'
+          break
+        case 'shorten':
+          instruction = 'Make this text shorter and more concise while keeping the same meaning. Use the same language as the original text.'
+          break
+        case 'custom':
+          instruction = prompt ? `${prompt} Use the same language as the original text.` : ''
+          break
+      }
+
+      if (!instruction.trim()) return
+
+      const result = await aiApi.rephraseText(selectedText, instruction)
+      let improved = typeof result === 'string' ? result : (result.data || result)
       
       // Remove any "Next step" or follow-up text that might still appear
       const nextStepPatterns = [
@@ -116,27 +120,85 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
       ]
       
       for (const pattern of nextStepPatterns) {
-        rephrased = rephrased.replace(pattern, '').trim()
+        improved = improved.replace(pattern, '').trim()
       }
       
-      setRephrasedText(rephrased)
+      setImprovedText(improved)
     } catch (err) {
-      console.error('Rephrase error:', err)
-      setError(err instanceof Error ? err.message : 'Failed to rephrase text')
+      console.error('Text improvement error:', err)
+      setError(err instanceof Error ? err.message : 'Failed to improve text')
     } finally {
       setIsLoading(false)
     }
+  }, [selectedText])
+
+  // Handle expand and improve
+  const handleExpandAndImprove = useCallback(() => {
+    setIsExpanded(true)
+    setImprovedText(null)
+    setError(null)
+    setActiveAction('improve')
+    processText('improve')
+  }, [processText])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'k' || e.key === 'K') {
+          e.preventDefault()
+          if (!isExpanded) {
+            handleExpandAndImprove()
+          } else {
+            setImprovedText(null)
+            setError(null)
+            setActiveAction('improve')
+            processText('improve')
+          }
+        } else if ((e.key === 'Enter' || e.key === 'Return') && improvedText) {
+          e.preventDefault()
+          handleReplace()
+        }
+      }
+      if (e.key === 'Escape') {
+        onClose()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isExpanded, improvedText, isLoading, handleReplace, onClose, handleExpandAndImprove, processText])
+
+  // Handle Enter key in custom input
+  const handleCustomInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !isLoading && customPrompt.trim()) {
+      e.preventDefault()
+      setActiveAction('custom')
+      processText('custom', customPrompt)
+    }
   }
 
-  // Initial mode: show small buttons
-  if (mode === 'buttons') {
+  // Close popup when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        onClose()
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [onClose])
+
+  // Show compact button initially
+  if (!isExpanded) {
     return (
       <div
         ref={popupRef}
         style={{
           position: 'fixed',
-          left: `${position.x}px`,
-          top: `${position.y}px`,
+          left: `${adjustedPosition.x}px`,
+          top: `${adjustedPosition.y}px`,
           backgroundColor: bgColor,
           border: `1px solid ${borderColor}`,
           borderRadius: '6px',
@@ -151,7 +213,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
         onClick={(e) => e.stopPropagation()}
       >
         <button
-          onClick={handleAddToChat}
+          onClick={handleExpandAndImprove}
           style={{
             padding: 0,
             backgroundColor: 'transparent',
@@ -172,185 +234,210 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
             e.currentTarget.style.opacity = '1'
           }}
         >
-          <span>Add to Chat</span>
-          <span style={{ fontSize: '11px', opacity: 0.6 }}>Ctrl+L</span>
-        </button>
-        <button
-          onClick={() => {
-            setMode('quick-edit')
-            setTimeout(() => inputRef.current?.focus(), 10)
-          }}
-          style={{
-            padding: 0,
-            backgroundColor: 'transparent',
-            color: textColor,
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontWeight: '400',
-            transition: 'opacity 0.15s',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.opacity = '0.7'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.opacity = '1'
-          }}
-        >
-          <span>Quick Edit</span>
+          <span>Improve</span>
           <span style={{ fontSize: '11px', opacity: 0.6 }}>Ctrl+K</span>
         </button>
       </div>
     )
   }
 
-  // Quick Edit mode: show input box and results
+  // Show expanded modal
   return (
     <div
       ref={popupRef}
       style={{
         position: 'fixed',
-        left: `${position.x}px`,
-        top: `${position.y}px`,
+        left: `${adjustedPosition.x}px`,
+        top: `${adjustedPosition.y}px`,
         backgroundColor: bgColor,
         border: `1px solid ${borderColor}`,
-        borderRadius: '8px',
-        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15)',
+        borderRadius: '12px',
+        boxShadow: theme === 'dark' 
+          ? '0 8px 32px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3)' 
+          : '0 8px 32px rgba(0, 0, 0, 0.12), 0 4px 16px rgba(0, 0, 0, 0.08)',
         zIndex: 10000,
-        minWidth: '320px',
-        maxWidth: '480px',
+        width: '360px',
         fontFamily: 'system-ui, -apple-system, sans-serif',
         display: 'flex',
         flexDirection: 'column',
+        overflow: 'hidden',
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Input Container - Same as ChatInterface */}
-      <div style={{ 
-        padding: rephrasedText ? '8px' : '10px',
-        backgroundColor: bgColor
+      {/* Action Buttons Row */}
+      <div style={{
+        padding: '10px 12px',
+        borderBottom: `1px solid ${borderColor}`,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fafafa',
       }}>
-        {/* Unified Container - Text input and button on same line */}
+        {/* Four action buttons in a row */}
         <div style={{
-          padding: '4px 6px',
-          backgroundColor: inputBg,
-          borderRadius: '6px',
-          border: `1px solid ${isInputFocused ? (theme === 'dark' ? '#3e3e42' : '#bdc1c6') : borderColor}`,
           display: 'flex',
-          flexDirection: 'row',
+          gap: '4px',
           alignItems: 'center',
-          gap: '6px',
-          transition: 'border-color 0.2s'
+          flexWrap: 'wrap',
         }}>
-          {/* Text Input Section */}
-          <textarea
-            ref={inputRef}
-            value={customPrompt}
-            onChange={(e) => setCustomPrompt(e.target.value)}
-            onFocus={() => setIsInputFocused(true)}
-            onBlur={() => setIsInputFocused(false)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && !isLoading && customPrompt.trim()) {
-                e.preventDefault()
-                handleQuickEdit()
-              } else if (e.key === 'Escape') {
-                if (rephrasedText) {
-                  setRephrasedText(null)
-                  setCustomPrompt('')
-                } else {
-                  setMode('buttons')
-                }
-              }
-            }}
-            placeholder="Type your prompt..."
-            disabled={isLoading}
-            rows={1}
-            style={{
-              flex: 1,
-              padding: '2px 2px',
-              border: 'none',
-              backgroundColor: 'transparent',
-              fontSize: '12px',
-              outline: 'none',
-              color: textColor,
-              resize: 'none',
-              overflowY: 'hidden',
-              overflowX: 'hidden',
-              fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-              lineHeight: '1.6',
-              minHeight: '24px',
-              maxHeight: '200px'
-            }}
-            onInput={(e) => {
-              const target = e.target as HTMLTextAreaElement
-              target.style.height = 'auto'
-              const scrollHeight = target.scrollHeight
-              const newHeight = Math.min(scrollHeight, 200)
-              target.style.height = `${newHeight}px`
-              // Only show scrollbar when content exceeds maxHeight
-              if (scrollHeight > 200) {
-                target.style.overflowY = 'auto'
-              } else {
-                target.style.overflowY = 'hidden'
-              }
-            }}
-          />
-      
-          {/* Send button - round with light circle and black arrow */}
           <button
             onClick={() => {
-              if (!isLoading && customPrompt.trim()) {
-                handleQuickEdit()
-              }
+              setImprovedText(null)
+              setError(null)
+              setActiveAction('improve')
+              processText('improve')
             }}
-            disabled={isLoading || !customPrompt.trim()}
             style={{
-              width: '20px',
-              height: '20px',
-              padding: 0,
-              backgroundColor: isLoading || !customPrompt.trim() 
-                ? (theme === 'dark' ? '#2a2a2a' : '#e0e0e0')
-                : (theme === 'dark' ? '#AEAEAE' : '#9e9e9e'),
+              padding: '6px 14px',
+              backgroundColor: activeAction === 'improve' ? activeButtonBg : 'transparent',
+              color: activeAction === 'improve' ? activeButtonColor : textColor,
               border: 'none',
-              borderRadius: '50%',
-              cursor: isLoading || !customPrompt.trim() ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              transition: 'all 0.15s',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: activeAction === 'improve' ? '500' : '400',
+              transition: 'all 0.2s ease',
             }}
             onMouseEnter={(e) => {
-              if (!isLoading && customPrompt.trim()) {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#C0C0C0' : '#808080'
-              } else if (!isLoading) {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#353535' : '#d0d0d0'
+              if (activeAction !== 'improve') {
+                e.currentTarget.style.backgroundColor = buttonHoverBg
               }
             }}
             onMouseLeave={(e) => {
-              if (!isLoading && customPrompt.trim()) {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#AEAEAE' : '#9e9e9e'
-              } else if (!isLoading) {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#e0e0e0'
+              if (activeAction !== 'improve') {
+                e.currentTarget.style.backgroundColor = 'transparent'
               }
             }}
-            title="Send"
           >
-            <ArrowUpwardIcon style={{ 
-              fontSize: '12px',
-              color: isLoading || !customPrompt.trim() 
-                ? (theme === 'dark' ? '#1D1D1D' : '#9e9e9e')
-                : (theme === 'dark' ? inputBg : '#ffffff')
-            }} />
+            Improve
+          </button>
+          <button
+            onClick={() => {
+              setActiveAction('rephrase')
+              processText('rephrase')
+            }}
+            style={{
+              padding: '6px 14px',
+              backgroundColor: activeAction === 'rephrase' ? activeButtonBg : 'transparent',
+              color: activeAction === 'rephrase' ? activeButtonColor : textColor,
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: activeAction === 'rephrase' ? '500' : '400',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              if (activeAction !== 'rephrase') {
+                e.currentTarget.style.backgroundColor = buttonHoverBg
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeAction !== 'rephrase') {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
+            }}
+          >
+            Rephrase
+          </button>
+          <button
+            onClick={() => {
+              setActiveAction('lengthen')
+              processText('lengthen')
+            }}
+            style={{
+              padding: '6px 14px',
+              backgroundColor: activeAction === 'lengthen' ? activeButtonBg : 'transparent',
+              color: activeAction === 'lengthen' ? activeButtonColor : textColor,
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: activeAction === 'lengthen' ? '500' : '400',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              if (activeAction !== 'lengthen') {
+                e.currentTarget.style.backgroundColor = buttonHoverBg
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeAction !== 'lengthen') {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
+            }}
+          >
+            Lengthen
+          </button>
+          <button
+            onClick={() => {
+              setActiveAction('shorten')
+              processText('shorten')
+            }}
+            style={{
+              padding: '6px 14px',
+              backgroundColor: activeAction === 'shorten' ? activeButtonBg : 'transparent',
+              color: activeAction === 'shorten' ? activeButtonColor : textColor,
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: activeAction === 'shorten' ? '500' : '400',
+              transition: 'all 0.2s ease',
+            }}
+            onMouseEnter={(e) => {
+              if (activeAction !== 'shorten') {
+                e.currentTarget.style.backgroundColor = buttonHoverBg
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeAction !== 'shorten') {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
+            }}
+          >
+            Shorten
           </button>
         </div>
+        {/* Custom input below buttons */}
+        <input
+          ref={inputRef}
+          type="text"
+          value={customPrompt}
+          onChange={(e) => {
+            setCustomPrompt(e.target.value)
+            setActiveAction('custom')
+          }}
+          onKeyDown={handleCustomInputKeyDown}
+          onFocus={() => {
+            if (onInputFocus) {
+              onInputFocus(true)
+            }
+          }}
+          onBlur={() => {
+            if (onInputFocus) {
+              onInputFocus(false)
+            }
+          }}
+          placeholder="Enter your own..."
+          disabled={isLoading}
+          style={{
+            width: '100%',
+            padding: '6px 10px',
+            backgroundColor: inputBg,
+            border: `1px solid ${borderColor}`,
+            borderRadius: '6px',
+            fontSize: '13px',
+            color: textColor,
+            outline: 'none',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            transition: 'border-color 0.2s ease',
+          }}
+        />
       </div>
 
       {/* Results */}
-      <div style={{ padding: '0 10px 10px 10px' }}>
+      <div style={{ padding: '14px 12px' }}>
         {isLoading ? (
           <div
             style={{
@@ -374,35 +461,46 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
           >
             {error}
           </div>
-        ) : rephrasedText ? (
+        ) : improvedText ? (
           <div>
             <div
               style={{
-                padding: '10px 0',
-                marginBottom: '10px',
-                fontSize: '14px',
+                padding: '14px',
+                marginBottom: '14px',
+                fontSize: '13px',
                 color: textColor,
-                lineHeight: '1.6',
+                lineHeight: '1.7',
                 minHeight: '50px',
                 whiteSpace: 'pre-wrap',
+                backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa',
+                borderRadius: '8px',
+                border: `1px solid ${theme === 'dark' ? '#333' : '#e8eaed'}`,
               }}
             >
-              {rephrasedText}
+              {improvedText}
             </div>
-            <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button
                 onClick={() => {
-                  setRephrasedText(null)
+                  setImprovedText(null)
                   setCustomPrompt('')
                 }}
                 style={{
-                  padding: '4px 10px',
+                  padding: '7px 18px',
                   backgroundColor: 'transparent',
                   color: textColor,
                   border: `1px solid ${borderColor}`,
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: '12px',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = buttonHoverBg
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent'
                 }}
               >
                 Cancel
@@ -410,17 +508,27 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
               <button
                 onClick={handleReplace}
                 style={{
-                  padding: '4px 10px',
+                  padding: '7px 18px',
                   backgroundColor: theme === 'dark' ? '#4a9eff' : '#1a73e8',
                   color: 'white',
                   border: 'none',
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: '12px',
+                  fontSize: '13px',
                   fontWeight: '500',
+                  transition: 'all 0.2s ease',
+                  boxShadow: theme === 'dark' 
+                    ? '0 2px 4px rgba(74, 158, 255, 0.2)' 
+                    : '0 2px 4px rgba(26, 115, 232, 0.2)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#5aafff' : '#1557b8'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#4a9eff' : '#1a73e8'
                 }}
               >
-                Apply
+                Accept
               </button>
             </div>
           </div>

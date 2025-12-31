@@ -54,6 +54,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   const inlineReplaceInputRef = useRef<HTMLInputElement>(null)
   const isSearchInputFocusedRef = useRef(false)
   const isReplaceInputFocusedRef = useRef(false)
+  const isRephrasePopupInputFocusedRef = useRef(false)
   const [rightOffset, setRightOffset] = useState(20)
   
   // Expose search API to parent (Layout)
@@ -237,8 +238,8 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     }
 
     const handleSelectionUpdate = () => {
-      // Don't update selection popup if search input is focused
-      if (isSearchInputFocusedRef.current || isReplaceInputFocusedRef.current) {
+      // Don't update selection popup if search input or rephrase popup input is focused
+      if (isSearchInputFocusedRef.current || isReplaceInputFocusedRef.current || isRephrasePopupInputFocusedRef.current) {
         return
       }
       
@@ -1865,6 +1866,9 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         <TextRephrasePopup
           selectedText={selectedText}
           position={popupPosition}
+          onInputFocus={(isFocused) => {
+            isRephrasePopupInputFocusedRef.current = isFocused
+          }}
           onReplace={(newText) => {
             if (editor && selectedRange) {
               try {
@@ -1899,14 +1903,6 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                 }
               }
             }
-            setShowRephrasePopup(false)
-            setSelectedText('')
-            setSelectedRange(null)
-          }}
-          onAddToChat={(text) => {
-            // Dispatch custom event to add text to chat
-            const event = new CustomEvent('addToChat', { detail: text })
-            window.dispatchEvent(event)
             setShowRephrasePopup(false)
             setSelectedText('')
             setSelectedRange(null)

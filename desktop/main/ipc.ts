@@ -264,6 +264,7 @@ export function setupIPC() {
       const prompt = `Rephrase this text according to the instruction. 
 
 CRITICAL: Return ONLY the rephrased text. Do NOT include any follow-up questions, suggestions, "Next step" messages, or any other text. Just the rephrased text.
+IMPORTANT: Use the same language as the original text. If it's in English, respond in English. Match the language exactly. If the original text is in Chinese, respond in Chinese.
 
 Original text: "${text}"
 

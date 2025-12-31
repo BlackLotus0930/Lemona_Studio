@@ -97,8 +97,7 @@ export default function KeyboardShortcutsModal({
     {
       category: 'Text Selection',
       shortcuts: [
-        { action: 'Add to AI chat', keys: ['Ctrl', 'L'] },
-        { action: 'Quick edit', keys: ['Ctrl', 'K'] },
+        { action: 'Improve', keys: ['Ctrl', 'K'] },
       ]
     },
     {
