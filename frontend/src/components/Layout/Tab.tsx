@@ -129,7 +129,7 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
         fontSize: '13px',
         fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
         minWidth: '120px',
-        maxWidth: '240px',
+        maxWidth: '200px',
         position: 'relative',
         transition: isDragging ? 'none' : 'background-color 0.15s',
         userSelect: 'none',

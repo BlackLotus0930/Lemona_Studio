@@ -97,6 +97,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
   const savedActiveChatId = loadActiveChatId(document)
   const previousActiveChatIdRef = useRef<string>(savedActiveChatId || 'chat_default') // Track previous activeChatId to maintain across file switches
   const chatsRef = useRef<Chat[]>([]) // Track current chats to preserve new chats when switching files
+  const isNavigatingAwayRef = useRef<boolean>(false) // Track if we're navigating away to prevent persisting 'chat_default'
   const [isStreaming, setIsStreaming] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
@@ -139,7 +140,9 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
 
   // Persist active chat ID whenever it changes
   useEffect(() => {
-    if (document && activeChatId) {
+    // Don't persist if we're navigating away (document is null) or if activeChatId is 'chat_default' during navigation
+    // This prevents persisting 'chat_default' when clicking Home
+    if (document?.id && activeChatId && !isNavigatingAwayRef.current) {
       saveActiveChatId(document, activeChatId)
     }
   }, [document?.id, activeChatId])
@@ -147,14 +150,18 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
   // Load chat history when document changes
   useEffect(() => {
     if (!document?.id) {
-      // Reset to default if no document, but don't reset previousActiveChatIdRef
-      // as it should preserve the last active chat for when we return to a project
+      // Reset to default if no document
+      // Set flag to prevent persisting 'chat_default' when navigating away
+      isNavigatingAwayRef.current = true
       setChats([{ id: 'chat_default', name: 'Chat 1', messages: [] }])
       const defaultChatId = 'chat_default'
       setActiveChatId(defaultChatId)
       // Don't reset previousActiveChatIdRef here - preserve it for when we return
       return
     }
+    
+    // Document exists - reset the navigation flag
+    isNavigatingAwayRef.current = false
 
     const loadChatHistory = async () => {
       try {
@@ -224,8 +231,12 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
             }
           }
           
-          // Filter loaded chats to only include open tabs
-          const loadedChats = allLoadedChats.filter(chat => openChatIds.includes(chat.id))
+          // Build loadedChats based on openChatIds order (not allLoadedChats order)
+          // This preserves the correct tab order from localStorage
+          const chatMap = new Map(allLoadedChats.map(chat => [chat.id, chat]))
+          const loadedChats = openChatIds
+            .map(chatId => chatMap.get(chatId))
+            .filter((chat): chat is Chat => chat !== undefined)
           
           // Always prioritize saved active chat ID from localStorage when restoring
           // Check if saved active chat exists in loaded chats first
@@ -525,6 +536,12 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         newChats.splice(insertIndex, 0, draggedChat)
         
         setChats(newChats)
+        
+        // Update persisted open tabs list with new order
+        if (document) {
+          const newOpenTabs = newChats.map(c => c.id)
+          saveOpenChatTabs(document, newOpenTabs)
+        }
       }
     }
     
