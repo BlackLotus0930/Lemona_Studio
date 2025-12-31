@@ -196,6 +196,14 @@ code {
   color: #202124;
   caret-color: #202124;
   white-space: pre-wrap;
+  /* Remove all transitions to prevent text appearing animation */
+  transition: none !important;
+}
+
+/* Disable animations and transitions for all ProseMirror content to prevent text appearing animation */
+.ProseMirror * {
+  animation: none !important;
+  transition: none !important;
 }
 
 .dark-theme .ProseMirror {
@@ -317,13 +325,12 @@ code {
   margin-top: 0;
 }
 
-/* List styling - Professional indentation with smooth transitions */
+/* List styling - Professional indentation */
 .ProseMirror ul,
 .ProseMirror ol {
   padding-left: 1.75em;
   margin: 0.5em 0;
   margin-left: 0;
-  transition: all 0.15s ease;
 }
 
 .ProseMirror ul {
@@ -338,7 +345,6 @@ code {
   margin: 0.25em 0;
   padding-left: 0.25em;
   position: relative;
-  transition: all 0.15s ease;
 }
 
 /* Nested lists - Professional multi-level styling */
@@ -349,7 +355,6 @@ code {
   margin-top: 0.25em;
   margin-bottom: 0.25em;
   padding-left: 1.75em;
-  transition: all 0.15s ease;
 }
 
 /* Different bullet styles for nested lists */
@@ -381,10 +386,7 @@ code {
   margin-top: 0.5em;
 }
 
-/* Smooth transitions when converting between list and paragraph */
-.ProseMirror p {
-  transition: margin 0.15s ease, padding 0.15s ease;
-}
+/* Paragraph styling - transitions removed to prevent animation when content loads */
 
 /* Custom class for better list appearance */
 .ProseMirror .editor-bullet-list,
@@ -560,7 +562,6 @@ code {
   height: auto;
   margin: 0;
   padding: 0;
-  vertical-align: bottom;
 }
 
 /* Ensure cursor can be placed after images */
