@@ -130,6 +130,9 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   // Prevent editor from stealing focus when search inputs are active
   useEffect(() => {
     if (!editor) return
+    
+    // Check if editor is destroyed or view is not available
+    if (editor.isDestroyed || !editor.view) return
 
     const handleEditorBlur = (event: FocusEvent) => {
       // If focus is moving to search input, prevent editor from regaining focus
@@ -147,6 +150,9 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     }
 
     const handleFocusAttempt = (event: FocusEvent) => {
+      // Check if editor is still valid before accessing view
+      if (editor.isDestroyed || !editor.view) return
+      
       // If search input is focused, prevent editor from stealing focus
       if (isSearchInputFocusedRef.current || isReplaceInputFocusedRef.current) {
         const target = event.target as HTMLElement
@@ -163,6 +169,9 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       }
     }
 
+    // Check again before accessing view.dom (editor might have been destroyed between checks)
+    if (editor.isDestroyed || !editor.view) return
+    
     const editorElement = editor.view.dom as HTMLElement
     const globalDoc = window.document
     if (editorElement) {
@@ -170,7 +179,10 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       // Also listen for focus events to prevent stealing
       globalDoc.addEventListener('focusin', handleFocusAttempt, true)
       return () => {
-        editorElement.removeEventListener('blur', handleEditorBlur, true)
+        // Check if editor is still valid before removing listeners
+        if (!editor.isDestroyed && editor.view && editorElement) {
+          editorElement.removeEventListener('blur', handleEditorBlur, true)
+        }
         globalDoc.removeEventListener('focusin', handleFocusAttempt, true)
       }
     }
@@ -207,6 +219,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         }
         
         // Fallback to ProseMirror coordinates if DOM selection doesn't work
+        if (editor.isDestroyed || !editor.view) return
         const startCoords = editor.view.coordsAtPos(from)
         const endCoords = editor.view.coordsAtPos(to)
         
@@ -380,7 +393,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
 
   // Clear inline search highlights (both all matches and current match highlights)
   const clearInlineSearchHighlights = () => {
-    if (!editor) return
+    if (!editor || editor.isDestroyed || !editor.view) return
     
     try {
       const { state, dispatch } = editor.view
@@ -561,7 +574,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
 
   // Highlight all matches (temporary highlights) - all matches get the same color
   const highlightMatches = (matchesToHighlight: Array<{ from: number; to: number }>, currentIndex: number = -1) => {
-    if (!editor || matchesToHighlight.length === 0) {
+    if (!editor || editor.isDestroyed || !editor.view || matchesToHighlight.length === 0) {
       // Clear highlights if no matches
       clearInlineSearchHighlights()
       return
@@ -635,6 +648,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       
       // Scroll to match
       setTimeout(() => {
+        if (editor.isDestroyed || !editor.view) return
         const coords = editor.view.coordsAtPos(match.from)
         if (coords && scrollContainerRef.current) {
           const container = scrollContainerRef.current
@@ -1489,7 +1503,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           minHeight: '100%',
           position: 'relative'
         }}>
-          <EditorContent editor={editor} />
+          <EditorContent key={document?.id} editor={editor} />
           <Autocomplete editor={editor} documentContent={document?.content} documentId={document?.id} />
           
           {/* Inline Search/Replace Bar - Dark Mode */}

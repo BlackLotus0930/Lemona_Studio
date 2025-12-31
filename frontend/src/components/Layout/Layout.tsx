@@ -32,7 +32,7 @@ import { Subtitle } from '../Editor/Subtitle'
 import { useTheme } from '../../contexts/ThemeContext'
 import { BulletList, OrderedList, ListItem } from '@tiptap/extension-list'
 import { IndentExtension } from '../Editor/IndentExtension'
-import { TextSelection } from 'prosemirror-state'
+import { TextSelection, EditorState } from 'prosemirror-state'
 // @ts-ignore
 import ChatIcon from '@mui/icons-material/Chat'
 // @ts-ignore
@@ -185,6 +185,9 @@ export default function Layout() {
   const pendingSearchNavRef = useRef<{ query: string; position: number } | null>(null) // Track pending search navigation
   const isNavigatingFromSearchRef = useRef<boolean>(false) // Track if we're navigating from search results
   const lastRestoredDocIdRef = useRef<string | null>(null) // Track last document ID we restored search state for
+  const restoredStateDocIdRef = useRef<string | null>(null) // Track doc ID whose state was restored
+  // Store EditorState for each document to preserve undo/redo history when switching
+  const documentEditorStatesRef = useRef<Map<string, EditorState>>(new Map())
   
   // Track manually renamed documents (persisted in localStorage)
   const [manuallyRenamedDocs, setManuallyRenamedDocs] = useState<Set<string>>(() => {
@@ -1649,7 +1652,8 @@ export default function Layout() {
     },
   })
 
-  // Create ONE shared editor instance
+  // Create editor instance - recreated when document.id changes to ensure isolation
+  // Each document gets its own Editor/EditorView with independent history plugin
   const editor = useEditor({
     extensions: [
       // StarterKit without list extensions and link/underline (we'll configure them separately)
@@ -2088,8 +2092,22 @@ export default function Layout() {
         return false
       },
     },
+    onTransaction: ({ editor }) => {
+      // Save EditorState after every transaction to preserve complete undo/redo history
+      // This includes undo/redo operations, so history plugin state is always up-to-date
+      if (document && editor && !editor.isDestroyed && editor.view) {
+        const currentState = editor.view.state
+        documentEditorStatesRef.current.set(document.id, currentState)
+      }
+    },
     onUpdate: ({ editor }) => {
       if (document) {
+        // Also save EditorState in onUpdate as a backup (though onTransaction should handle it)
+        if (editor && !editor.isDestroyed && editor.view) {
+          const currentState = editor.view.state
+          documentEditorStatesRef.current.set(document.id, currentState)
+        }
+        
         if (saveTimeoutRef.current) {
           clearTimeout(saveTimeoutRef.current)
         }
@@ -2148,8 +2166,61 @@ export default function Layout() {
         }, 1000)
       }
     },
-  })
+  }, [document?.id]) // Recreate editor when document.id changes - ensures independent Editor/EditorView for each document
   
+  // Save the current editor state right before the editor instance is destroyed/recreated
+  // This catches cases where useEditor re-creates the editor due to document.id change
+  useEffect(() => {
+    return () => {
+      if (editor && currentDocIdRef.current && !editor.isDestroyed && editor.view) {
+        documentEditorStatesRef.current.set(currentDocIdRef.current, editor.view.state)
+      }
+    }
+  }, [editor])
+
+  // Save EditorState before switching documents
+  useEffect(() => {
+    if (!editor || !document) return
+    
+    // Save current document's EditorState before switching (if we have a current document)
+    const documentChanged = currentDocIdRef.current !== null && currentDocIdRef.current !== document.id
+    if (documentChanged && currentDocIdRef.current && editor && !editor.isDestroyed && editor.view) {
+      const currentState = editor.view.state
+      documentEditorStatesRef.current.set(currentDocIdRef.current, currentState)
+    }
+  }, [document?.id, editor])
+
+  // Restore saved EditorState immediately when editor is created for a document
+  // This must happen BEFORE the content update effect runs
+  useEffect(() => {
+    if (!editor || !document || editor.isDestroyed || !editor.view) return
+    
+    // Check if we have a saved EditorState for this document
+    const savedState = documentEditorStatesRef.current.get(document.id)
+    
+    // Check if this is a document switch (not just content update from server)
+    const documentChanged = currentDocIdRef.current !== document.id
+    
+    // Restore EditorState if:
+    // 1. We have a saved state
+    // 2. This is a document switch (documentChanged is true)
+    // This ensures we restore the complete EditorState including history when switching back to a document
+    if (savedState && documentChanged) {
+      // Restore the complete EditorState including history plugin state
+      // This preserves the full undo/redo history
+      editor.view.updateState(savedState)
+      
+      // Extract content from the restored state to update lastContentRef
+      // This ensures content update effect won't call setContent and reset history
+      const restoredContent = JSON.stringify(editor.getJSON())
+      
+      // Update refs to match the restored state
+      currentDocIdRef.current = document.id
+      currentDocTitleRef.current = document.title
+      lastContentRef.current = restoredContent // Use content from restored state, not document.content
+      restoredStateDocIdRef.current = document.id
+    }
+  }, [editor, document?.id]) // Run when editor or document.id changes
 
   // Search results use temporary highlights (Chrome-style) that are not saved to the document
 
@@ -2157,9 +2228,12 @@ export default function Layout() {
   useEffect(() => {
     if (!editor) return
     
-    // If document is null, just reset the ref and don't touch the editor
-    // The navigation will handle loading the new document
+    // If document is null, save current state (if any) before clearing refs
+    // This captures history when the app clears document while switching
     if (!document) {
+      if (editor && currentDocIdRef.current && !editor.isDestroyed && editor.view) {
+        documentEditorStatesRef.current.set(currentDocIdRef.current, editor.view.state)
+      }
       lastContentRef.current = ''
       currentDocIdRef.current = null
       currentDocTitleRef.current = null
@@ -2169,11 +2243,33 @@ export default function Layout() {
     // Skip if content hasn't changed AND document ID is the same
     const documentChanged = currentDocIdRef.current !== document.id
     const contentChanged = lastContentRef.current !== document.content
+
+    // If we just restored this document's state, skip the content update entirely
+    if (restoredStateDocIdRef.current === document.id) {
+      restoredStateDocIdRef.current = null
+      currentDocTitleRef.current = document.title
+      return
+    }
     
     // If only title changed (not content or ID), skip editor update to preserve editor state
     if (!documentChanged && !contentChanged) {
       // Still update the title ref even if we skip editor update
       currentDocTitleRef.current = document.title
+      return
+    }
+    
+    // Check if EditorState was already restored in the previous effect
+    // If EditorState was restored (documentChanged && savedState exists), skip content update
+    // This preserves the complete undo/redo history even if document.content differs
+    const savedState = documentEditorStatesRef.current.get(document.id)
+    const wasStateRestored = savedState && documentChanged
+
+    // If EditorState was restored elsewhere, skip content update to preserve history
+    // The restored state already contains the correct content and history
+    if (wasStateRestored) {
+      currentDocIdRef.current = document.id
+      currentDocTitleRef.current = document.title
+      // Don't update lastContentRef here - it was already set to restored content in the restore effect
       return
     }
     
@@ -2241,8 +2337,14 @@ export default function Layout() {
               }
             }
             
-            // Set content
-            editor.commands.setContent(content)
+            // Set content - EditorState restoration is handled in the previous effect (line 2176)
+            // This effect only runs when content needs to be updated from server
+            // If EditorState was already restored, this effect would have been skipped (line 2227)
+            editor.commands.setContent(content, { emitUpdate: false })
+            // Save the newly created state
+            const newState = editor.view.state
+            documentEditorStatesRef.current.set(document.id, newState)
+            
             lastContentRef.current = docContent
             
             // Clear search highlights after setting content (in case they were preserved)
