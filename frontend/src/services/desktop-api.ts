@@ -4,12 +4,22 @@ import { Project, AIChatMessage } from '@shared/types'
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electron !== undefined
 
-// Helper to get API key from localStorage
+// Helper to get Google API key from localStorage
 function getApiKey(): string {
   try {
     return localStorage.getItem('googleApiKey') || ''
   } catch (error) {
     console.error('Failed to get API key from localStorage:', error)
+    return ''
+  }
+}
+
+// Helper to get OpenAI API key from localStorage
+function getOpenaiApiKey(): string {
+  try {
+    return localStorage.getItem('openaiApiKey') || ''
+  } catch (error) {
+    console.error('Failed to get OpenAI API key from localStorage:', error)
     return ''
   }
 }
@@ -63,24 +73,26 @@ export const aiApi = {
     return invokeOrFetch('ai:generateTitle', apiKey, documentContent, provider)
   },
   rephraseText: (text: string, instruction: string, provider?: 'gemini' | 'ollama' | 'auto') => {
-    const apiKey = getApiKey()
-    return invokeOrFetch('ai:rephraseText', apiKey, text, instruction, provider)
+    const googleApiKey = getApiKey()
+    const openaiApiKey = getOpenaiApiKey()
+    return invokeOrFetch('ai:rephraseText', googleApiKey, openaiApiKey, text, instruction, provider)
   },
   getStatus: () =>
     invokeOrFetch('ai:getStatus'),
-  streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string, attachments?: any[]): Promise<Response> => {
+  streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string, attachments?: any[], style?: string): Promise<Response> => {
     if (!isElectron) {
       throw new Error('Streaming not available in web mode')
     }
 
-    const apiKey = getApiKey()
+    const googleApiKey = getApiKey()
+    const openaiApiKey = getOpenaiApiKey()
 
     // Create a ReadableStream that reads from IPC events
     const stream = new ReadableStream({
       async start(controller) {
         try {
           // Start stream and get streamId
-          const { streamId } = await window.electron!.invoke('ai:streamChat', apiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, attachments)
+          const { streamId } = await window.electron!.invoke('ai:streamChat', googleApiKey, openaiApiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, attachments, style)
           console.log('[Desktop API] Stream started with ID:', streamId)
           
           // Note: preload script strips the event, so callbacks receive args directly

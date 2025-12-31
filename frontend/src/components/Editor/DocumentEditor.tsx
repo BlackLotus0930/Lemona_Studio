@@ -246,6 +246,14 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       const { from, to } = editor.state.selection
       const isEmpty = from === to
       
+      // If popup is already showing and we have a stored range, don't close it on temporary selection collapse
+      // This prevents the popup from disappearing when Ctrl+K is pressed (which may temporarily collapse selection)
+      if (isEmpty && showRephrasePopup && selectedRange) {
+        // Only update position if popup is showing, don't close it
+        updatePopupPosition(selectedRange)
+        return
+      }
+      
       if (isEmpty) {
         setSelectedText('')
         setSelectedRange(null)
@@ -1291,8 +1299,97 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                     
                     // Validate positions point to valid inline content
                     try {
-                      const $from = doc.resolve(from)
-                      const $to = doc.resolve(to)
+                      const { state } = editor.view
+                      const { listItem } = state.schema.nodes
+                      
+                      // Helper function to adjust position if it points to a listItem
+                      const adjustPositionForListItem = (pos: number): number | null => {
+                        try {
+                          const $pos = doc.resolve(pos)
+                          
+                          // Check if we're inside a listItem at any depth
+                          let listItemDepth = -1
+                          for (let d = $pos.depth; d > 0; d--) {
+                            if ($pos.node(d).type === listItem) {
+                              listItemDepth = d
+                              break
+                            }
+                          }
+                          
+                          // If we're in a listItem, check if parent has inline content
+                          if (listItemDepth >= 0) {
+                            // Check if parent node can contain inline content
+                            // If parent is listItem itself, we need to find the paragraph within it
+                            if ($pos.parent.type === listItem || $pos.parent.type.name === 'listItem') {
+                              // Find the paragraph within the listItem
+                              const listItemPos = $pos.before(listItemDepth)
+                              
+                              try {
+                                const resolvedPos = state.doc.resolve(listItemPos + 1)
+                                // Look for paragraph/heading/title/subtitle within the listItem
+                                for (let childD = resolvedPos.depth; childD > 0 && childD <= resolvedPos.depth + 2; childD++) {
+                                  const childNode = resolvedPos.node(childD)
+                                  if (childNode.type.name === 'paragraph' || 
+                                      childNode.type.name.startsWith('heading') || 
+                                      childNode.type.name === 'title' || 
+                                      childNode.type.name === 'subtitle') {
+                                    // Found the paragraph - adjust position to point to valid inline content
+                                    const paragraphStart = resolvedPos.before(childD) + 1
+                                    const paragraphEnd = resolvedPos.after(childD) - 1
+                                    
+                                    // Ensure we have valid inline content
+                                    if (paragraphStart < paragraphEnd) {
+                                      // Clamp position to paragraph bounds, ensuring it's within inline content
+                                      const adjustedPos = Math.max(paragraphStart, Math.min(pos, paragraphEnd))
+                                      // Verify the adjusted position points to inline content
+                                      const $adjusted = doc.resolve(adjustedPos)
+                                      if ($adjusted.parent.inlineContent) {
+                                        return adjustedPos
+                                      }
+                                    }
+                                    // If paragraph is empty, use start position
+                                    return paragraphStart
+                                  }
+                                }
+                              } catch (e) {
+                                // If resolution fails, return null
+                                return null
+                              }
+                              
+                              // No paragraph found in listItem
+                              return null
+                            }
+                            
+                            // If parent is not listItem but we're inside one, check if parent has inline content
+                            if (!$pos.parent.inlineContent) {
+                              // Parent doesn't have inline content, try to find a valid position
+                              return null
+                            }
+                          }
+                          
+                          // Verify the position points to inline content
+                          if (!$pos.parent.inlineContent) {
+                            return null
+                          }
+                          
+                          // Position is valid, return original
+                          return pos
+                        } catch (e) {
+                          return null
+                        }
+                      }
+                      
+                      // Adjust positions if they point to listItems
+                      const adjustedFrom = adjustPositionForListItem(from)
+                      const adjustedTo = adjustPositionForListItem(to)
+                      
+                      // If either position couldn't be adjusted, skip selection
+                      if (adjustedFrom === null || adjustedTo === null) {
+                        return
+                      }
+                      
+                      const $from = doc.resolve(adjustedFrom)
+                      const $to = doc.resolve(adjustedTo)
                       
                       // Ensure positions are within valid nodes that can contain text
                       // Check if we're at a valid selection boundary
@@ -1305,11 +1402,16 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                         return
                       }
                       
+                      // Ensure positions are still different after adjustment
+                      if (adjustedFrom === adjustedTo) {
+                        return
+                      }
+                      
                       // Set text selection from initial position to current position
-                      // Use from/to directly without sorting - this preserves selection direction
+                      // Use adjusted positions - this preserves selection direction
                       editor.chain().focus().setTextSelection({ 
-                        from, 
-                        to 
+                        from: adjustedFrom, 
+                        to: adjustedTo 
                       }).run()
                     } catch (error) {
                       // Silently ignore selection errors (e.g., invalid positions)

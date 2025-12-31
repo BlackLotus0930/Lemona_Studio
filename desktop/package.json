@@ -30,6 +30,7 @@
     "dotenv": "^17.2.3",
     "electron": "^28.0.0",
     "mammoth": "^1.11.0",
+    "openai": "^6.15.0",
     "pdfjs-dist": "^3.11.174",
     "pdfkit": "^0.17.2",
     "puppeteer": "^24.34.0"

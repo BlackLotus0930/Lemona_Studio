@@ -3,6 +3,7 @@ import { ipcMain, BrowserWindow, shell } from 'electron'
 import { documentService } from './services/documentService.js'
 import { chatHistoryService } from './services/chatHistoryService.js'
 import { geminiService } from './services/geminiService.js'
+import { openaiService } from './services/openaiService.js'
 import { projectService } from './services/projectService.js'
 import { exportService } from './services/export.js'
 import { extractPDFTextAsync } from './services/pdfTextExtractor.js'
@@ -167,7 +168,7 @@ export function setupIPC() {
 
   // Stream chat - uses webContents.send to stream chunks
   // Chat always uses Gemini (not Ollama)
-  ipcMain.handle('ai:streamChat', async (event, apiKey: string, message: string, documentContent?: string, documentId?: string, chatHistory?: any[], useWebSearch?: boolean, modelName?: string, attachments?: any[]) => {
+  ipcMain.handle('ai:streamChat', async (event, googleApiKey: string, openaiApiKey: string, message: string, documentContent?: string, documentId?: string, chatHistory?: any[], useWebSearch?: boolean, modelName?: string, attachments?: any[], style?: string) => {
     const webContents = event.sender
     const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     
@@ -181,12 +182,28 @@ export function setupIPC() {
         projectId = document?.projectId
       }
       
+      // Determine which service to use based on model name
+      const isOpenaiModel = modelName && modelName.startsWith('gpt-')
+      const useOpenai = isOpenaiModel && openaiApiKey
+      
+      if (useOpenai && !openaiApiKey) {
+        throw new Error('OpenAI API key is required for GPT models. Please set it in Settings > API Keys.')
+      }
+      
+      if (!useOpenai && !googleApiKey) {
+        throw new Error('Google API key is required for Gemini models. Please set it in Settings > API Keys.')
+      }
+      
       // Start streaming in background
       ;(async () => {
         try {
-          console.log(`[Stream] Calling geminiService.streamChat with ${chatHistory?.length || 0} history messages, ${attachments?.length || 0} attachments...`)
+          console.log(`[Stream] Calling ${useOpenai ? 'openaiService' : 'geminiService'}.streamChat with ${chatHistory?.length || 0} history messages, ${attachments?.length || 0} attachments...`)
           let chunkCount = 0
-          for await (const chunk of geminiService.streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments)) {
+          const stream = useOpenai
+            ? openaiService.streamChat(openaiApiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, style)
+            : geminiService.streamChat(googleApiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments)
+          
+          for await (const chunk of stream) {
             chunkCount++
             webContents.send('ai:streamChunk', streamId, chunk)
           }
@@ -254,12 +271,11 @@ export function setupIPC() {
     }
   })
 
-  // Rephrase text uses Gemini 2.5 Flash Lite (fast and free)
-  ipcMain.handle('ai:rephraseText', async (_, apiKey: string, text: string, instruction: string) => {
+  // Rephrase text uses GPT-5 Nano if only OpenAI key is available, otherwise Gemini 2.5 Flash Lite
+  ipcMain.handle('ai:rephraseText', async (_, googleApiKey: string, openaiApiKey: string, text: string, instruction: string) => {
     try {
       console.log('[IPC] Rephrase text request:', { textLength: text.length, instruction })
       
-      // Use Gemini Flash Lite for fast rephrasing
       // Explicitly instruct to only return the rephrased text with no follow-up questions or suggestions
       const prompt = `Rephrase this text according to the instruction. 
 
@@ -272,8 +288,20 @@ Instruction: ${instruction}
 
 Rephrased text:`
       
-      const msg = await geminiService.chat(apiKey, prompt, undefined, undefined, undefined, 'gemini-2.5-flash-lite')
-      let result = msg.content.trim()
+      let result: string
+      
+      // Use GPT-5 Nano if only OpenAI key is available, otherwise use Gemini 2.5 Flash Lite
+      if (openaiApiKey && !googleApiKey) {
+        console.log('[IPC] Using OpenAI GPT-5 Nano for rephrasing')
+        const msg = await openaiService.chat(openaiApiKey, prompt, undefined, undefined, undefined, 'gpt-5-nano')
+        result = msg.content.trim()
+      } else if (googleApiKey) {
+        console.log('[IPC] Using Gemini 2.5 Flash Lite for rephrasing')
+        const msg = await geminiService.chat(googleApiKey, prompt, undefined, undefined, undefined, 'gemini-2.5-flash-lite')
+        result = msg.content.trim()
+      } else {
+        throw new Error('No API key configured. Please set either Google API key or OpenAI API key in Settings > API Keys.')
+      }
       
       // Remove any "Next step" or similar follow-up text that might still appear
       const nextStepPatterns = [

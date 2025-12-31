@@ -76,6 +76,45 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
     }
   }, [improvedText, onReplace, onClose])
 
+  // Helper function to format error messages in a user-friendly way
+  const formatErrorMessage = (error: any): string => {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    
+    // API key errors
+    if (errorMessage.includes('API key') || errorMessage.includes('not configured')) {
+      if (errorMessage.includes('OpenAI')) {
+        return 'OpenAI API key is required. Please add your OpenAI API key in Settings > API Keys.'
+      }
+      if (errorMessage.includes('Google')) {
+        return 'Google API key is required. Please add your Google API key in Settings > API Keys.'
+      }
+      return 'API key is required. Please add your API key in Settings > API Keys.'
+    }
+    
+    // Network/connection errors
+    if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('ECONNREFUSED')) {
+      return 'Connection error. Please check your internet connection and try again.'
+    }
+    
+    // Rate limit errors
+    if (errorMessage.includes('rate limit') || errorMessage.includes('429')) {
+      return 'Rate limit exceeded. Please wait a moment and try again.'
+    }
+    
+    // Authentication errors
+    if (errorMessage.includes('401') || errorMessage.includes('unauthorized') || errorMessage.includes('invalid')) {
+      return 'Invalid API key. Please check your API key in Settings > API Keys.'
+    }
+    
+    // Quota/billing errors
+    if (errorMessage.includes('quota') || errorMessage.includes('billing') || errorMessage.includes('insufficient')) {
+      return 'API quota exceeded. Please check your API account billing or usage limits.'
+    }
+    
+    // Generic error
+    return 'Unable to process your request. Please try again or check your API keys.'
+  }
+
   const processText = useCallback(async (action: ActionType, prompt?: string) => {
     setIsLoading(true)
     setError(null)
@@ -126,7 +165,8 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
       setImprovedText(improved)
     } catch (err) {
       console.error('Text improvement error:', err)
-      setError(err instanceof Error ? err.message : 'Failed to improve text')
+      const friendlyError = formatErrorMessage(err)
+      setError(friendlyError)
     } finally {
       setIsLoading(false)
     }
@@ -452,14 +492,17 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
         ) : error ? (
           <div
             style={{
-              padding: '10px',
+              padding: '12px 14px',
               backgroundColor: theme === 'dark' ? '#3a1f1f' : '#fce8e6',
               borderRadius: '6px',
+              border: `1px solid ${theme === 'dark' ? '#5a2f2f' : '#f28b82'}`,
               color: theme === 'dark' ? '#ff6b6b' : '#c5221f',
               fontSize: '13px',
+              lineHeight: '1.5',
             }}
           >
-            {error}
+            <div style={{ fontWeight: '500', marginBottom: '4px' }}>⚠️ Error</div>
+            <div>{error}</div>
           </div>
         ) : improvedText ? (
           <div>

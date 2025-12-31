@@ -147,13 +147,12 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
   // Load chat history when document changes
   useEffect(() => {
     if (!document?.id) {
-      // Reset to default if no document
+      // Reset to default if no document, but don't reset previousActiveChatIdRef
+      // as it should preserve the last active chat for when we return to a project
       setChats([{ id: 'chat_default', name: 'Chat 1', messages: [] }])
       const defaultChatId = 'chat_default'
       setActiveChatId(defaultChatId)
-      if (previousActiveChatIdRef) {
-        previousActiveChatIdRef.current = defaultChatId
-      }
+      // Don't reset previousActiveChatIdRef here - preserve it for when we return
       return
     }
 
@@ -165,7 +164,8 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         // Load saved open chat tabs
         const savedOpenTabs = loadOpenChatTabs(document)
         
-        // Prefer saved active chat ID, then ref, then current state
+        // Always prioritize saved active chat ID from localStorage for this project
+        // This ensures we restore the correct chat when returning to a project
         const currentChatId = savedActiveChatId || (previousActiveChatIdRef && previousActiveChatIdRef.current) || activeChatId
         
         // IPC returns data directly, not wrapped in { data: ... }
@@ -206,33 +206,38 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
           if (savedOpenTabs.length === 0) {
             // First time loading - include all chats
             openChatIds = allLoadedChats.map(chat => chat.id)
-            // Ensure active chat is included
-            if (currentChatId && !openChatIds.includes(currentChatId)) {
-              openChatIds.push(currentChatId)
+            // Ensure saved active chat is included if it exists in chat history
+            if (savedActiveChatId && allLoadedChats.some(chat => chat.id === savedActiveChatId)) {
+              if (!openChatIds.includes(savedActiveChatId)) {
+                openChatIds.push(savedActiveChatId)
+              }
             }
             saveOpenChatTabs(document, openChatIds)
           } else {
-            // Use saved open tabs, but ensure active chat is included
+            // Use saved open tabs, but ensure saved active chat is included if it exists
             openChatIds = [...savedOpenTabs]
-            if (currentChatId && !openChatIds.includes(currentChatId)) {
-              openChatIds.push(currentChatId)
-              saveOpenChatTabs(document, openChatIds)
+            if (savedActiveChatId && allLoadedChats.some(chat => chat.id === savedActiveChatId)) {
+              if (!openChatIds.includes(savedActiveChatId)) {
+                openChatIds.push(savedActiveChatId)
+                saveOpenChatTabs(document, openChatIds)
+              }
             }
           }
           
           // Filter loaded chats to only include open tabs
           const loadedChats = allLoadedChats.filter(chat => openChatIds.includes(chat.id))
           
-          // Always maintain the current activeChatId when switching files/tabs
-          // Don't auto-switch to first chat - keep whatever chat is currently active
-          
-          // Check if current chat exists in loaded chats
-          const chatExists = loadedChats.some(chat => chat.id === currentChatId)
-          
-          // If current chat doesn't exist in loaded chats, try to restore it or use first available
-          let chatIdToUse = currentChatId
-          if (!chatExists) {
-            // If saved chat doesn't exist, use first chat from loaded chats
+          // Always prioritize saved active chat ID from localStorage when restoring
+          // Check if saved active chat exists in loaded chats first
+          let chatIdToUse: string
+          if (savedActiveChatId && loadedChats.some(chat => chat.id === savedActiveChatId)) {
+            // Saved active chat exists - use it
+            chatIdToUse = savedActiveChatId
+          } else if (currentChatId && loadedChats.some(chat => chat.id === currentChatId)) {
+            // Current chat ID exists - use it
+            chatIdToUse = currentChatId
+          } else {
+            // Fallback to first available chat
             if (loadedChats.length > 0) {
               chatIdToUse = loadedChats[0].id
             } else {
