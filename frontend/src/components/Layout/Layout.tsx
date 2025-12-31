@@ -182,6 +182,8 @@ export default function Layout() {
   const lastContentRef = useRef<string>('') // Track last set content to avoid unnecessary updates
   const currentDocIdRef = useRef<string | null>(null) // Track current document ID
   const currentDocTitleRef = useRef<string | null>(null) // Track current document title for placeholder
+  const isLoadingDocumentRef = useRef<boolean>(true) // Track loading state for placeholder
+  const isNewlyCreatedDocRef = useRef<boolean>(false) // Track if document was just created (for auto-focus)
   const pendingSearchNavRef = useRef<{ query: string; position: number } | null>(null) // Track pending search navigation
   const isNavigatingFromSearchRef = useRef<boolean>(false) // Track if we're navigating from search results
   const lastRestoredDocIdRef = useRef<string | null>(null) // Track last document ID we restored search state for
@@ -215,6 +217,11 @@ export default function Layout() {
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
   const borderColor = theme === 'dark' ? '#232323' : '#dadce0'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#5f6368'
+
+  // Sync loading state ref for placeholder
+  useEffect(() => {
+    isLoadingDocumentRef.current = isLoadingDocument
+  }, [isLoadingDocument])
 
   // Restore search mode and query from sessionStorage when document changes (after navigation)
   useEffect(() => {
@@ -282,6 +289,12 @@ export default function Layout() {
           pdfViewerRef.current.clearSearch()
         } else if (!isPDF && documentEditorRef.current) {
           documentEditorRef.current.clearSearch()
+        }
+        
+        // Clear newly created flag when switching to a different document
+        // (unless this is the newly created document itself)
+        if (document && document.id !== id) {
+          isNewlyCreatedDocRef.current = false
         }
         
         setIsLoadingDocument(true)
@@ -1627,10 +1640,14 @@ export default function Layout() {
         }
       }
       
+      // Mark as newly created document for auto-focus and placeholder hiding
+      isNewlyCreatedDocRef.current = true
+      
       navigate(`/document/${newDoc.id}`)
     } catch (error) {
       console.error('Failed to create document:', error)
       alert('Failed to create document. Please try again.')
+      isNewlyCreatedDocRef.current = false
     }
   }
 
@@ -1744,13 +1761,17 @@ export default function Layout() {
       }),
       Placeholder.configure({
         placeholder: () => {
-          // Check if the current document is README.md using ref to get latest value
+          // Hide placeholder when document is loading or when it's a newly created document
+          if (isLoadingDocumentRef.current || isNewlyCreatedDocRef.current) {
+            return ''
+          }
+          // Only show placeholder for README files
           const docTitle = currentDocTitleRef.current
           const isReadme = docTitle?.toLowerCase() === 'readme.md' || 
                           docTitle?.toLowerCase() === 'readme'
           return isReadme 
             ? 'This README helps the AI learn about the project...'
-            : 'Start writing...'
+            : '' // No placeholder for regular documents
         },
       }),
       Underline,
@@ -2295,7 +2316,7 @@ export default function Layout() {
          try {
           const content = JSON.parse(docContent)
           
-          // Check if editor is still mounted and ready
+            // Check if editor is still mounted and ready
           if (editor && !editor.isDestroyed && editor.view) {
             // Always clear search highlights before setting new content
             // This ensures highlights don't persist when navigating between documents
@@ -2303,6 +2324,20 @@ export default function Layout() {
             
             // Check if this is a new tab (document not in openTabs before)
             const isNewTab = !openTabs.some(tab => tab.id === document.id)
+            
+            // If this is a newly created document, focus immediately before setting content
+            // This prevents placeholder from showing
+            if (isNewlyCreatedDocRef.current && editor && !editor.isDestroyed && editor.view) {
+              try {
+                const editorElement = editor.view.dom as HTMLElement
+                if (editorElement) {
+                  editorElement.focus()
+                  editor.commands.focus('start')
+                }
+              } catch (e) {
+                // Ignore focus errors
+              }
+            }
             
             // Restore scroll position BEFORE setting content to prevent any scrolling animation
             // Only restore scroll position if this is NOT a new tab (i.e., switching to existing tab)
@@ -2485,10 +2520,15 @@ export default function Layout() {
               // Check if this is a new tab (document not in openTabs before)
               const isNewTab = !openTabs.some(tab => tab.id === document.id)
               
-              if (isEmpty) {
+              if (isEmpty || isNewlyCreatedDocRef.current) {
                 // Scenario 1: New file - autofocus at top
+                // Also handle newly created documents (even if not empty, they should be focused)
                 const focusEditor = (attempt: number = 0) => {
-                  if (isCancelled || attempt > 5) return
+                  if (isCancelled || attempt > 5) {
+                    // Clear the flag even if focus failed
+                    isNewlyCreatedDocRef.current = false
+                    return
+                  }
                   
                   if (editor && !editor.isDestroyed && editor.view) {
                     const editorElement = editor.view.dom as HTMLElement
@@ -2503,10 +2543,19 @@ export default function Layout() {
                       // Focus at the beginning (top)
                       try {
                         editor.commands.focus('start')
+                        // Clear the flag after successful focus
+                        isNewlyCreatedDocRef.current = false
                       } catch (e) {
-                        // Ignore focus errors
+                        // Ignore focus errors, but still clear the flag
+                        isNewlyCreatedDocRef.current = false
                       }
+                    } else {
+                      // Retry if editor element not ready
+                      setTimeout(() => focusEditor(attempt + 1), 50)
                     }
+                  } else {
+                    // Retry if editor not ready
+                    setTimeout(() => focusEditor(attempt + 1), 50)
                   }
                 }
                 
