@@ -491,6 +491,10 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           // This prevents selection update handlers from closing popup
           isCtrlKProcessingRef.current = true
           
+          // CRITICAL: Mark the time when Ctrl+K is pressed to prevent click-outside handler from closing popup
+          // Store in window object so TextRephrasePopup can also access it
+          ;(window as any).__lastCtrlKTime = Date.now()
+          
           // CRITICAL: Prevent default and stop propagation IMMEDIATELY
           // This prevents ProseMirror and browser from handling the event
           e.preventDefault()

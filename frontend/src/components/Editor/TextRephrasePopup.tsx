@@ -232,6 +232,9 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'k' || e.key === 'K') {
+          // CRITICAL: Mark the time when Ctrl+K is pressed to prevent click-outside handler from closing popup
+          // Use window object to share with DocumentEditor
+          ;(window as any).__lastCtrlKTime = Date.now()
           e.preventDefault()
           // Cancel any pending autocomplete requests
           if (typeof (window as any).__cancelAutocomplete === 'function') {
@@ -271,6 +274,17 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
   // Close popup when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      // CRITICAL: Ignore clicks that happen shortly after Ctrl+K to prevent accidental close
+      // Ctrl+K might trigger focus changes that cause mousedown events
+      // Check both window global (set by DocumentEditor) and local ref (set by this component)
+      const lastCtrlKTime = (window as any).__lastCtrlKTime || 0
+      const timeSinceCtrlK = Date.now() - lastCtrlKTime
+      const CTRL_K_COOLDOWN_MS = 300 // Ignore clicks within 300ms of Ctrl+K
+      
+      if (timeSinceCtrlK < CTRL_K_COOLDOWN_MS) {
+        return
+      }
+      
       if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
         onClose()
       }
@@ -278,7 +292,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [onClose])
+  }, [onClose, isExpanded])
 
   // Show compact button initially
   if (!isExpanded) {
