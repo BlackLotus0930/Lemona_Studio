@@ -28,6 +28,8 @@ import AddIcon from '@mui/icons-material/Add'
 import AttachFileIcon from '@mui/icons-material/AttachFile'
 // @ts-ignore
 import FormatQuoteIcon from '@mui/icons-material/FormatQuote'
+// @ts-ignore
+import StopIcon from '@mui/icons-material/Stop'
 
 interface ChatInterfaceProps {
   documentId?: string
@@ -102,6 +104,9 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const unifiedContainerRef = useRef<HTMLDivElement>(null)
   const previousMessageCountRef = useRef<number>(0)
   const hasRestoredScrollRef = useRef<boolean>(false)
+  const streamReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const isStreamCancelledRef = useRef<boolean>(false)
   const lastStreamingContentLengthRef = useRef<number>(0)
   const streamingScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [inputContainerWidth, setInputContainerWidth] = useState<number | null>(null)
@@ -794,8 +799,43 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     return 'Unable to process your request. Please try again or check your API keys in Settings.'
   }
 
+  const handleStopGeneration = async () => {
+    isStreamCancelledRef.current = true
+    
+    if (streamReaderRef.current) {
+      try {
+        await streamReaderRef.current.cancel()
+      } catch (error) {
+        console.error('Error canceling stream:', error)
+      }
+      streamReaderRef.current = null
+    }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    
+    // Remove the incomplete assistant message if it exists
+    if (currentAssistantMessageIdRef.current) {
+      setMessages(prev => {
+        const filtered = prev.filter(msg => msg.id !== currentAssistantMessageIdRef.current)
+        return filtered
+      })
+      currentAssistantMessageIdRef.current = null
+    }
+    
+    setIsLoading(false)
+    setIsStreaming(false)
+  }
+
   const handleSend = async () => {
-    if ((!input.trim() && attachments.length === 0) || isLoading || !documentId || !chatId) return
+    // If already generating, stop the current generation
+    if (isLoading) {
+      await handleStopGeneration()
+      return
+    }
+
+    if ((!input.trim() && attachments.length === 0) || !documentId || !chatId) return
 
     // Check for required API keys before sending
     const isOpenaiModel = selectedModel.startsWith('gpt-')
@@ -856,10 +896,20 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     await saveMessage(userMessage, false)
 
     try {
+      // Reset cancellation flag
+      isStreamCancelledRef.current = false
+      
+      // Create abort controller for this request
+      abortControllerRef.current = new AbortController()
+      
       // Pass chat history (excluding the just-added user message) for conversation continuity
       const chatHistoryForAPI = messages.filter(msg => msg.id !== userMessage.id)
-      const response = await aiApi.streamChat(input, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined, selectedStyle)
+      const response = await aiApi.streamChat(userMessage.content, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined, selectedStyle)
       const reader = response.body?.getReader()
+      
+      // Store reader reference for cancellation
+      streamReaderRef.current = reader || null
+      
       const decoder = new TextDecoder()
 
       let assistantMessage: AIChatMessage = {
@@ -881,37 +931,50 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
       await saveMessage(assistantMessage, true)
 
       if (reader) {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
+        try {
+          while (true) {
+            // Check if stream was cancelled
+            if (isStreamCancelledRef.current || !streamReaderRef.current) {
+              break
+            }
+            
+            const { done, value } = await reader.read()
+            if (done) break
 
-          const chunk = decoder.decode(value)
-          const lines = chunk.split('\n')
+            const chunk = decoder.decode(value)
+            const lines = chunk.split('\n')
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6))
-                if (data.chunk) {
-                  assistantMessage.content += data.chunk
-                  setMessages(prev => {
-                    const updated = [...prev]
-                    updated[updated.length - 1] = { ...assistantMessage }
-                    return updated
-                  })
-                  // Update message during streaming (debounced)
-                  await saveMessage(assistantMessage, true)
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6))
+                  if (data.chunk) {
+                    assistantMessage.content += data.chunk
+                    setMessages(prev => {
+                      const updated = [...prev]
+                      updated[updated.length - 1] = { ...assistantMessage }
+                      return updated
+                    })
+                    // Update message during streaming (debounced)
+                    await saveMessage(assistantMessage, true)
+                  }
+                } catch (e) {
+                  // Ignore parse errors
                 }
-              } catch (e) {
-                // Ignore parse errors
               }
             }
+          }
+        } catch (readError) {
+          // Stream was cancelled or error occurred
+          if (streamReaderRef.current) {
+            // Only log if it wasn't a cancellation
+            console.error('Error reading stream:', readError)
           }
         }
       }
 
-      // Save final message when streaming completes
-      if (currentAssistantMessageIdRef.current) {
+      // Save final message when streaming completes (only if not cancelled)
+      if (currentAssistantMessageIdRef.current && !isStreamCancelledRef.current) {
         await saveMessage(assistantMessage, false)
         currentAssistantMessageIdRef.current = null
       }
@@ -949,16 +1012,32 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
       setIsLoading(false)
       setIsStreaming(false)
       currentAssistantMessageIdRef.current = null
+      streamReaderRef.current = null
+      abortControllerRef.current = null
+      isStreamCancelledRef.current = false
     }
   }
 
   return (
-    <div style={{
-      height: '100%',
-      display: 'flex',
-      flexDirection: 'column',
-      backgroundColor: bgColor
-    }}>
+    <>
+      <style>{`
+        @keyframes thinkingPulse {
+          0%, 60%, 100% {
+            opacity: 0.3;
+            transform: scale(0.8);
+          }
+          30% {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+      `}</style>
+      <div style={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        backgroundColor: bgColor
+      }}>
         <div 
           ref={scrollContainerRef}
           className={`scrollable-container ${theme === 'dark' ? 'dark-theme' : ''}`}
@@ -1409,12 +1488,60 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
         {isLoading && (
           <div style={{
             width: '100%',
-            padding: '16px',
+            padding: '0px 16px 16px 16px',
+            marginTop: '-8px',
             color: secondaryTextColor,
-            fontStyle: 'italic',
-            fontSize: '13px'
+            fontSize: '13px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
           }}>
-            Thinking...
+            <div style={{
+              display: 'flex',
+              gap: '4px',
+              alignItems: 'center'
+            }}>
+              <div style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor: theme === 'dark' ? '#666' : '#999',
+                animation: 'thinkingPulse 1.4s ease-in-out infinite',
+                animationDelay: '0s'
+              }} />
+              <div style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor: theme === 'dark' ? '#666' : '#999',
+                animation: 'thinkingPulse 1.4s ease-in-out infinite',
+                animationDelay: '0.2s'
+              }} />
+              <div style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor: theme === 'dark' ? '#666' : '#999',
+                animation: 'thinkingPulse 1.4s ease-in-out infinite',
+                animationDelay: '0.4s'
+              }} />
+            </div>
+            <span style={{
+              color: textColor,
+              fontWeight: 400
+            }}>Generating response...</span>
+            <style>{`
+              @keyframes pulse {
+                0%, 60%, 100% {
+                  opacity: 0.3;
+                  transform: scale(0.8);
+                }
+                30% {
+                  opacity: 1;
+                  transform: scale(1);
+                }
+              }
+            `}</style>
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -2315,51 +2442,67 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                 })()}
               </div>
               
-              {/* Send button with grey container */}
+              {/* Send/Stop button with grey container */}
               <button
                 onClick={handleSend}
-                disabled={isLoading || (!input.trim() && attachments.length === 0)}
+                disabled={!isLoading && (!input.trim() && attachments.length === 0)}
                 style={{
                   padding: '4px 8px',
-                  backgroundColor: isLoading || (!input.trim() && attachments.length === 0) 
-                    ? (theme === 'dark' ? '#282828' : '#e0e0e0')
-                    : (theme === 'dark' ? '#505050' : '#e8e8e8'),
-                  color: isLoading || (!input.trim() && attachments.length === 0) 
-                    ? secondaryTextColor 
-                    : (theme === 'dark' ? '#ffffff' : '#202124'),
+                  backgroundColor: isLoading 
+                    ? (theme === 'dark' ? '#505050' : '#e8e8e8')
+                    : ((!input.trim() && attachments.length === 0) 
+                      ? (theme === 'dark' ? '#282828' : '#e0e0e0')
+                      : (theme === 'dark' ? '#505050' : '#e8e8e8')),
+                  color: isLoading 
+                    ? (theme === 'dark' ? '#ffffff' : '#202124')
+                    : ((!input.trim() && attachments.length === 0) 
+                      ? secondaryTextColor 
+                      : (theme === 'dark' ? '#ffffff' : '#202124')),
                   border: 'none',
                   borderRadius: '6px',
-                  cursor: isLoading || (!input.trim() && attachments.length === 0) ? 'not-allowed' : 'pointer',
+                  cursor: (!isLoading && (!input.trim() && attachments.length === 0)) ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  opacity: isLoading ? 0.5 : 1,
+                  opacity: (!isLoading && (!input.trim() && attachments.length === 0)) ? 0.5 : 1,
                   width: '24px',
                   height: '24px'
                 }}
                 onMouseEnter={(e) => {
-                  if (!isLoading && (input.trim() || attachments.length > 0)) {
+                  if (isLoading) {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#5a5a5a' : '#f0f0f0'
+                  } else if (!isLoading && (input.trim() || attachments.length > 0)) {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#5a5a5a' : '#f0f0f0'
                   } else if (!isLoading) {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#282828' : '#e0e0e0'
                   }
                 }}
                 onMouseLeave={(e) => {
-                  if (!isLoading && (input.trim() || attachments.length > 0)) {
+                  if (isLoading) {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#505050' : '#e8e8e8'
+                  } else if (!isLoading && (input.trim() || attachments.length > 0)) {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#505050' : '#e8e8e8'
                   } else if (!isLoading) {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#282828' : '#e0e0e0'
                   }
                 }}
-                title="Send"
+                title={isLoading ? "Stop generation" : "Send"}
               >
-                <ArrowUpwardIcon style={{ 
-                  fontSize: '19px', 
-                  transform: 'translateY(0px)', 
-                  color: isLoading || (!input.trim() && attachments.length === 0) 
-                    ? secondaryTextColor 
-                    : (theme === 'dark' ? '#ffffff' : '#202124')
-                }} />
+                {isLoading ? (
+                  <StopIcon style={{ 
+                    fontSize: '19px', 
+                    transform: 'translateY(0px)', 
+                    color: theme === 'dark' ? '#ffffff' : '#202124'
+                  }} />
+                ) : (
+                  <ArrowUpwardIcon style={{ 
+                    fontSize: '19px', 
+                    transform: 'translateY(0px)', 
+                    color: (!input.trim() && attachments.length === 0) 
+                      ? secondaryTextColor 
+                      : (theme === 'dark' ? '#ffffff' : '#202124')
+                  }} />
+                )}
               </button>
             </div>
           </div>
@@ -2621,6 +2764,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
