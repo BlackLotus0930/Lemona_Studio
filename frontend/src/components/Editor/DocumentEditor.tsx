@@ -59,7 +59,13 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   const isRephrasePopupInputFocusedRef = useRef(false)
   const isCtrlKProcessingRef = useRef(false)
   const isRephrasePopupOpenRef = useRef(false) // Track if popup is open to prevent selection updates
+  const editorRef = useRef<Editor | null>(null) // Store editor in ref for reliable access in event handlers
   const [rightOffset, setRightOffset] = useState(20)
+  
+  // Keep editor ref in sync with prop
+  useEffect(() => {
+    editorRef.current = editor
+  }, [editor])
   
   // Expose search API to parent (Layout)
   useImperativeHandle(ref, () => ({
@@ -385,47 +391,152 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     }
   }, [editor, showRephrasePopup, selectedRange])
 
-  // Handle Ctrl+K to prevent selection handler from closing popup
+  // Handle Ctrl+K - MUST intercept 100% in capture phase before ProseMirror/browser
+  // Register IMMEDIATELY on mount, don't wait for editor to be ready
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Handle Ctrl+K or Cmd+K when rephrase popup is showing or when there's a selection
+      // Handle Ctrl+K or Cmd+K
       if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
-        // Cancel any pending autocomplete requests
-        if (typeof (window as any).__cancelAutocomplete === 'function') {
-          (window as any).__cancelAutocomplete()
+        // Check if popup is already expanded - if so, let TextRephrasePopup handle it
+        const isPopupExpanded = showRephrasePopup && isRephrasePopupOpenRef.current
+        
+        // If popup is expanded, don't intercept (let TextRephrasePopup handle)
+        if (isPopupExpanded) {
+          return
         }
         
-        // If popup is showing OR there's a stored selected range, set flag to prevent selection handler from closing popup
-        // Check selectedRangeRef instead of selectedRange state for more reliable detection
-        if (showRephrasePopup || selectedRangeRef.current) {
-          // Set flag IMMEDIATELY to prevent selection handler from closing popup
-          // This must happen before ProseMirror processes the key event
+        // Check for text selection using multiple strategies (don't depend on editor being ready)
+        let hasSelection = false
+        let selectionRange: { from: number; to: number } | null = null
+        let selectionText = ''
+        
+        // Strategy 1: Check ref (most reliable, set by selection update handler)
+        if (selectedRangeRef.current) {
+          hasSelection = true
+          selectionRange = selectedRangeRef.current
+          selectionText = selectedTextRef.current
+        }
+        
+        // Strategy 2: Check DOM selection (works even if editor not ready)
+        if (!hasSelection) {
+          try {
+            const domSelection = window.getSelection()
+            if (domSelection && domSelection.rangeCount > 0) {
+              const domRange = domSelection.getRangeAt(0)
+              const selected = domRange.toString().trim()
+              
+              if (selected.length > 0) {
+                // Try to convert DOM selection to ProseMirror positions if editor is ready
+                const currentEditor = editorRef.current
+                if (currentEditor && !currentEditor.isDestroyed && currentEditor.view) {
+                  try {
+                    // Try to find positions using DOM range
+                    const startPos = currentEditor.view.posAtCoords({
+                      left: domRange.getBoundingClientRect().left,
+                      top: domRange.getBoundingClientRect().top
+                    })
+                    const endPos = currentEditor.view.posAtCoords({
+                      left: domRange.getBoundingClientRect().right,
+                      top: domRange.getBoundingClientRect().bottom
+                    })
+                    
+                    if (startPos && endPos && startPos.pos !== endPos.pos) {
+                      selectionRange = { from: startPos.pos, to: endPos.pos }
+                      selectionText = selected
+                      hasSelection = true
+                    }
+                  } catch (error) {
+                    // If conversion fails, we still have DOM selection
+                    // We'll use it but might need to handle differently
+                    console.debug('DOM to ProseMirror conversion failed:', error)
+                  }
+                }
+                
+                // If editor not ready or conversion failed, check editor selection directly
+                if (!hasSelection && currentEditor && !currentEditor.isDestroyed && currentEditor.view) {
+                  try {
+                    const { from, to } = currentEditor.state.selection
+                    if (from !== to) {
+                      const editorSelected = currentEditor.state.doc.textBetween(from, to)
+                      if (editorSelected.trim().length > 0) {
+                        selectionRange = { from, to }
+                        selectionText = editorSelected
+                        hasSelection = true
+                      }
+                    }
+                  } catch (error) {
+                    console.debug('Editor selection check failed:', error)
+                  }
+                }
+                
+                // If we have DOM selection but couldn't convert, still proceed
+                // The popup will work, but we might need to handle replacement differently
+                if (!hasSelection && selected.length > 0) {
+                  // Use a placeholder range - will be updated when editor is ready
+                  hasSelection = true
+                  selectionText = selected
+                  // Mark that we need to resolve the range later
+                  // For now, we'll open the popup and let selection update handler set the range
+                }
+              }
+            }
+          } catch (error) {
+            console.debug('DOM selection check failed:', error)
+          }
+        }
+        
+        // If there's a selection, 100% intercept
+        if (hasSelection) {
+          // CRITICAL: Set flag FIRST before any other operations
+          // This prevents selection update handlers from closing popup
           isCtrlKProcessingRef.current = true
           
-          // Also ensure popup is marked as open if it's not already
-          if (!isRephrasePopupOpenRef.current && selectedRangeRef.current) {
-            isRephrasePopupOpenRef.current = true
-            if (!showRephrasePopup) {
-              setShowRephrasePopup(true)
-            }
+          // CRITICAL: Prevent default and stop propagation IMMEDIATELY
+          // This prevents ProseMirror and browser from handling the event
+          e.preventDefault()
+          e.stopPropagation()
+          e.stopImmediatePropagation()
+          
+          // Cancel any pending autocomplete requests
+          if (typeof (window as any).__cancelAutocomplete === 'function') {
+            (window as any).__cancelAutocomplete()
+          }
+          
+          // Save selection to refs if we have valid range
+          if (selectionRange) {
+            selectedRangeRef.current = selectionRange
+            selectedTextRef.current = selectionText
+            setSelectedRange(selectionRange)
+            setSelectedText(selectionText)
+          } else if (selectionText) {
+            // We have text but no range yet - save text, range will be resolved by selection handler
+            selectedTextRef.current = selectionText
+            setSelectedText(selectionText)
+          }
+          
+          // Ensure popup is marked as open and shown
+          isRephrasePopupOpenRef.current = true
+          if (!showRephrasePopup) {
+            setShowRephrasePopup(true)
           }
           
           // Clear flag after a delay to allow popup to expand and stabilize
-          // Don't prevent default - let TextRephrasePopup handle the event
           setTimeout(() => {
             isCtrlKProcessingRef.current = false
-          }, 500) // Increased delay to ensure popup has time to expand
+          }, 1500) // Longer delay to ensure popup is fully stable and selection updates have settled
         }
       }
     }
 
-    // Use capture phase to set flag early, before other handlers (including ProseMirror)
-    // This ensures the flag is set before handleSelectionUpdate can close the popup
-    window.addEventListener('keydown', handleKeyDown, true)
+    // Use capture phase at the earliest possible stage
+    // This MUST be before ProseMirror's keymap handlers
+    // Register IMMEDIATELY - don't wait for editor or any other dependencies
+    window.addEventListener('keydown', handleKeyDown, { capture: true, passive: false })
+    
     return () => {
-      window.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener('keydown', handleKeyDown, { capture: true })
     }
-  }, [showRephrasePopup])
+  }, [showRephrasePopup]) // Only depend on showRephrasePopup, not editor
 
   // Note: Scroll position restoration is now handled in Layout.tsx immediately after setContent
   // to avoid any scrolling animation. This useEffect is kept as a fallback for edge cases.

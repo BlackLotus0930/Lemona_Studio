@@ -22,11 +22,13 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
   const [error, setError] = useState<string | null>(null)
   const popupRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const positionLockedRef = useRef(false) // Track if position has been locked
+  const expandedPositionLockedRef = useRef(false) // Track if expanded position has been locked
   const [adjustedPosition, setAdjustedPosition] = useState(() => {
-    // Initialize with adjusted position
+    // Initialize with adjusted position for compact state
     const screenWidth = window.innerWidth
     const rightMargin = 25
-    const estimatedWidth = isExpanded ? 360 : 120 // expanded modal width or compact button width
+    const estimatedWidth = 120 // Start with compact button width
     const maxX = screenWidth - estimatedWidth - rightMargin
     return {
       x: Math.min(position.x, maxX),
@@ -42,12 +44,12 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
   const activeButtonBg = theme === 'dark' ? '#2a2a2a' : '#e8f0fe'
   const activeButtonColor = theme === 'dark' ? '#4a9eff' : '#1a73e8'
 
-  // Adjust position to keep 25px from right edge
+  // Adjust position only once when popup first opens (compact state)
   useEffect(() => {
-    const adjustPosition = () => {
+    if (!positionLockedRef.current) {
       const screenWidth = window.innerWidth
       const rightMargin = 25
-      const popupWidth = isExpanded ? 360 : 120 // fixed width for expanded modal
+      const popupWidth = 120 // compact button width
       const maxX = screenWidth - popupWidth - rightMargin
       
       const adjustedX = Math.min(position.x, maxX)
@@ -56,18 +58,62 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
         x: adjustedX,
         y: position.y
       })
+      
+      // Lock position after first calculation
+      positionLockedRef.current = true
+    }
+  }, [position])
+
+  // Adjust position once when expanding, then lock it
+  useEffect(() => {
+    if (isExpanded && !expandedPositionLockedRef.current) {
+      const screenWidth = window.innerWidth
+      const rightMargin = 25
+      const popupWidth = 360 // expanded modal width
+      const maxX = screenWidth - popupWidth - rightMargin
+      
+      // Adjust position to account for expanded width, but keep it close to original
+      setAdjustedPosition(prev => ({
+        x: Math.min(prev.x, maxX),
+        y: prev.y
+      }))
+      
+      // Lock expanded position
+      expandedPositionLockedRef.current = true
+    }
+  }, [isExpanded])
+
+  // Only adjust position on window resize (but keep it locked relative to screen)
+  useEffect(() => {
+    const adjustPositionOnResize = () => {
+      if (positionLockedRef.current) {
+        const screenWidth = window.innerWidth
+        const rightMargin = 25
+        const popupWidth = isExpanded ? 360 : 120
+        const maxX = screenWidth - popupWidth - rightMargin
+        
+        // Keep the relative position, but ensure it doesn't go off screen
+        setAdjustedPosition(prev => ({
+          x: Math.min(prev.x, maxX),
+          y: prev.y
+        }))
+      }
     }
 
-    // Adjust immediately
-    adjustPosition()
-    
-    // Also adjust on window resize
-    window.addEventListener('resize', adjustPosition)
+    window.addEventListener('resize', adjustPositionOnResize)
     
     return () => {
-      window.removeEventListener('resize', adjustPosition)
+      window.removeEventListener('resize', adjustPositionOnResize)
     }
-  }, [position, isExpanded])
+  }, [isExpanded])
+
+  // Reset position locks when popup closes
+  useEffect(() => {
+    return () => {
+      positionLockedRef.current = false
+      expandedPositionLockedRef.current = false
+    }
+  }, [])
 
   const handleReplace = useCallback(() => {
     if (improvedText) {
