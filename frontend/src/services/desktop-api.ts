@@ -65,8 +65,9 @@ export const aiApi = {
     return invokeOrFetch('ai:batchQuestions', apiKey, questions, documentContent, documentId, provider)
   },
   autocomplete: (text: string, cursorPosition: number, documentContent?: string, documentId?: string, provider?: 'gemini' | 'ollama' | 'auto') => {
-    const apiKey = getApiKey()
-    return invokeOrFetch('ai:autocomplete', apiKey, text, cursorPosition, documentContent, documentId, provider)
+    const googleApiKey = getApiKey()
+    const openaiApiKey = getOpenaiApiKey()
+    return invokeOrFetch('ai:autocomplete', googleApiKey, openaiApiKey, text, cursorPosition, documentContent, documentId, provider)
   },
   generateTitle: (documentContent: string, provider?: 'gemini' | 'ollama' | 'auto') => {
     const apiKey = getApiKey()

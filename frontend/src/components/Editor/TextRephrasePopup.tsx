@@ -187,6 +187,10 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'k' || e.key === 'K') {
           e.preventDefault()
+          // Cancel any pending autocomplete requests
+          if (typeof (window as any).__cancelAutocomplete === 'function') {
+            (window as any).__cancelAutocomplete()
+          }
           if (!isExpanded) {
             handleExpandAndImprove()
           } else {

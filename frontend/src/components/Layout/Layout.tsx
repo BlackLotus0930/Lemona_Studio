@@ -2243,6 +2243,48 @@ export default function Layout() {
     }
   }, [editor, document?.id]) // Run when editor or document.id changes
 
+  // Handle app close: clear undo/redo history and restore documents to last saved state
+  useEffect(() => {
+    const handleWindowWillClose = async () => {
+      // Clear all undo/redo history
+      documentEditorStatesRef.current.clear()
+      
+      // Reload current document from backend to restore to last saved state
+      if (document?.id && editor && !editor.isDestroyed) {
+        try {
+          // Reload document from backend
+          const savedDoc = await documentApi.get(document.id)
+          if (savedDoc && editor && !editor.isDestroyed) {
+            // Update editor content to match saved state (this discards unsaved changes)
+            editor.commands.setContent(savedDoc.content || '')
+          }
+        } catch (error) {
+          console.error('Failed to restore document on close:', error)
+        }
+      }
+    }
+
+    // Listen for window-will-close event from Electron main process
+    if (window.electron) {
+      const unsubscribe = window.electron.on('window-will-close', handleWindowWillClose)
+      return () => {
+        if (unsubscribe) unsubscribe()
+      }
+    }
+    
+    // Fallback to beforeunload for non-Electron environments (e.g., web)
+    const handleBeforeUnload = () => {
+      // Clear all undo/redo history synchronously
+      documentEditorStatesRef.current.clear()
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [document?.id, editor])
+
   // Search results use temporary highlights (Chrome-style) that are not saved to the document
 
   // Update editor content when document changes
@@ -3105,8 +3147,9 @@ export default function Layout() {
         
         {/* Editor Panel */}
         <Panel 
-          ref={editorPanelRef}
+          id="editor-panel"
           order={2}
+          ref={editorPanelRef}
           defaultSize={isAIPanelOpen 
             ? ((100 - fileExplorerSize) - ((aiPanelWidth / 100) * (100 - fileExplorerSize))) 
             : (100 - fileExplorerSize)

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Editor } from '@tiptap/react'
 import { aiApi } from '../../services/api'
 import { AutocompleteSuggestion } from '@shared/types'
@@ -14,6 +14,32 @@ export default function Autocomplete({ editor, documentContent, documentId, enab
   const [suggestion, setSuggestion] = useState<AutocompleteSuggestion | null>(null)
   const [, setIsLoading] = useState(false)
   const [showSuggestion, setShowSuggestion] = useState(false)
+  const requestIdRef = useRef<number>(0)
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Expose cancel function to window for Ctrl+K handler
+  useEffect(() => {
+    const cancelAutocomplete = () => {
+      // Clear debounce timer
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
+      }
+      // Increment request ID to invalidate any pending requests
+      requestIdRef.current++
+      // Clear current suggestion
+      setSuggestion(null)
+      setShowSuggestion(false)
+      setIsLoading(false)
+    }
+
+    // Store cancel function on window for external access
+    ;(window as any).__cancelAutocomplete = cancelAutocomplete
+
+    return () => {
+      delete (window as any).__cancelAutocomplete
+    }
+  }, [])
 
   const fetchSuggestion = useCallback(async (text: string, cursorPosition: number) => {
     if (!enabled || !editor || text.length < 10) {
@@ -22,30 +48,40 @@ export default function Autocomplete({ editor, documentContent, documentId, enab
       return
     }
 
+    // Increment request ID for this request
+    const currentRequestId = ++requestIdRef.current
     setIsLoading(true)
+    
     try {
       const response = await aiApi.autocomplete(text, cursorPosition, documentContent, documentId)
-      if (response.data && response.data.text) {
+      
+      // Check if this request is still valid (not cancelled)
+      if (currentRequestId === requestIdRef.current && response.data && response.data.text) {
         setSuggestion(response.data)
         setShowSuggestion(true)
       }
     } catch (error) {
-      console.error('Autocomplete error:', error)
-      setSuggestion(null)
-      setShowSuggestion(false)
+      // Only log error if this request is still valid
+      if (currentRequestId === requestIdRef.current) {
+        console.error('Autocomplete error:', error)
+        setSuggestion(null)
+        setShowSuggestion(false)
+      }
     } finally {
-      setIsLoading(false)
+      // Only update loading state if this request is still valid
+      if (currentRequestId === requestIdRef.current) {
+        setIsLoading(false)
+      }
     }
   }, [editor, documentContent, documentId, enabled])
 
   useEffect(() => {
     if (!editor) return
 
-    let debounceTimer: NodeJS.Timeout | null = null
-
     const handleUpdate = () => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer)
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
       }
 
       const { from } = editor.state.selection
@@ -57,7 +93,7 @@ export default function Autocomplete({ editor, documentContent, documentId, enab
       if (lastChar === '.' || lastChar === '!' || lastChar === '?' || 
           (textBeforeCursor.length > 20 && textBeforeCursor.length % 50 === 0)) {
         
-        debounceTimer = setTimeout(() => {
+        debounceTimerRef.current = setTimeout(() => {
           fetchSuggestion(text, from)
         }, 1000)
       } else {
@@ -70,8 +106,9 @@ export default function Autocomplete({ editor, documentContent, documentId, enab
     editor.on('selectionUpdate', handleUpdate)
 
     return () => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer)
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
       }
       editor.off('update', handleUpdate)
       editor.off('selectionUpdate', handleUpdate)

@@ -40,6 +40,8 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   // Text selection popup state
   const [selectedText, setSelectedText] = useState<string>('')
   const [selectedRange, setSelectedRange] = useState<{ from: number; to: number } | null>(null)
+  const selectedRangeRef = useRef<{ from: number; to: number } | null>(null) // Use ref for reliable access in event handlers
+  const selectedTextRef = useRef<string>('') // Use ref for reliable access in event handlers
   const [showRephrasePopup, setShowRephrasePopup] = useState(false)
   const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 })
   
@@ -55,6 +57,8 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   const isSearchInputFocusedRef = useRef(false)
   const isReplaceInputFocusedRef = useRef(false)
   const isRephrasePopupInputFocusedRef = useRef(false)
+  const isCtrlKProcessingRef = useRef(false)
+  const isRephrasePopupOpenRef = useRef(false) // Track if popup is open to prevent selection updates
   const [rightOffset, setRightOffset] = useState(20)
   
   // Expose search API to parent (Layout)
@@ -221,6 +225,20 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         
         // Fallback to ProseMirror coordinates if DOM selection doesn't work
         if (editor.isDestroyed || !editor.view) return
+        
+        // Validate positions are within document bounds
+        const docSize = editor.state.doc.content.size
+        if (from < 0 || from > docSize || to < 0 || to > docSize) {
+          // Invalid range, but don't close if Ctrl+K is being processed or popup is showing
+          if (!isCtrlKProcessingRef.current && !showRephrasePopup) {
+            setShowRephrasePopup(false)
+            isRephrasePopupOpenRef.current = false
+            setSelectedRange(null)
+            setSelectedText('')
+          }
+          return
+        }
+        
         const startCoords = editor.view.coordsAtPos(from)
         const endCoords = editor.view.coordsAtPos(to)
         
@@ -238,6 +256,36 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     }
 
     const handleSelectionUpdate = () => {
+      // CRITICAL: Don't close popup if Ctrl+K is being processed (prevents race condition)
+      // Check this FIRST before any other logic
+      if (isCtrlKProcessingRef.current) {
+        // If we have a stored range, ensure popup stays open and update position
+        // Don't update position if rephrase popup input is focused (prevents popup from moving when input is clicked)
+        if (selectedRangeRef.current && !isRephrasePopupInputFocusedRef.current) {
+          updatePopupPosition(selectedRangeRef.current)
+        }
+        if (selectedRangeRef.current) {
+          if (!isRephrasePopupOpenRef.current) {
+            isRephrasePopupOpenRef.current = true
+          }
+          if (!showRephrasePopup) {
+            setShowRephrasePopup(true)
+          }
+        }
+        return
+      }
+      
+      // CRITICAL: If popup is open, don't update selectedText/selectedRange
+      // This prevents selection from being reset when editor loses focus due to popup interaction
+      if (isRephrasePopupOpenRef.current && selectedRangeRef.current) {
+        // Don't update position if rephrase popup input is focused (prevents popup from moving when input is clicked)
+        if (!isRephrasePopupInputFocusedRef.current) {
+          // Only update position if needed, but keep the stored text and range
+          updatePopupPosition(selectedRangeRef.current)
+        }
+        return
+      }
+      
       // Don't update selection popup if search input or rephrase popup input is focused
       if (isSearchInputFocusedRef.current || isReplaceInputFocusedRef.current || isRephrasePopupInputFocusedRef.current) {
         return
@@ -246,33 +294,57 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       const { from, to } = editor.state.selection
       const isEmpty = from === to
       
-      // If popup is already showing and we have a stored range, don't close it on temporary selection collapse
+      // CRITICAL: If we have a stored range, NEVER close the popup on selection collapse
       // This prevents the popup from disappearing when Ctrl+K is pressed (which may temporarily collapse selection)
-      if (isEmpty && showRephrasePopup && selectedRange) {
-        // Only update position if popup is showing, don't close it
-        updatePopupPosition(selectedRange)
+      // Use selectedRangeRef as source of truth (more reliable than state)
+      if (selectedRangeRef.current) {
+        // Always keep popup open if we have a stored range, even if selection temporarily collapses
+        // Only update position, don't close it
+        updatePopupPosition(selectedRangeRef.current)
+        // Ensure popup stays visible and is marked as open
+        if (!isRephrasePopupOpenRef.current) {
+          isRephrasePopupOpenRef.current = true
+        }
+        if (!showRephrasePopup) {
+          setShowRephrasePopup(true)
+        }
         return
       }
       
       if (isEmpty) {
         setSelectedText('')
         setSelectedRange(null)
+        selectedTextRef.current = ''
+        selectedRangeRef.current = null
         setShowRephrasePopup(false)
+        isRephrasePopupOpenRef.current = false
         return
       }
 
       const selected = editor.state.doc.textBetween(from, to)
+      
       if (selected.trim().length > 0) {
         const range = { from, to }
+        // CRITICAL: Save text and range IMMEDIATELY to refs BEFORE showing popup to prevent race conditions
+        // This ensures we capture the full text even if editor loses focus immediately after
+        selectedTextRef.current = selected
+        selectedRangeRef.current = range
+        
+        // Also update state for React rendering
         setSelectedText(selected)
         setSelectedRange(range)
         // Update position immediately with the new range
         updatePopupPosition(range)
+        // Mark popup as open AFTER setting text and range
+        isRephrasePopupOpenRef.current = true
         setShowRephrasePopup(true)
       } else {
         setSelectedText('')
         setSelectedRange(null)
+        selectedTextRef.current = ''
+        selectedRangeRef.current = null
         setShowRephrasePopup(false)
+        isRephrasePopupOpenRef.current = false
       }
     }
 
@@ -291,7 +363,8 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
 
     // Update popup position on scroll
     const handleScroll = () => {
-      if (showRephrasePopup && selectedRange) {
+      // Don't update position if rephrase popup input is focused (prevents popup from moving when input is clicked)
+      if (showRephrasePopup && selectedRange && !isRephrasePopupInputFocusedRef.current) {
         updatePopupPosition(selectedRange)
       }
     }
@@ -311,6 +384,48 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       }
     }
   }, [editor, showRephrasePopup, selectedRange])
+
+  // Handle Ctrl+K to prevent selection handler from closing popup
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Handle Ctrl+K or Cmd+K when rephrase popup is showing or when there's a selection
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        // Cancel any pending autocomplete requests
+        if (typeof (window as any).__cancelAutocomplete === 'function') {
+          (window as any).__cancelAutocomplete()
+        }
+        
+        // If popup is showing OR there's a stored selected range, set flag to prevent selection handler from closing popup
+        // Check selectedRangeRef instead of selectedRange state for more reliable detection
+        if (showRephrasePopup || selectedRangeRef.current) {
+          // Set flag IMMEDIATELY to prevent selection handler from closing popup
+          // This must happen before ProseMirror processes the key event
+          isCtrlKProcessingRef.current = true
+          
+          // Also ensure popup is marked as open if it's not already
+          if (!isRephrasePopupOpenRef.current && selectedRangeRef.current) {
+            isRephrasePopupOpenRef.current = true
+            if (!showRephrasePopup) {
+              setShowRephrasePopup(true)
+            }
+          }
+          
+          // Clear flag after a delay to allow popup to expand and stabilize
+          // Don't prevent default - let TextRephrasePopup handle the event
+          setTimeout(() => {
+            isCtrlKProcessingRef.current = false
+          }, 500) // Increased delay to ensure popup has time to expand
+        }
+      }
+    }
+
+    // Use capture phase to set flag early, before other handlers (including ProseMirror)
+    // This ensures the flag is set before handleSelectionUpdate can close the popup
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true)
+    }
+  }, [showRephrasePopup])
 
   // Note: Scroll position restoration is now handled in Layout.tsx immediately after setContent
   // to avoid any scrolling animation. This useEffect is kept as a fallback for edge cases.
@@ -548,7 +663,6 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       // TODO: Implement PDF page navigation
       // For now, we can show a message or try to communicate with the PDF iframe
       // This would require using pdfjs-dist to render PDFs instead of iframe
-      console.log(`Navigate to PDF page ${match.pageNumber}, match at position ${match.from}`)
       // In the future, we can integrate with pdfjs-dist to highlight and navigate
     }
   }
@@ -1964,20 +2078,54 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       </div>
       
       {/* Text Rephrase Popup */}
-      {showRephrasePopup && selectedText && selectedRange && (
+      {showRephrasePopup && (selectedTextRef.current || selectedText) && (selectedRangeRef.current || selectedRange) && (
         <TextRephrasePopup
-          selectedText={selectedText}
+          selectedText={selectedTextRef.current || selectedText}
           position={popupPosition}
           onInputFocus={(isFocused) => {
             isRephrasePopupInputFocusedRef.current = isFocused
           }}
           onReplace={(newText) => {
-            if (editor && selectedRange) {
+            const rangeToUse = selectedRangeRef.current || selectedRange
+            if (editor && rangeToUse) {
+              // Validate positions are within document bounds
+              const docSize = editor.state.doc.content.size
+              const { from, to } = rangeToUse
+              
+              if (from < 0 || from > docSize || to < 0 || to > docSize) {
+                // Invalid range, use current selection or insert at cursor
+                try {
+                  const currentSelection = editor.state.selection
+                  if (currentSelection.from !== currentSelection.to) {
+                    editor.chain()
+                      .focus()
+                      .setTextSelection({ from: currentSelection.from, to: currentSelection.to })
+                      .deleteSelection()
+                      .insertContent(newText)
+                      .run()
+                  } else {
+                    editor.chain()
+                      .focus()
+                      .insertContent(newText)
+                      .run()
+                  }
+                } catch (fallbackError) {
+                  console.error('Fallback replace failed:', fallbackError)
+                }
+                setShowRephrasePopup(false)
+                isRephrasePopupOpenRef.current = false
+                setSelectedText('')
+                setSelectedRange(null)
+                return
+              }
+              
               try {
                 // Use the stored selection range
+                const rangeToUse = selectedRangeRef.current || selectedRange
+                if (!rangeToUse) return
                 editor.chain()
                   .focus()
-                  .setTextSelection(selectedRange)
+                  .setTextSelection(rangeToUse)
                   .deleteSelection()
                   .insertContent(newText)
                   .run()
@@ -2006,11 +2154,21 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
               }
             }
             setShowRephrasePopup(false)
+            isRephrasePopupOpenRef.current = false
+            isRephrasePopupInputFocusedRef.current = false // Reset input focus state when popup closes
             setSelectedText('')
             setSelectedRange(null)
+            selectedTextRef.current = ''
+            selectedRangeRef.current = null
           }}
           onClose={() => {
             setShowRephrasePopup(false)
+            isRephrasePopupOpenRef.current = false
+            isRephrasePopupInputFocusedRef.current = false // Reset input focus state when popup closes
+            setSelectedText('')
+            setSelectedRange(null)
+            selectedTextRef.current = ''
+            selectedRangeRef.current = null
           }}
         />
       )}

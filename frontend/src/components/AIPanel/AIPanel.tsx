@@ -658,7 +658,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                 cursor: isDragging ? 'grabbing' : 'grab',
                 transition: isDragging ? 'none' : 'all 0.2s ease',
                 minWidth: '60px',
-                maxWidth: '160px',
+                maxWidth: '120px',
                 flexShrink: 0, // Don't shrink, allow horizontal scroll instead
                 flexGrow: 0,
                 position: 'relative',
