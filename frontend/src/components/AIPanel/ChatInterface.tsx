@@ -868,6 +868,9 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
       return
     }
 
+    // Store the input value before clearing it (for onFirstMessage callback)
+    const messageContent = input.trim()
+
     const userMessage: AIChatMessage = {
       id: `msg_${Date.now()}`,
       role: 'user',
@@ -886,9 +889,9 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     setIsLoading(true)
     setIsStreaming(true)
 
-    // Notify parent about first message for chat naming
-    if (!hasNotifiedFirstMessage.current && onFirstMessage) {
-      onFirstMessage(input.trim())
+    // Notify parent about first message for chat naming (only when message is actually being sent)
+    if (!hasNotifiedFirstMessage.current && onFirstMessage && messageContent) {
+      onFirstMessage(messageContent)
       hasNotifiedFirstMessage.current = true
     }
 
