@@ -201,8 +201,6 @@ function DocumentEditorWrapper({
 }
 
 export default function Layout(): JSX.Element {
-  console.log('[Layout] Component rendering')
-  
   // Add error boundary for component errors
   useEffect(() => {
     const handleError = (error: ErrorEvent) => {
@@ -224,10 +222,8 @@ export default function Layout(): JSX.Element {
   const { theme } = useTheme()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
-  console.log('[Layout] Route id:', id)
   const [document, setDocument] = useState<Document | null>(null)
   const [isLoadingDocument, setIsLoadingDocument] = useState(true)
-  console.log('[Layout] Initial state - document:', document?.id, 'isLoadingDocument:', isLoadingDocument)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const titleUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const titleUpdatedRef = useRef<Set<string>>(new Set()) // Track which documents have had their title auto-updated
@@ -271,20 +267,6 @@ export default function Layout(): JSX.Element {
     documentsRef.current = documents
   }, [documents])
   
-  // Log when documents state actually changes
-  useEffect(() => {
-    console.log('[Layout] documents state changed:', documents.length, 'docs:', documents.map(d => d.id))
-  }, [documents])
-  
-  // Log when isLoadingDocuments state actually changes
-  useEffect(() => {
-    console.log('[Layout] isLoadingDocuments state changed:', isLoadingDocuments)
-  }, [isLoadingDocuments])
-  
-  // Log when projectName state actually changes
-  useEffect(() => {
-    console.log('[Layout] projectName state changed:', projectName)
-  }, [projectName])
   // Load tabs from localStorage on mount
   const [openTabs, setOpenTabs] = useState<Document[]>(() => {
     try {
@@ -552,7 +534,6 @@ export default function Layout(): JSX.Element {
         )
       })
       
-      console.log('[Layout] Document saved immediately:', docId)
     } catch (error) {
       console.error('[Layout] Failed to save document:', error)
     }
@@ -560,12 +541,10 @@ export default function Layout(): JSX.Element {
 
   // Load document when route parameter changes
   useEffect(() => {
-    console.log('[Layout] useEffect[id] - id:', id, 'current document:', document?.id)
     if (id) {
       // When switching documents, keep the UI visible for smooth transition
       // Only set loading state if we're switching to a different document
       if (!document || document.id !== id) {
-        console.log('[Layout] Loading new document:', id, 'previous document:', document?.id)
         
         // Save current document before switching
         if (document?.id) {
@@ -634,9 +613,7 @@ export default function Layout(): JSX.Element {
 
   // Add document to tabs when it loads
   useEffect(() => {
-    console.log('[Layout] useEffect[document] - document changed:', document?.id, 'projectId:', document?.projectId, 'title:', document?.title)
     if (document && !openTabs.find(tab => tab.id === document.id)) {
-      console.log('[Layout] Adding document to tabs:', document.id)
       setOpenTabs(prevTabs => [...prevTabs, document])
       setActiveTabId(document.id)
     } else if (document) {
@@ -648,15 +625,12 @@ export default function Layout(): JSX.Element {
   }, [document])
 
   const loadDocument = async (docId: string) => {
-    console.log('[Layout] loadDocument called for:', docId)
     try {
       // Retry logic for newly created documents (increased retries and delay for file system sync)
       let doc = await documentApi.get(docId)
-      console.log('[Layout] loadDocument - initial fetch result:', doc ? `found (projectId: ${doc.projectId})` : 'not found')
       let retries = 5 // Increased from 3 to 5
       
       while (!doc && retries > 0) {
-        console.log(`Document ${docId} not found, retrying... (${retries} attempts left)`)
         // Increased delay from 200ms to 300ms for better file system sync
         await new Promise(resolve => setTimeout(resolve, 300))
         doc = await documentApi.get(docId)
@@ -681,7 +655,6 @@ export default function Layout(): JSX.Element {
       // Check if PDF needs text extraction
       const isPDF = doc.title.toLowerCase().endsWith('.pdf')
       if (isPDF && !doc.pdfText) {
-        console.log('[PDF] PDF text not available, triggering extraction for:', doc.title)
         // Set document first so PDF viewer can render
         if (id === docId) {
           setDocument(doc)
@@ -689,8 +662,7 @@ export default function Layout(): JSX.Element {
         
         try {
           // Trigger PDF text extraction (this will update the document file)
-          const pdfText = await documentApi.extractPDFText(docId)
-          console.log('[PDF] PDF text extraction completed, pdfText:', pdfText ? 'available' : 'missing')
+          await documentApi.extractPDFText(docId)
           
           // Reload document to get updated version with pdfText
           // Wait a moment for file write to complete
@@ -698,7 +670,6 @@ export default function Layout(): JSX.Element {
           const updatedDoc = await documentApi.get(docId)
           
           if (updatedDoc && id === docId) {
-            console.log('[PDF] Reloaded document with pdfText:', updatedDoc.pdfText ? 'available' : 'missing')
             setDocument(updatedDoc)
           }
         } catch (extractionError) {
@@ -710,10 +681,7 @@ export default function Layout(): JSX.Element {
         // Only update document if this is still the current route
         // This prevents race conditions when rapidly switching files
         if (id === docId) {
-          console.log('[Layout] Setting document:', doc.id, 'projectId:', doc.projectId, 'title:', doc.title)
           setDocument(doc)
-        } else {
-          console.log('[Layout] Skipping document set - route changed. id:', id, 'docId:', docId)
         }
       }
       
@@ -746,11 +714,9 @@ export default function Layout(): JSX.Element {
   // Load project name immediately for shell UI, then load documents
   useEffect(() => {
     const currentProjectId = document?.projectId
-    console.log('[Layout] useEffect[document?.projectId] - currentProjectId:', currentProjectId, 'previousProjectId:', previousProjectIdRef.current, 'document:', document?.id)
     
     // Only clear and reload if projectId actually changed
     if (previousProjectIdRef.current !== currentProjectId) {
-      console.log('[Layout] Project changed - clearing documents and loading new project')
       // Clear documents immediately when project changes to prevent showing stale data
       setDocuments([])
       setIsLoadingDocuments(true)
@@ -793,28 +759,21 @@ export default function Layout(): JSX.Element {
       
       previousProjectIdRef.current = currentProjectId
       // Pass the projectId explicitly to ensure we load the correct project's documents
-      console.log('[Layout] Calling loadDocuments with projectId:', currentProjectId)
       loadDocuments(currentProjectId)
-    } else {
-      console.log('[Layout] Project unchanged, skipping reload')
     }
   }, [document?.projectId]) // Reload when project changes (removed activeTabId to prevent cross-project loading)
 
   // Also try to load documents when we have an id but no document yet (e.g., document failed to load)
   // This ensures the file explorer shows documents even if the current document doesn't load
   useEffect(() => {
-    console.log('[Layout] useEffect[fallback] - id:', id, 'document:', document?.id, 'documents.length:', documents.length, 'isLoadingDocuments:', isLoadingDocuments)
     // Only run if we have an id but no document, and documents haven't been loaded yet
     if (id && !document && documents.length === 0 && !isLoadingDocuments) {
-      console.log('[Layout] Fallback: Trying to load documents - no document but have id')
       // Try to get projectId from open tabs that match this id
       const matchingTab = openTabs.find(tab => tab.id === id)
       if (matchingTab?.projectId) {
-        console.log('[Layout] Fallback: Found projectId from tab:', matchingTab.projectId)
         // Load documents for this project
         loadDocuments(matchingTab.projectId)
       } else {
-        console.log('[Layout] Fallback: No matching tab, loading all documents')
         // Fallback: load all documents if we can't determine the project
         loadDocuments(undefined)
       }
@@ -823,21 +782,13 @@ export default function Layout(): JSX.Element {
 
   // Set selected folder based on current document's folder
   useEffect(() => {
-    console.log('[Layout] useEffect[document?.folder] - document?.folder:', document?.folder, 'document?.id:', document?.id)
     if (document?.folder === 'library') {
-      console.log('[Layout] Setting selectedFolder to library')
       setSelectedFolder('library')
     } else if (document && (!document.folder || document.folder === 'project')) {
-      console.log('[Layout] Setting selectedFolder to project')
       setSelectedFolder('project')
     }
     // Don't clear selectedFolder if document is null - keep it for creating new files
   }, [document?.folder])
-  
-  // Log when selectedFolder changes
-  useEffect(() => {
-    console.log('[Layout] selectedFolder changed:', selectedFolder)
-  }, [selectedFolder])
 
   // Keyboard shortcuts: Ctrl+F for inline search, Ctrl+Shift+F for global search, Ctrl+Shift+E to toggle FileExplorer
   useEffect(() => {
@@ -1039,28 +990,21 @@ export default function Layout(): JSX.Element {
           return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
         })
         const docsToSet = Array.isArray(sortedDocs) ? sortedDocs : []
-        console.log('[Layout] About to set documents:', docsToSet.length, 'docs:', docsToSet.map(d => d.id))
         setDocuments(docsToSet)
-        console.log('[Layout] setDocuments called with', docsToSet.length, 'documents')
       } else {
         // No project, show all documents
-        console.log('[Layout] No projectId, loading all documents')
         const docs = await documentApi.list()
         setDocuments(Array.isArray(docs) ? docs : [])
-        console.log('[Layout] Set all documents:', Array.isArray(docs) ? docs.length : 0)
       }
     } catch (error) {
       console.error('[Layout] Failed to load documents:', error)
       setDocuments([])
     } finally {
-      console.log('[Layout] About to set isLoadingDocuments to false')
       setIsLoadingDocuments(false)
-      console.log('[Layout] setIsLoadingDocuments(false) called')
     }
   }
 
   const handleDocumentClick = (docId: string, searchQueryParam?: string, matchPosition?: number) => {
-    console.log('[Layout] handleDocumentClick called - docId:', docId, 'searchQueryParam:', searchQueryParam, 'current document:', document?.id)
     try {
     // If called from search results, ensure search mode stays active
     const wasCalledFromSearch = !!searchQueryParam
@@ -1141,9 +1085,7 @@ export default function Layout(): JSX.Element {
     
     // Add or update tab when opening a document
     const clickedDoc = documents.find(doc => doc.id === docId)
-    console.log('[Layout] handleDocumentClick - clickedDoc found:', !!clickedDoc, 'docId:', docId, 'documents.length:', documents.length)
     if (clickedDoc) {
-      console.log('[Layout] handleDocumentClick - Adding/updating tab for:', docId)
       setOpenTabs(prevTabs => {
         // Check if tab already exists
         const existingTabIndex = prevTabs.findIndex(tab => tab.id === docId)
@@ -1161,7 +1103,6 @@ export default function Layout(): JSX.Element {
     }
     
     // Always navigate, even if it's the current document (for different document case)
-    console.log('[Layout] Navigating to document:', docId)
     try {
     navigate(`/document/${docId}`)
     } catch (error) {
@@ -1804,12 +1745,10 @@ export default function Layout(): JSX.Element {
   }
 
   const handleCreateDocument = async () => {
-    console.log('[Layout] handleCreateDocument called - selectedFolder:', selectedFolder, 'documents.length:', documents.length, 'document?.projectId:', document?.projectId)
     try {
       // Use selected folder if available, otherwise default to 'project'
       // Ensure we always pass a string value, not null or undefined
       const folder: 'library' | 'project' = selectedFolder === 'library' ? 'library' : 'project'
-      console.log('[Layout] Creating document in folder:', folder)
       
       // Generate name based on folder: "Section X" for workspace, "Doc X" for library
       const namePrefix = folder === 'library' ? 'Doc' : 'Section'
@@ -1817,24 +1756,20 @@ export default function Layout(): JSX.Element {
         (folder === 'library' && doc.folder === 'library') ||
         (folder === 'project' && (!doc.folder || doc.folder === 'project'))
       )
-      console.log('[Layout] Found', folderDocs.length, 'documents in folder:', folder)
       const existingTitles = folderDocs.map(doc => doc.title)
       let number = 1
       while (existingTitles.includes(`${namePrefix} ${number}`)) {
         number++
       }
       const newTitle = `${namePrefix} ${number}`
-      console.log('[Layout] Creating document with title:', newTitle)
       
       const newDoc = await documentApi.create(newTitle, folder)
-      console.log('[Layout] Document created:', newDoc.id, 'title:', newDoc.title)
       
       // Small delay to ensure file is fully written to disk before proceeding
       await new Promise(resolve => setTimeout(resolve, 100))
       
       // If current document has projectId, add new doc to same project
       if (document?.projectId) {
-        console.log('[Layout] Adding document to project:', document.projectId)
         // Calculate order based on documents in the same folder
         const folderDocs = documents.filter(doc => 
           (folder === 'library' && doc.folder === 'library') ||
@@ -1844,12 +1779,10 @@ export default function Layout(): JSX.Element {
         const maxOrder = folderDocs.length > 0
           ? Math.max(...folderDocs.map(doc => doc.order ?? 0), -1) + 1
           : 0
-        console.log('[Layout] Adding document with order:', maxOrder)
         
         // Add document to project BEFORE navigating (await to ensure it's saved)
         try {
           await projectApi.addDocument(document.projectId, newDoc.id, maxOrder)
-          console.log('[Layout] Document added to project successfully')
           // Update document with projectId and order
           const newDocWithOrder = { ...newDoc, order: maxOrder, projectId: document.projectId }
           
@@ -1890,7 +1823,6 @@ export default function Layout(): JSX.Element {
       // Mark as newly created document for auto-focus and placeholder hiding
       isNewlyCreatedDocRef.current = true
       
-      console.log('[Layout] Navigating to new document:', newDoc.id)
       try {
       navigate(`/document/${newDoc.id}`)
       } catch (navError) {
@@ -2495,7 +2427,6 @@ export default function Layout(): JSX.Element {
           )
         })
         
-        console.log('[Layout] Document saved:', docId)
       } catch (error) {
         console.error('[Layout] Failed to save document:', error)
       }
@@ -2559,7 +2490,6 @@ export default function Layout(): JSX.Element {
                   return prevDoc
                 })
                 
-                console.log('[Layout] Auto-updated document title after newline:', docId, 'new title:', titleCandidate)
               }
             } catch (titleError) {
               console.error('[Layout] Failed to auto-update document title:', titleError)
@@ -4500,7 +4430,6 @@ export default function Layout(): JSX.Element {
         exportData = await exportApi.export(idsToExport[0], format, exportFilename)
       } else {
         // Multiple documents - merge into one file (WYSIWYG)
-        console.log('[Layout] Calling exportMultiple with usePageBreaks:', usePageBreaks, 'type:', typeof usePageBreaks)
         exportData = await exportApi.exportMultiple(idsToExport, format, exportFilename, usePageBreaks)
       }
       
@@ -4536,8 +4465,6 @@ export default function Layout(): JSX.Element {
 
   // Show shell UI immediately - no full-screen loading blocker
   // Skeletons will handle loading states for progressive reveal
-
-  console.log('[Layout] Render - document:', document?.id, 'isLoadingDocument:', isLoadingDocument, 'documents.length:', documents.length, 'isLoadingDocuments:', isLoadingDocuments, 'projectName:', projectName, 'bgColor:', bgColor)
 
   return (
     <div style={{ 
@@ -4739,7 +4666,6 @@ export default function Layout(): JSX.Element {
             {/* File Explorer Content */}
             <div style={{ flex: 1, overflow: 'hidden', backgroundColor: bgColor, padding: 0, margin: 0 }}>
               {(() => {
-                console.log('[Layout] FileExplorer render check - isLoadingDocuments:', isLoadingDocuments, 'documents.length:', documents.length, 'projectName:', projectName)
                 if (isLoadingDocuments) {
                   return <FileExplorerSkeleton projectName={projectName} />
                 }
@@ -4767,7 +4693,6 @@ export default function Layout(): JSX.Element {
                     )
                   }}
                   onSelectedFolderChange={(folder) => {
-                    console.log('[Layout] onSelectedFolderChange called with:', folder, 'current selectedFolder:', selectedFolder)
                     try {
                       setSelectedFolder(folder)
                     } catch (error) {
