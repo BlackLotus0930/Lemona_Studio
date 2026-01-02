@@ -2,9 +2,10 @@ import { useEffect, useRef } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import { Editor } from '@tiptap/react'
 import { Document } from '@shared/types'
+import { useEditorContext } from '../../contexts/EditorContext'
 
 interface WordCountModalProps {
-  editor: Editor | null
+  editor?: Editor | null // Optional prop for backward compatibility, will use EditorContext if not provided
   documents: Document[]
   currentDocument: Document | null
   isOpen: boolean
@@ -185,13 +186,16 @@ function calculateWorkspaceWordCount(documents: Document[] | undefined): WordCou
 }
 
 export default function WordCountModal({ 
-  editor, 
+  editor: editorProp, 
   documents, 
   currentDocument, 
   isOpen, 
   onClose 
 }: WordCountModalProps) {
   const { theme } = useTheme()
+  // Use currentEditor from context, fallback to editorProp for backward compatibility
+  const { currentEditor } = useEditorContext()
+  const editor = currentEditor || editorProp || null
   const modalRef = useRef<HTMLDivElement>(null)
 
   const currentFileStats = calculateWordCountFromEditor(editor)

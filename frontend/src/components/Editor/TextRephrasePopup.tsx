@@ -227,6 +227,20 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
     processText('improve')
   }, [processText])
 
+  // Listen for popup open event to auto-expand when opened via Ctrl+K
+  useEffect(() => {
+    const handlePopupOpen = () => {
+      // Check if we should auto-expand (triggered by Ctrl+K)
+      if ((window as any).__triggerRephraseExpand && !isExpanded) {
+        ;(window as any).__triggerRephraseExpand = false
+        handleExpandAndImprove()
+      }
+    }
+
+    window.addEventListener('rephrase-popup-open', handlePopupOpen)
+    return () => window.removeEventListener('rephrase-popup-open', handlePopupOpen)
+  }, [isExpanded, handleExpandAndImprove])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

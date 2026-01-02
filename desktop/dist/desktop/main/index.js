@@ -1,49 +1,17 @@
 import { app, BrowserWindow, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config } from 'dotenv';
 import { existsSync } from 'fs';
 import { setupIPC } from './ipc.js';
 import { migrateDocuments } from './services/migration.js';
 import { documentService } from './services/documentService.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// Load .env file
+// Get project root directory (Lemona/)
 // __dirname in compiled code (running from desktop/): dist/desktop/main
-// Going up 3 levels from dist/desktop/main gives us the desktop/ directory
-// Example: desktop/dist/desktop/main -> desktop/dist/desktop -> desktop/dist -> desktop
-const desktopDir = path.resolve(__dirname, '../../..'); // This is the desktop/ directory
-const projectRoot = path.resolve(desktopDir, '..'); // This is the Lemona/ directory
-const desktopEnvPath = path.join(desktopDir, '.env'); // desktop/.env
-const rootEnvPath = path.join(projectRoot, '.env'); // Lemona/.env
-console.log(`Debug - desktopDir: ${desktopDir}`);
-console.log(`Debug - Looking for .env at: ${desktopEnvPath}`);
-let envLoaded = false;
-// Try desktop/.env first
-const desktopResult = config({ path: desktopEnvPath });
-if (!desktopResult.error && desktopResult.parsed && Object.keys(desktopResult.parsed).length > 0) {
-    console.log(`✅ Loaded .env from: ${desktopEnvPath} (Desktop-specific)`);
-    console.log(`   Found ${Object.keys(desktopResult.parsed).length} variables`);
-    envLoaded = true;
-}
-else {
-    console.log(`   desktop/.env not found or empty, trying project root...`);
-    // Fallback to project root/.env
-    const rootResult = config({ path: rootEnvPath });
-    if (!rootResult.error && rootResult.parsed && Object.keys(rootResult.parsed).length > 0) {
-        console.log(`✅ Loaded .env from: ${rootEnvPath} (Project root)`);
-        console.log(`   Found ${Object.keys(rootResult.parsed).length} variables`);
-        envLoaded = true;
-    }
-}
-if (!envLoaded) {
-    console.warn(`⚠️  Could not find .env file. Tried:`);
-    console.warn(`   1. ${desktopEnvPath}`);
-    console.warn(`   2. ${rootEnvPath}`);
-}
-// Note: API keys are now stored in localStorage via the Settings modal
-// Users can configure their Google API key in Settings > API Keys
-console.log('✅ API keys are configured via Settings > API Keys in the application');
+// Going up 4 levels from dist/desktop/main gives us the Lemona/ directory
+// Example: desktop/dist/desktop/main -> desktop/dist/desktop -> desktop/dist -> desktop -> Lemona
+const projectRoot = path.resolve(__dirname, '../../../../'); // This is the Lemona/ directory
 let mainWindow = null;
 // Setup IPC handlers
 setupIPC();
@@ -112,6 +80,13 @@ function createWindow() {
             contextIsolation: true,
             preload: path.join(__dirname, '../../preload/index.js'),
         },
+    });
+    // Handle window close: notify renderer to cleanup before closing
+    mainWindow.on('close', (event) => {
+        // Send message to renderer to cleanup (clear undo/redo, restore documents)
+        mainWindow?.webContents.send('window-will-close');
+        // Don't prevent default - allow window to close normally
+        // The cleanup will happen synchronously in the renderer
     });
     // 开发环境：加载 Vite dev server
     if (process.env.NODE_ENV === 'development' || !app.isPackaged) {

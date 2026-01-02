@@ -1,6 +1,7 @@
 import { Editor } from '@tiptap/react'
 import { useState, useEffect, useRef } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
+import { useEditorContext } from '../../contexts/EditorContext'
 import ExportModal from '../Layout/ExportModal'
 import KeyboardShortcutsModal from '../Layout/KeyboardShortcutsModal'
 import { Document } from '@shared/types'
@@ -84,7 +85,7 @@ interface ToolbarProps {
 }
 
 export default function Toolbar({ 
-  editor, 
+  editor: editorProp, 
   onToggleSearch, 
   isSearchActive = false,
   onExport,
@@ -93,6 +94,20 @@ export default function Toolbar({
   documentTitle
 }: ToolbarProps) {
   const { theme, toggleTheme } = useTheme()
+  const { currentEditor } = useEditorContext()
+  // Use currentEditor from context, fallback to editorProp for backward compatibility
+  const editor = currentEditor || editorProp
+  // Use ref to preserve editor during transitions to prevent flash
+  const editorRef = useRef<Editor | null>(editor)
+  // Update ref when editor changes, but keep previous value if new editor is null or destroyed
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) {
+      editorRef.current = editor
+    }
+  }, [editor])
+  // Use ref value for rendering to prevent flash when editor temporarily becomes null
+  // Only use stable editor if current editor is null/destroyed, otherwise use current editor
+  const stableEditor = (editor && !editor.isDestroyed) ? editor : editorRef.current
   const [fontSize, setFontSize] = useState(14)
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const storedSelectionRef = useRef<{ range: Range; cell: HTMLElement } | null>(null)
@@ -133,8 +148,8 @@ export default function Toolbar({
   
   // Helper function to check if table node is selected
   const isTableNodeSelected = () => {
-    if (!editor) return false
-    const { selection } = editor.state
+    if (!stableEditor || stableEditor.isDestroyed) return false
+    const { selection } = stableEditor.state
     if (selection.empty) return false
     
     // Check if it's a NodeSelection and the node is a tableBlock
@@ -148,7 +163,7 @@ export default function Toolbar({
     // Check if selection spans a table block
     const { from, to } = selection
     let foundTable = false
-    editor.state.doc.nodesBetween(from, to, (node) => {
+    stableEditor.state.doc.nodesBetween(from, to, (node) => {
       if (node.type.name === 'tableBlock') {
         foundTable = true
         return false // Stop traversing
@@ -159,8 +174,8 @@ export default function Toolbar({
   
   // Helper function to get all table cells from selected table
   const getAllTableCells = () => {
-    if (!editor) return []
-    const { selection } = editor.state
+    if (!stableEditor || stableEditor.isDestroyed) return []
+    const { selection } = stableEditor.state
     const cells: HTMLElement[] = []
     
     if (selection.constructor.name === 'NodeSelection' || (selection as any).node) {
@@ -185,8 +200,8 @@ export default function Toolbar({
   
   // Helper function to get the applyFormattingToAllCells function from the selected table
   const getTableFormattingFunction = () => {
-    if (!editor) return null
-    const { selection } = editor.state
+    if (!stableEditor || stableEditor.isDestroyed) return null
+    const { selection } = stableEditor.state
     
     if (selection.constructor.name === 'NodeSelection' || (selection as any).node) {
       const selectedNode = (selection as any).node
@@ -372,12 +387,12 @@ export default function Toolbar({
 
   // Update toolbar when editor selection changes
   useEffect(() => {
-    if (!editor) return
+    if (!stableEditor || stableEditor.isDestroyed) return
 
     const getFontSizeFromDOM = (): number | null => {
       try {
-        const { from } = editor.state.selection
-        const view = editor.view
+        const { from } = stableEditor.state.selection
+        const view = stableEditor.view
         
         // Get the DOM node at the cursor/selection position
         const domPos = view.domAtPos(from)
@@ -424,10 +439,11 @@ export default function Toolbar({
     }
 
     const handleUpdate = () => {
+      if (!stableEditor || stableEditor.isDestroyed) return
       forceUpdate({})
       
       // First, try to get fontSize from TipTap marks
-      const attrs = editor.getAttributes('textStyle')
+      const attrs = stableEditor.getAttributes('textStyle')
       if (attrs.fontSize) {
         const size = parseInt(attrs.fontSize)
         if (!isNaN(size) && size > 0) {
@@ -437,11 +453,11 @@ export default function Toolbar({
       }
       
       // If no fontSize mark found, check if there's text selected and try to get fontSize from the selection range
-      const { from, to } = editor.state.selection
+      const { from, to } = stableEditor.state.selection
       if (from !== to) {
         // Text is selected - check marks in the selection range
         let foundSize: number | null = null
-        editor.state.doc.nodesBetween(from, to, (node) => {
+        stableEditor.state.doc.nodesBetween(from, to, (node) => {
           if (node.marks) {
             node.marks.forEach(mark => {
               if (mark.type.name === 'textStyle' && mark.attrs.fontSize) {
@@ -471,18 +487,20 @@ export default function Toolbar({
       setFontSize(14)
     }
 
-    editor.on('selectionUpdate', handleUpdate)
-    editor.on('transaction', handleUpdate)
-    editor.on('update', handleUpdate)
-    editor.on('focus', handleUpdate)
+    stableEditor.on('selectionUpdate', handleUpdate)
+    stableEditor.on('transaction', handleUpdate)
+    stableEditor.on('update', handleUpdate)
+    stableEditor.on('focus', handleUpdate)
 
     return () => {
-      editor.off('selectionUpdate', handleUpdate)
-      editor.off('transaction', handleUpdate)
-      editor.off('update', handleUpdate)
-      editor.off('focus', handleUpdate)
+      if (stableEditor && !stableEditor.isDestroyed) {
+        stableEditor.off('selectionUpdate', handleUpdate)
+        stableEditor.off('transaction', handleUpdate)
+        stableEditor.off('update', handleUpdate)
+        stableEditor.off('focus', handleUpdate)
+      }
     }
-  }, [editor])
+  }, [stableEditor])
 
   // Close menus when clicking outside
   useEffect(() => {
@@ -513,8 +531,23 @@ export default function Toolbar({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  if (!editor) {
-    return null
+  // Focus input when menu opens
+  useEffect(() => {
+    if (showMathMenu && mathInputRef.current) {
+      setTimeout(() => mathInputRef.current?.focus(), 100)
+    }
+  }, [showMathMenu])
+
+  useEffect(() => {
+    if (showLinkDialog && linkInputRef.current) {
+      setTimeout(() => linkInputRef.current?.focus(), 100)
+    }
+  }, [showLinkDialog])
+
+  // Use stableEditor to prevent flash when editor temporarily becomes null
+  // Only hide toolbar if we never had an editor (initial state)
+  if (!stableEditor) {
+    return <div style={{ display: 'none' }} />
   }
 
   const toolbarBgColor = theme === 'dark' ? '#141414' : '#ffffff'
@@ -708,7 +741,8 @@ export default function Toolbar({
       }
     }
     // Apply font size to selected text
-    editor.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
+    if (!stableEditor || stableEditor.isDestroyed) return
+    stableEditor.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
     setShowFontSizeMenu(false)
   }
 
@@ -825,7 +859,7 @@ export default function Toolbar({
       return
     }
     // Apply font size to selected text using TextStyle extension
-    editor.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
+    stableEditor.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
   }
 
   const handleInsertLink = () => {
@@ -834,7 +868,7 @@ export default function Toolbar({
   }
 
   const handleLinkSubmit = (): void => {
-    if (!editor) return
+    if (!stableEditor || stableEditor.isDestroyed) return
     if (!linkUrl.trim()) {
       setShowLinkDialog(false)
       setLinkUrl('')
@@ -842,15 +876,15 @@ export default function Toolbar({
     }
     
     const url = linkUrl.trim()
-    const { from, to } = editor.state.selection
+    const { from, to } = stableEditor.state.selection
     
     // If text is selected, apply link to selected text
     if (from !== to) {
-      editor.chain().focus().setLink({ href: url }).run()
+      stableEditor.chain().focus().setLink({ href: url }).run()
     } else {
       // No text selected - insert URL as clickable link
       // Use insertContent with HTML to create a link directly
-      editor.chain()
+      stableEditor.chain()
         .focus()
         .insertContent(`<a href="${url}">${url}</a>`)
         .run()
@@ -870,7 +904,7 @@ export default function Toolbar({
   }
 
   const handleInsertGraph = (graphType: 'table' | 'column' | 'line' | 'pie') => {
-    if (!editor) return
+    if (!stableEditor || stableEditor.isDestroyed) return
     
     if (graphType === 'table') {
       // Insert a 3x3 table using TableExtension
@@ -896,7 +930,7 @@ export default function Toolbar({
         </tbody>
       </table>`
       // @ts-ignore - TableExtension command
-      editor.chain().focus().insertTableBlock(tableHtml).run()
+      stableEditor.chain().focus().insertTableBlock(tableHtml).run()
     } else {
       // Insert chart using ChartExtension
       const chartData = {
@@ -907,7 +941,7 @@ export default function Toolbar({
         }]
       }
       // @ts-ignore - ChartExtension command
-      editor.chain().focus().setChart(graphType, chartData, '').run()
+      stableEditor.chain().focus().setChart(graphType, chartData, '').run()
     }
     
     setShowGraphMenu(false)
@@ -922,7 +956,7 @@ export default function Toolbar({
         const dataUrl = e.target?.result as string
         if (dataUrl) {
           // Insert image and then add a paragraph after it so cursor can be placed
-          editor.chain().focus().setImage({ src: dataUrl }).insertContent('<p></p>').run()
+          stableEditor.chain().focus().setImage({ src: dataUrl }).insertContent('<p></p>').run()
         }
       }
       reader.readAsDataURL(file)
@@ -945,23 +979,10 @@ export default function Toolbar({
   const handleMathSubmit = () => {
     if (mathFormula.trim()) {
       // @ts-ignore - Math extension command
-      editor.chain().focus().setMath(mathFormula.trim(), false).run()
+      stableEditor.chain().focus().setMath(mathFormula.trim(), false).run()
     }
     setShowMathMenu(false)
   }
-
-  // Focus input when menu opens
-  useEffect(() => {
-    if (showMathMenu && mathInputRef.current) {
-      setTimeout(() => mathInputRef.current?.focus(), 100)
-    }
-  }, [showMathMenu])
-
-  useEffect(() => {
-    if (showLinkDialog && linkInputRef.current) {
-      setTimeout(() => linkInputRef.current?.focus(), 100)
-    }
-  }, [showLinkDialog])
 
   const styles = [
     { label: 'Title', value: 'title', fontSize: '24px', fontWeight: 600 },
@@ -976,17 +997,19 @@ export default function Toolbar({
 
   // Get current style label
   const getCurrentStyle = () => {
-    if (editor.isActive('title')) return 'Title'
-    if (editor.isActive('subtitle')) return 'Subtitle'
-    if (editor.isActive('heading', { level: 1 })) return 'Heading 1'
-    if (editor.isActive('heading', { level: 2 })) return 'Heading 2'
-    if (editor.isActive('heading', { level: 3 })) return 'Heading 3'
+    if (!stableEditor || stableEditor.isDestroyed) return 'Normal text'
+    if (stableEditor.isActive('title')) return 'Title'
+    if (stableEditor.isActive('subtitle')) return 'Subtitle'
+    if (stableEditor.isActive('heading', { level: 1 })) return 'Heading 1'
+    if (stableEditor.isActive('heading', { level: 2 })) return 'Heading 2'
+    if (stableEditor.isActive('heading', { level: 3 })) return 'Heading 3'
     return 'Normal text'
   }
 
   // Get current font family
   const getCurrentFontFamily = () => {
-    const attrs = editor.getAttributes('textStyle')
+    if (!stableEditor || stableEditor.isDestroyed) return 'Noto Sans SC'
+    const attrs = stableEditor.getAttributes('textStyle')
     return attrs.fontFamily || 'Noto Sans SC'
   }
 
@@ -1000,34 +1023,37 @@ export default function Toolbar({
 
   // Get current text color
   const getCurrentColor = () => {
-    const attrs = editor.getAttributes('textStyle')
+    if (!stableEditor || stableEditor.isDestroyed) return null
+    const attrs = stableEditor.getAttributes('textStyle')
     return normalizeColor(attrs.color)
   }
 
   // Get current highlight color
   const getCurrentHighlightColor = () => {
-    const attrs = editor.getAttributes('highlight')
+    if (!stableEditor || stableEditor.isDestroyed) return null
+    const attrs = stableEditor.getAttributes('highlight')
     return normalizeColor(attrs?.color)
   }
 
   // Check if a style is currently active
   const isStyleActive = (styleValue: string) => {
+    if (!stableEditor || stableEditor.isDestroyed) return false
     if (styleValue === 'title') {
-      return editor.isActive('title')
+      return stableEditor.isActive('title')
     }
     if (styleValue === 'subtitle') {
-      return editor.isActive('subtitle')
+      return stableEditor.isActive('subtitle')
     }
     if (styleValue === 'normal') {
       // Normal text is active when it's a paragraph AND not title/subtitle/heading
-      return editor.isActive('paragraph') && 
-             !editor.isActive('title') && 
-             !editor.isActive('subtitle') &&
-             !editor.isActive('heading')
+      return stableEditor.isActive('paragraph') && 
+             !stableEditor.isActive('title') && 
+             !stableEditor.isActive('subtitle') &&
+             !stableEditor.isActive('heading')
     }
     if (styleValue.startsWith('h')) {
       const level = parseInt(styleValue.slice(1)) as 1 | 2 | 3
-      return editor.isActive('heading', { level })
+      return stableEditor.isActive('heading', { level })
     }
     return false
   }
@@ -1085,13 +1111,13 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          editor.chain().focus().undo().run()
+          stableEditor.chain().focus().undo().run()
         }}
-        disabled={!editor.can().undo()}
-        style={{ ...buttonStyle, opacity: editor.can().undo() ? 1 : 0.3 }}
+        disabled={!stableEditor?.can().undo()}
+        style={{ ...buttonStyle, opacity: stableEditor?.can().undo() ? 1 : 0.3 }}
         title="Undo"
         onMouseEnter={(e) => {
-          if (editor.can().undo()) {
+          if (stableEditor?.can().undo()) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
@@ -1102,13 +1128,13 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          editor.chain().focus().redo().run()
+          stableEditor.chain().focus().redo().run()
         }}
-        disabled={!editor.can().redo()}
-        style={{ ...buttonStyle, opacity: editor.can().redo() ? 1 : 0.3 }}
+        disabled={!stableEditor?.can().redo()}
+        style={{ ...buttonStyle, opacity: stableEditor?.can().redo() ? 1 : 0.3 }}
         title="Redo"
         onMouseEnter={(e) => {
-          if (editor.can().redo()) {
+          if (stableEditor?.can().redo()) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
@@ -1198,16 +1224,16 @@ export default function Toolbar({
                     e.preventDefault()
                     if (style.value === 'title') {
                       // @ts-ignore - Title extension command
-                      editor.chain().focus().setTitle().run()
+                      stableEditor.chain().focus().setTitle().run()
                     } else if (style.value === 'subtitle') {
                       // @ts-ignore - Subtitle extension command
-                      editor.chain().focus().setSubtitle().run()
+                      stableEditor.chain().focus().setSubtitle().run()
                     } else if (style.value.startsWith('h')) {
                       const level = parseInt(style.value.slice(1)) as 1 | 2 | 3
-                      editor.chain().focus().toggleHeading({ level }).run()
+                      stableEditor.chain().focus().toggleHeading({ level }).run()
                     } else {
                       // Normal text
-                      editor.chain().focus().setParagraph().run()
+                      stableEditor.chain().focus().setParagraph().run()
                     }
                     setShowStyleMenu(false)
                   }}
@@ -1303,7 +1329,7 @@ export default function Toolbar({
                   key={font}
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    editor.chain().focus().setMark('textStyle', { fontFamily: font }).run()
+                    stableEditor.chain().focus().setMark('textStyle', { fontFamily: font }).run()
                     setShowFontMenu(false)
                   }}
                   style={{
@@ -1470,18 +1496,18 @@ export default function Toolbar({
           if (isTableNodeSelected() || isSelectionInTableCell()) {
             applyTableCellFormatting('bold')
           } else {
-            editor.chain().focus().toggleBold().run()
+            stableEditor.chain().focus().toggleBold().run()
           }
         }}
-        style={editor.isActive('bold') || (isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('bold') ? activeButtonStyle : buttonStyle}
+        style={stableEditor?.isActive('bold') || (isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('bold') ? activeButtonStyle : buttonStyle}
         title="Bold"
         onMouseEnter={(e) => {
-          if (!editor.isActive('bold')) {
+          if (!stableEditor?.isActive('bold')) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
         onMouseLeave={(e) => {
-          if (!editor.isActive('bold')) {
+          if (!stableEditor?.isActive('bold')) {
             e.currentTarget.style.backgroundColor = 'transparent'
           }
         }}
@@ -1494,18 +1520,18 @@ export default function Toolbar({
           if (isTableNodeSelected() || isSelectionInTableCell()) {
             applyTableCellFormatting('italic')
           } else {
-            editor.chain().focus().toggleItalic().run()
+            stableEditor.chain().focus().toggleItalic().run()
           }
         }}
-        style={editor.isActive('italic') || ((isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('italic')) ? activeButtonStyle : buttonStyle}
+        style={stableEditor?.isActive('italic') || ((isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('italic')) ? activeButtonStyle : buttonStyle}
         title="Italic"
         onMouseEnter={(e) => {
-          if (!editor.isActive('italic')) {
+          if (!stableEditor?.isActive('italic')) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
         onMouseLeave={(e) => {
-          if (!editor.isActive('italic')) {
+          if (!stableEditor?.isActive('italic')) {
             e.currentTarget.style.backgroundColor = 'transparent'
           }
         }}
@@ -1518,18 +1544,18 @@ export default function Toolbar({
           if (isTableNodeSelected() || isSelectionInTableCell()) {
             applyTableCellFormatting('underline')
           } else {
-            editor.chain().focus().toggleUnderline().run()
+            stableEditor.chain().focus().toggleUnderline().run()
           }
         }}
-        style={editor.isActive('underline') || ((isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('underline')) ? activeButtonStyle : buttonStyle}
+        style={stableEditor?.isActive('underline') || ((isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('underline')) ? activeButtonStyle : buttonStyle}
         title="Underline"
         onMouseEnter={(e) => {
-          if (!editor.isActive('underline')) {
+          if (!stableEditor?.isActive('underline')) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
         onMouseLeave={(e) => {
-          if (!editor.isActive('underline')) {
+          if (!stableEditor?.isActive('underline')) {
             e.currentTarget.style.backgroundColor = 'transparent'
           }
         }}
@@ -1594,10 +1620,10 @@ export default function Toolbar({
                     e.preventDefault()
                     if (isDefaultColor) {
                       // For black/white, unset color to use theme's default text color
-                      editor.chain().focus().unsetColor().run()
+                      stableEditor.chain().focus().unsetColor().run()
                     } else {
                       // For other colors, set them normally
-                      editor.chain().focus().setColor(color).run()
+                      stableEditor.chain().focus().setColor(color).run()
                     }
                     setShowColorMenu(false)
                   }}
@@ -1691,7 +1717,7 @@ export default function Toolbar({
                       key={color}
                       onMouseDown={(e) => {
                         e.preventDefault()
-                        editor.chain().focus().toggleHighlight({ color }).run()
+                        stableEditor.chain().focus().toggleHighlight({ color }).run()
                         setShowHighlightMenu(false)
                       }}
                       style={{
@@ -1733,7 +1759,7 @@ export default function Toolbar({
                 <button
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    editor.chain().focus().unsetHighlight().run()
+                    stableEditor.chain().focus().unsetHighlight().run()
                     setShowHighlightMenu(false)
                   }}
                   style={{
@@ -2029,7 +2055,7 @@ export default function Toolbar({
                 <button
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  editor.chain().focus().setTextAlign('left').run()
+                  stableEditor.chain().focus().setTextAlign('left').run()
                   setShowAlignMenu(false)
                 }}
                 style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2041,7 +2067,7 @@ export default function Toolbar({
               <button
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  editor.chain().focus().setTextAlign('center').run()
+                  stableEditor.chain().focus().setTextAlign('center').run()
                   setShowAlignMenu(false)
                 }}
                 style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2053,7 +2079,7 @@ export default function Toolbar({
               <button
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  editor.chain().focus().setTextAlign('right').run()
+                  stableEditor.chain().focus().setTextAlign('right').run()
                   setShowAlignMenu(false)
                 }}
                 style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2065,7 +2091,7 @@ export default function Toolbar({
               <button
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  editor.chain().focus().setTextAlign('justify').run()
+                  stableEditor.chain().focus().setTextAlign('justify').run()
                   setShowAlignMenu(false)
                 }}
                 style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2082,7 +2108,7 @@ export default function Toolbar({
                 <button
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    editor.chain().focus().liftListItem('listItem').run()
+                    stableEditor.chain().focus().liftListItem('listItem').run()
                     setShowAlignMenu(false)
                   }}
                   style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2094,7 +2120,7 @@ export default function Toolbar({
                 <button
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    editor.chain().focus().sinkListItem('listItem').run()
+                    stableEditor.chain().focus().sinkListItem('listItem').run()
                     setShowAlignMenu(false)
                   }}
                   style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2147,7 +2173,7 @@ export default function Toolbar({
                 key={spacing}
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  editor.chain().focus().setLineHeight(spacing.toString()).run()
+                  stableEditor.chain().focus().setLineHeight(spacing.toString()).run()
                   setShowSpacingMenu(false)
                 }}
                 style={{
@@ -2171,17 +2197,17 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          editor.chain().focus().toggleBulletList().run()
+          stableEditor.chain().focus().toggleBulletList().run()
         }}
-        style={editor.isActive('bulletList') ? activeButtonStyle : buttonStyle}
+        style={stableEditor?.isActive('bulletList') ? activeButtonStyle : buttonStyle}
         title="Bulleted list"
         onMouseEnter={(e) => {
-          if (!editor.isActive('bulletList')) {
+          if (!stableEditor?.isActive('bulletList')) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
         onMouseLeave={(e) => {
-          if (!editor.isActive('bulletList')) {
+          if (!stableEditor?.isActive('bulletList')) {
             e.currentTarget.style.backgroundColor = 'transparent'
           }
         }}
@@ -2193,17 +2219,17 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          editor.chain().focus().toggleOrderedList().run()
+          stableEditor.chain().focus().toggleOrderedList().run()
         }}
-        style={editor.isActive('orderedList') ? activeButtonStyle : buttonStyle}
+        style={stableEditor?.isActive('orderedList') ? activeButtonStyle : buttonStyle}
         title="Numbered list"
         onMouseEnter={(e) => {
-          if (!editor.isActive('orderedList')) {
+          if (!stableEditor?.isActive('orderedList')) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
         onMouseLeave={(e) => {
-          if (!editor.isActive('orderedList')) {
+          if (!stableEditor?.isActive('orderedList')) {
             e.currentTarget.style.backgroundColor = 'transparent'
           }
         }}
@@ -2215,7 +2241,7 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          editor.chain().focus().sinkListItem('listItem').run()
+          stableEditor.chain().focus().sinkListItem('listItem').run()
         }}
         style={buttonStyle}
         title="Increase indent"
@@ -2229,7 +2255,7 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          editor.chain().focus().liftListItem('listItem').run()
+          stableEditor.chain().focus().liftListItem('listItem').run()
         }}
         style={buttonStyle}
         title="Decrease indent"

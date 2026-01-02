@@ -1,6 +1,6 @@
 // Desktop OpenAI Service - Uses OpenAI API
 import OpenAI from 'openai'
-import { AIChatMessage, ChatAttachment } from '../../../shared/types.js'
+import { AIChatMessage, AutocompleteSuggestion, ChatAttachment } from '../../../shared/types.js'
 import { projectService } from './projectService.js'
 import { documentService } from './documentService.js'
 import { createRequire } from 'module'
@@ -100,40 +100,185 @@ function isGpt5Model(modelName: string): boolean {
   return modelName.startsWith('gpt-5')
 }
 
-async function buildContext(documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], style?: string): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[] }> {
-  let systemInstruction = `You are a reliable, focused assistant for Lemona.
+// Extract text from TipTap JSON node
+function extractTextFromTipTap(node: any): string {
+  if (typeof node === 'string') return node
+  if (node.type === 'text') return node.text || ''
+  if (node.content && Array.isArray(node.content)) {
+    return node.content.map(extractTextFromTipTap).join('')
+  }
+  return ''
+}
 
-You must always:
+// Extract paragraphs from TipTap JSON document
+function parseTipTapToParagraphs(node: any): Array<{ type: string; text: string; level?: number }> {
+  const paragraphs: Array<{ type: string; text: string; level?: number }> = []
+  
+  if (!node || !node.content) {
+    return paragraphs
+  }
+  
+  function traverse(currentNode: any) {
+    if (currentNode.type === 'paragraph') {
+      const text = extractTextFromTipTap(currentNode)
+      if (text.trim()) {
+        paragraphs.push({ type: 'paragraph', text })
+      }
+    } else if (currentNode.type === 'heading') {
+      const text = extractTextFromTipTap(currentNode)
+      const level = currentNode.attrs?.level || 1
+      if (text.trim()) {
+        paragraphs.push({ type: 'heading', text, level })
+      }
+    } else if (currentNode.content && Array.isArray(currentNode.content)) {
+      currentNode.content.forEach(traverse)
+    }
+  }
+  
+  traverse(node)
+  return paragraphs
+}
 
-- Understand user intent and ask follow-up questions if the request is ambiguous.
+// Get current editing context: current paragraph + 1 paragraph before + 1 paragraph after
+// If no cursor position is provided, use first 3 paragraphs as "current editing area"
+function getCurrentEditingContext(documentContent?: string, cursorPosition?: number, maxTokens: number = 128000): string {
+  if (!documentContent) {
+    return ''
+  }
+  
+  try {
+    const content = JSON.parse(documentContent)
+    const paragraphs = parseTipTapToParagraphs(content)
+    
+    if (paragraphs.length === 0) {
+      return ''
+    }
+    
+    // If no cursor position, use first 3 paragraphs as "current editing area"
+    let currentIndex = 0
+    if (cursorPosition !== undefined && cursorPosition !== null) {
+      // Find which paragraph contains the cursor position
+      let charCount = 0
+      for (let i = 0; i < paragraphs.length; i++) {
+        const paraLength = paragraphs[i].text.length + 1 // +1 for newline
+        if (charCount + paraLength > cursorPosition) {
+          currentIndex = i
+          break
+        }
+        charCount += paraLength
+        currentIndex = i // In case cursor is at the end
+      }
+    }
+    
+    // Get 1 paragraph before + current + 1 paragraph after
+    const startIndex = Math.max(0, currentIndex - 1)
+    const endIndex = Math.min(paragraphs.length - 1, currentIndex + 1)
+    
+    const contextParagraphs = paragraphs.slice(startIndex, endIndex + 1)
+    
+    // Format paragraphs with their types
+    const formattedParagraphs = contextParagraphs.map((para) => {
+      const prefix = para.type === 'heading' 
+        ? `#${'#'.repeat((para.level || 1) - 1)} ` 
+        : ''
+      return `${prefix}${para.text}`
+    }).join('\n\n')
+    
+    // Limit by token count (rough estimate: 1 token ≈ 4 characters)
+    const maxChars = maxTokens * 4
+    if (formattedParagraphs.length > maxChars) {
+      return formattedParagraphs.substring(0, maxChars) + '\n\n[... content continues ...]'
+    }
+    
+    return formattedParagraphs
+  } catch (error) {
+    // Fallback: if parsing fails, use simple truncation
+    return documentContent.slice(0, maxTokens * 4)
+  }
+}
 
-- Prioritize safe, accurate, verifiable information.
+async function getReadmeContent(projectId: string): Promise<string | null> {
+  try {
+    const documents = await projectService.getProjectDocuments(projectId)
+    const readmeDoc = documents.find(doc => doc.title === 'README.md')
+    if (readmeDoc) {
+      const content = JSON.parse(readmeDoc.content)
+      return extractTextFromTipTap(content)
+    }
+    return null
+  } catch (error) {
+    return null
+  }
+}
 
-- Follow the output contract defined later for each task.
+async function buildContext(documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], style?: string, cursorPosition?: number, apiKey?: string): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[] }> {
+  let systemInstruction = `You are Lemona's AI writing companion.
 
-- Never hallucinate facts; if you cannot answer confidently, say "INSUFFICIENT_DATA".
+You are supportive, curious, and engaged, like a thoughtful collaborator sitting beside the user while they write.
 
-General rules:
+Your primary goal is to help the user think clearly without taking over their thinking.
 
-1. Respond concisely and clearly unless the user requests depth.
+You care about:
 
-2. Provide structured outputs in the requested format (JSON, steps, table, etc.).
+preserving the user's voice
 
-3. Cite sources when available (URL or named source).
+keeping ideas open rather than prematurely settled
 
-4. Abide by safety policies: avoid harmful advice, personal data exposure, and disallowed content.
+supporting confidence, not replacing authorship
 
-When responding in JSON:
+By default:
 
-- Output only valid JSON (no extra commentary outside the JSON object).
+You do not write full passages for the user.
 
-- Follow the exact schema from the user request.
+You do not assume access to the entire project.
 
-If the request is incomplete:
+You do not introduce outside knowledge unless asked.
 
-- Ask the user a clarifying question before answering.
+Instead, you:
 
-End every answer with a clear "Next step" suggestion if relevant.`
+reflect what the user seems to be doing
+
+gently point out tensions, assumptions, or unclear moves
+
+ask questions that help the user decide their next step
+
+When the user explicitly asks for it, you may:
+
+help rephrase a sentence
+
+outline possible directions
+
+bring in external references or examples
+
+Keep your tone warm, human, and encouraging.
+Avoid sounding like a reviewer, judge, or authority.
+
+Your role is not to finish the work, but to help the user stay in the work.`
+
+  // 1️⃣ Add project context FIRST (README, project overview, intent)
+  // This gives AI the background about "what project am I working on"
+  if (projectId) {
+    try {
+      const project = await projectService.getById(projectId)
+      if (project) {
+        systemInstruction += `\n\n## PROJECT CONTEXT\n\nProject: ${project.title}`
+        if (project.description) {
+          systemInstruction += `\nDescription: ${project.description}`
+        }
+        if (project.intent) {
+          systemInstruction += `\nIntent: ${project.intent}`
+        }
+        
+        // Add README content if available
+        const readmeContent = await getReadmeContent(projectId)
+        if (readmeContent && readmeContent.trim()) {
+          systemInstruction += `\n\n### PROJECT INSTRUCTIONS (README.md)\n\n${readmeContent}`
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load project context:', error)
+    }
+  }
 
   // Add style instructions
   if (style && style !== 'Normal') {
@@ -153,44 +298,153 @@ End every answer with a clear "Next step" suggestion if relevant.`
     }
   }
 
-  let contextHistory: AIChatMessage[] = []
-
-  // Add document context if available
+  // 2️⃣ Add current editing context (local paragraph context)
+  // Only pass the paragraph being edited + surrounding paragraphs, not the entire document
   if (documentContent) {
-    systemInstruction += `\n\nCurrent document context:\n${documentContent.slice(0, 8000)}`
-  }
-
-  // Add project context if available
-  if (projectId) {
-    try {
-      const project = await projectService.getById(projectId)
-      if (project) {
-        systemInstruction += `\n\nProject context: ${project.title}`
-        if (project.description) {
-          systemInstruction += `\nDescription: ${project.description}`
-        }
-        if (project.intent) {
-          systemInstruction += `\nIntent: ${project.intent}`
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load project context:', error)
+    const editingContext = getCurrentEditingContext(documentContent, cursorPosition, 128000)
+    if (editingContext) {
+      systemInstruction += `\n\n## CURRENT EDITING CONTEXT\n\n${editingContext}`
     }
   }
 
-  // Add chat history if available
+  // 3️⃣ Chat history management: sliding window + summarization
+  let contextHistory: AIChatMessage[] = []
+  let historySummary: string = ''
+
   if (chatHistory && chatHistory.length > 0) {
-    contextHistory = [...chatHistory]
+    // Token-based sliding window: keep recent history up to ~8K tokens
+    const RECENT_HISTORY_TOKEN_LIMIT = 8000 // ~8K tokens for recent conversation
+    const SUMMARY_TOKEN_LIMIT = 1000 // ~1K tokens for old history summary
+    
+    // Estimate tokens for all messages (rough estimate: 1 token ≈ 4 characters)
+    const estimateTokens = (text: string): number => {
+      return Math.ceil(text.length / 4)
+    }
+    
+    // Calculate total tokens in history
+    let totalTokens = 0
+    for (const msg of chatHistory) {
+      totalTokens += estimateTokens(msg.content || '')
+    }
+    
+    if (totalTokens > RECENT_HISTORY_TOKEN_LIMIT) {
+      // Need to split: keep recent messages up to token limit, summarize the rest
+      let recentTokens = 0
+      let splitIndex = chatHistory.length
+      
+      // Find split point: keep as many recent messages as possible within token limit
+      for (let i = chatHistory.length - 1; i >= 0; i--) {
+        const msgTokens = estimateTokens(chatHistory[i].content || '')
+        if (recentTokens + msgTokens <= RECENT_HISTORY_TOKEN_LIMIT) {
+          recentTokens += msgTokens
+          splitIndex = i
+        } else {
+          break
+        }
+      }
+      
+      // Split history
+      const oldHistory = chatHistory.slice(0, splitIndex)
+      const recentHistory = chatHistory.slice(splitIndex)
+      
+      // Summarize old history (~1K tokens)
+      if (oldHistory.length > 0) {
+        historySummary = await summarizeChatHistory(oldHistory, SUMMARY_TOKEN_LIMIT, apiKey)
+      }
+      
+      // Keep recent history
+      contextHistory = recentHistory
+    } else {
+      // All history fits within token limit, keep all
+      contextHistory = [...chatHistory]
+    }
+  }
+
+  // Add history summary as a message in chatHistory (not in systemInstruction)
+  // This allows AI to reference it as context without treating it as a "rule" or "personality instruction"
+  if (historySummary) {
+    // Insert summary as a system-like message at the beginning of chat history
+    // Using 'assistant' role to indicate it's contextual information, not a user message
+    const summaryMessage: AIChatMessage = {
+      id: `summary_${Date.now()}`,
+      role: 'assistant',
+      content: `[Previous conversation summary]\n\n${historySummary}`,
+      timestamp: new Date().toISOString()
+    }
+    contextHistory = [summaryMessage, ...contextHistory]
   }
 
   return { systemInstruction, chatHistory: contextHistory }
+}
+
+// Summarize old chat history to preserve context without using too many tokens
+async function summarizeChatHistory(history: AIChatMessage[], targetTokens: number = 1000, apiKey?: string): Promise<string> {
+  if (history.length === 0) {
+    return ''
+  }
+
+  // Format history for summarization
+  const historyText = history
+    .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+    .join('\n\n')
+
+  // If API key is available, use AI to generate summary
+  if (apiKey) {
+    try {
+      const client = getClient(apiKey)
+      const summaryPrompt = `Please provide a concise summary of the following conversation history. Focus on:
+- Key topics discussed
+- Important decisions or conclusions
+- User's writing goals and preferences
+- Any specific instructions or context mentioned
+
+Keep the summary to approximately ${targetTokens} tokens (roughly ${targetTokens * 4} characters). Be concise but preserve important context.
+
+Conversation history:
+${historyText}
+
+Summary:`
+
+      const completion = await client.chat.completions.create({
+        model: 'gpt-5-nano', // Use a lightweight model for summarization
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a helpful assistant that summarizes conversation history concisely while preserving important context.'
+          },
+          {
+            role: 'user',
+            content: summaryPrompt
+          }
+        ],
+        max_tokens: targetTokens,
+        temperature: 0.3 // Lower temperature for more focused summaries
+      })
+
+      const summary = completion.choices[0]?.message?.content || ''
+      if (summary.trim()) {
+        return summary.trim()
+      }
+    } catch (error) {
+      console.error('Failed to generate AI summary, falling back to truncation:', error)
+    }
+  }
+
+  // Fallback: truncate history if AI summarization fails or API key not available
+  const maxChars = targetTokens * 4
+  if (historyText.length <= maxChars) {
+    return historyText
+  }
+  
+  // Simple truncation with note
+  return historyText.substring(0, maxChars) + '\n\n[... earlier conversation history truncated ...]'
 }
 
 export const openaiService = {
   async chat(apiKey: string, message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string, style?: string, attachments?: ChatAttachment[]): Promise<AIChatMessage> {
     const client = getClient(apiKey)
     const model = getModelName(modelName || 'gpt-5-nano', attachments && attachments.length > 0)
-    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style)
+    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey)
     
     try {
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -245,7 +499,7 @@ export const openaiService = {
   ): AsyncGenerator<string> {
     const client = getClient(apiKey)
     const model = getModelName(modelName || 'gpt-5-nano', attachments && attachments.length > 0)
-    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style)
+    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey)
     
     try {
       // If web search is enabled, use OpenAI's Responses API with native web_search tool
@@ -442,6 +696,55 @@ export const openaiService = {
     } catch (error: any) {
       console.error('OpenAI API error:', error)
       throw new Error(`Failed to generate response: ${error.message || 'Unknown error'}`)
+    }
+  },
+
+  async autocomplete(
+    apiKey: string,
+    text: string,
+    cursorPosition: number,
+    documentContent?: string,
+    projectId?: string,
+    modelName?: string
+  ): Promise<AutocompleteSuggestion> {
+    const client = getClient(apiKey)
+    const model = getModelName(modelName || 'gpt-5-nano', false)
+    const { systemInstruction } = await buildContext(documentContent, projectId, undefined, undefined, undefined, apiKey)
+    const beforeCursor = text.slice(0, cursorPosition)
+    const afterCursor = text.slice(cursorPosition)
+    const prompt = `${systemInstruction}\n\nUser is typing: "${beforeCursor}|${afterCursor}"\n\nPlease suggest the next few words or sentence to complete their thought. Only provide the continuation text, nothing else.`
+    
+    try {
+      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        {
+          role: 'system',
+          content: systemInstruction
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ]
+
+      const completionParams: any = {
+        model,
+        messages,
+      }
+      if (!isGpt5Model(model)) {
+        completionParams.temperature = 0.7
+      }
+
+      const completion = await client.chat.completions.create(completionParams)
+      const suggestion = completion.choices[0]?.message?.content?.trim() || ''
+      
+      return {
+        text: suggestion,
+        start: cursorPosition,
+        end: cursorPosition + suggestion.length,
+      }
+    } catch (error: any) {
+      console.error('OpenAI autocomplete error:', error)
+      throw new Error(`Failed to generate autocomplete: ${error.message || 'Unknown error'}`)
     }
   },
 }

@@ -25,6 +25,12 @@ export interface DocumentEditorSearchHandle {
   clearSearch: () => void // Clear search highlights and state
 }
 
+// DocumentEditor component for multi-editor architecture
+// In this architecture:
+// - Each document has its own Editor instance (created in DocumentEditorWrapper)
+// - Editor content is set when the editor is created, not when switching documents
+// - This component handles search, selection, scrolling, and other UI interactions
+// - It does NOT handle content initialization or updates (handled by DocumentEditorWrapper)
 const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProps>(
   ({ document, editor, isAIPanelOpen = false, aiPanelWidth = 20 }, ref) => {
   const { theme } = useTheme()
@@ -397,11 +403,13 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     const handleKeyDown = (e: KeyboardEvent) => {
       // Handle Ctrl+K or Cmd+K
       if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
-        // Check if popup is already expanded - if so, let TextRephrasePopup handle it
-        const isPopupExpanded = showRephrasePopup && isRephrasePopupOpenRef.current
+        // Check if popup is already showing - if so, let TextRephrasePopup handle it
+        // This allows Ctrl+K to expand the popup if it's showing but not expanded yet
+        const isPopupShowing = showRephrasePopup && isRephrasePopupOpenRef.current
         
-        // If popup is expanded, don't intercept (let TextRephrasePopup handle)
-        if (isPopupExpanded) {
+        // If popup is showing (whether expanded or not), don't intercept (let TextRephrasePopup handle)
+        // This ensures Ctrl+K expands the popup and executes improve when text is selected
+        if (isPopupShowing) {
           return
         }
         
@@ -485,7 +493,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           }
         }
         
-        // If there's a selection, 100% intercept
+        // If there's a selection, open popup and let TextRephrasePopup handle expansion
         if (hasSelection) {
           // CRITICAL: Set flag FIRST before any other operations
           // This prevents selection update handlers from closing popup
@@ -495,11 +503,9 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           // Store in window object so TextRephrasePopup can also access it
           ;(window as any).__lastCtrlKTime = Date.now()
           
-          // CRITICAL: Prevent default and stop propagation IMMEDIATELY
-          // This prevents ProseMirror and browser from handling the event
+          // CRITICAL: Prevent default to prevent browser/ProseMirror default behavior
+          // But DON'T stop propagation - let TextRephrasePopup handle the expansion
           e.preventDefault()
-          e.stopPropagation()
-          e.stopImmediatePropagation()
           
           // Cancel any pending autocomplete requests
           if (typeof (window as any).__cancelAutocomplete === 'function') {
@@ -520,14 +526,32 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           
           // Ensure popup is marked as open and shown
           isRephrasePopupOpenRef.current = true
-          if (!showRephrasePopup) {
+          const wasPopupHidden = !showRephrasePopup
+          if (wasPopupHidden) {
             setShowRephrasePopup(true)
           }
           
+          // If popup was just opened, trigger expansion via window signal
+          // This ensures TextRephrasePopup expands even if it hasn't registered event listener yet
+          if (wasPopupHidden) {
+            // Set a flag that TextRephrasePopup can check
+            ;(window as any).__triggerRephraseExpand = true
+            // Use requestAnimationFrame to ensure popup has rendered
+            requestAnimationFrame(() => {
+              // Trigger a custom event that TextRephrasePopup can listen to
+              window.dispatchEvent(new CustomEvent('rephrase-popup-open'))
+            })
+          }
+          
+          // Don't stop propagation - let the event continue to TextRephrasePopup
+          // TextRephrasePopup will handle expanding the popup and executing improve
           // Clear flag after a delay to allow popup to expand and stabilize
           setTimeout(() => {
             isCtrlKProcessingRef.current = false
           }, 1500) // Longer delay to ensure popup is fully stable and selection updates have settled
+          
+          // Return without stopping propagation so TextRephrasePopup can handle it
+          return
         }
       }
     }
@@ -941,6 +965,8 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   }, [showInlineSearch, editor])
 
   // Clear search highlights when document or editor changes
+  // In multi-editor architecture, each document has its own editor instance
+  // When switching documents, we need to clear search state for the previous document
   const prevDocumentIdRef = useRef<string | undefined>(undefined)
   const prevEditorRef = useRef<Editor | null>(null)
   useEffect(() => {
@@ -950,6 +976,8 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     
     if (documentChanged || editorChanged) {
       // Clear highlights and search state when switching documents or editor changes
+      // Note: In multi-editor architecture, each editor maintains its own state
+      // We only need to clear the UI state (search highlights, matches, etc.)
       clearInlineSearchHighlights()
       setMatches([])
       setCurrentMatchIndex(-1)

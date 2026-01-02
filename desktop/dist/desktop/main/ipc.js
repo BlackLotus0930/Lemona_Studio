@@ -231,8 +231,8 @@ export function setupIPC() {
             throw error;
         }
     });
-    // Autocomplete uses Gemini 2.5 Flash Lite (fast and free)
-    ipcMain.handle('ai:autocomplete', async (_, apiKey, text, cursorPosition, documentContent, documentId) => {
+    // Autocomplete: uses Gemini if available, otherwise falls back to OpenAI GPT-5 Nano
+    ipcMain.handle('ai:autocomplete', async (_, googleApiKey, openaiApiKey, text, cursorPosition, documentContent, documentId) => {
         try {
             // Get projectId from document if documentId is provided
             let projectId;
@@ -240,7 +240,18 @@ export function setupIPC() {
                 const document = await documentService.getById(documentId);
                 projectId = document?.projectId;
             }
-            return await geminiService.autocomplete(apiKey, text, cursorPosition, documentContent, projectId, 'gemini-2.5-flash-lite');
+            // Use Gemini if available (default), otherwise fall back to OpenAI GPT-5 Nano
+            if (googleApiKey) {
+                console.log('[IPC] Using Gemini 2.5 Flash Lite for autocomplete');
+                return await geminiService.autocomplete(googleApiKey, text, cursorPosition, documentContent, projectId, 'gemini-2.5-flash-lite');
+            }
+            else if (openaiApiKey) {
+                console.log('[IPC] Using OpenAI GPT-5 Nano for autocomplete');
+                return await openaiService.autocomplete(openaiApiKey, text, cursorPosition, documentContent, projectId, 'gpt-5-nano');
+            }
+            else {
+                throw new Error('No API key configured. Please set either Google API key or OpenAI API key in Settings > API Keys.');
+            }
         }
         catch (error) {
             console.error('IPC ai:autocomplete error:', error);
@@ -263,7 +274,12 @@ export function setupIPC() {
     // Rephrase text uses GPT-5 Nano if only OpenAI key is available, otherwise Gemini 2.5 Flash Lite
     ipcMain.handle('ai:rephraseText', async (_, googleApiKey, openaiApiKey, text, instruction) => {
         try {
-            console.log('[IPC] Rephrase text request:', { textLength: text.length, instruction });
+            console.log('[IPC] Rephrase text request:', {
+                textLength: text.length,
+                textPreview: text.length > 50 ? text.substring(0, 50) + '...' : text,
+                fullText: text,
+                instruction
+            });
             // Explicitly instruct to only return the rephrased text with no follow-up questions or suggestions
             const prompt = `Rephrase this text according to the instruction. 
 
@@ -278,12 +294,10 @@ Rephrased text:`;
             let result;
             // Use GPT-5 Nano if only OpenAI key is available, otherwise use Gemini 2.5 Flash Lite
             if (openaiApiKey && !googleApiKey) {
-                console.log('[IPC] Using OpenAI GPT-5 Nano for rephrasing');
                 const msg = await openaiService.chat(openaiApiKey, prompt, undefined, undefined, undefined, 'gpt-5-nano');
                 result = msg.content.trim();
             }
             else if (googleApiKey) {
-                console.log('[IPC] Using Gemini 2.5 Flash Lite for rephrasing');
                 const msg = await geminiService.chat(googleApiKey, prompt, undefined, undefined, undefined, 'gemini-2.5-flash-lite');
                 result = msg.content.trim();
             }
@@ -305,7 +319,6 @@ Rephrased text:`;
             for (const pattern of nextStepPatterns) {
                 result = result.replace(pattern, '').trim();
             }
-            console.log('[IPC] Rephrase result length:', result.length);
             return result;
         }
         catch (error) {

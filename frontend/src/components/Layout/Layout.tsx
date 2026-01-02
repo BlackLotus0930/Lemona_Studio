@@ -14,7 +14,7 @@ import { MathExtension } from '../Editor/MathExtension'
 import { PDFViewerExtension } from '../Editor/PDFViewer'
 import { TableExtension } from '../Editor/TableExtension'
 import { ChartExtension } from '../Editor/ChartExtension'
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import DocumentEditor, { DocumentEditorSearchHandle } from '../Editor/DocumentEditor'
 import Toolbar from '../Editor/Toolbar'
 import AIPanel from '../AIPanel/AIPanel'
@@ -30,9 +30,10 @@ import { LineHeight } from '../Editor/LineHeight'
 import { Title } from '../Editor/Title'
 import { Subtitle } from '../Editor/Subtitle'
 import { useTheme } from '../../contexts/ThemeContext'
+import { useEditorContext } from '../../contexts/EditorContext'
 import { BulletList, OrderedList, ListItem } from '@tiptap/extension-list'
 import { IndentExtension } from '../Editor/IndentExtension'
-import { TextSelection, EditorState } from 'prosemirror-state'
+import { TextSelection } from 'prosemirror-state'
 // @ts-ignore
 import ChatIcon from '@mui/icons-material/Chat'
 // @ts-ignore
@@ -98,14 +99,148 @@ function saveFileExplorerSize(size: number) {
   }
 }
 
-export default function Layout() {
+// Internal component to manage a single document's editor instance
+// This component uses useEditor hook to create the editor instance
+function DocumentEditorWrapper({
+  document,
+  isActive,
+  onEditorCreated,
+  onDocumentChange,
+  isAIPanelOpen,
+  aiPanelWidth,
+  createEditorConfigFn,
+  editorRef,
+  onUpdate,
+}: {
+  document: Document
+  isActive: boolean
+  onEditorCreated: (docId: string, editor: Editor) => void
+  onDocumentChange?: (doc: Document | null) => void
+  isAIPanelOpen?: boolean
+  aiPanelWidth?: number
+  createEditorConfigFn: (content: any) => any
+  editorRef: React.MutableRefObject<DocumentEditorSearchHandle | null>
+  onUpdate?: (editor: Editor, docId: string) => void
+}) {
+  
+  // Parse content and create stable config
+  const editorConfig = useMemo(() => {
+    let parsedContent: any = ''
+    try {
+      if (document.content) {
+        parsedContent = JSON.parse(document.content)
+      }
+    } catch (error) {
+      console.error('Failed to parse document content:', error)
+      parsedContent = ''
+    }
+    return createEditorConfigFn(parsedContent)
+  }, [document.content, createEditorConfigFn])
+
+  // Create editor instance using useEditor hook with config from parent
+  const editor = useEditor(editorConfig)
+
+  // Set up onUpdate callback
+  useEffect(() => {
+    if (!editor || !onUpdate) return
+    
+    const handleUpdate = () => {
+      onUpdate(editor, document.id)
+    }
+    
+    editor.on('update', handleUpdate)
+    
+    return () => {
+      editor.off('update', handleUpdate)
+    }
+  }, [editor, document.id, onUpdate])
+
+  // Notify parent when editor is created
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) {
+      onEditorCreated(document.id, editor)
+    }
+  }, [editor, document.id, onEditorCreated])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (editor && !editor.isDestroyed) {
+        editor.destroy()
+      }
+    }
+  }, [editor])
+
+  if (!editor) {
+    return null
+  }
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        display: isActive ? 'block' : 'none',
+        pointerEvents: isActive ? 'auto' : 'none',
+      }}
+    >
+      <DocumentEditor
+        ref={editorRef}
+        document={document}
+        editor={editor}
+        onDocumentChange={onDocumentChange}
+        showToolbarOnly={false}
+        isAIPanelOpen={isAIPanelOpen}
+        aiPanelWidth={aiPanelWidth}
+      />
+    </div>
+  )
+}
+
+export default function Layout(): JSX.Element {
+  console.log('[Layout] Component rendering')
+  
+  // Add error boundary for component errors
+  useEffect(() => {
+    const handleError = (error: ErrorEvent) => {
+      console.error('[Layout] Global error caught:', error.error)
+    }
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      console.error('[Layout] Unhandled promise rejection:', event.reason)
+    }
+    
+    window.addEventListener('error', handleError)
+    window.addEventListener('unhandledrejection', handleUnhandledRejection)
+    
+    return () => {
+      window.removeEventListener('error', handleError)
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection)
+    }
+  }, [])
+  
   const { theme } = useTheme()
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
+  console.log('[Layout] Route id:', id)
   const [document, setDocument] = useState<Document | null>(null)
   const [isLoadingDocument, setIsLoadingDocument] = useState(true)
+  console.log('[Layout] Initial state - document:', document?.id, 'isLoadingDocument:', isLoadingDocument)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const documentEditorRef = useRef<DocumentEditorSearchHandle>(null)
+  const titleUpdateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const titleUpdatedRef = useRef<Set<string>>(new Set()) // Track which documents have had their title auto-updated
+  // Map to store DocumentEditor refs for each document (keep them mounted)
+  const documentEditorRefsMap = useRef<Map<string, React.MutableRefObject<DocumentEditorSearchHandle | null>>>(new Map())
+  
+  // Helper to get or create a ref for a document editor
+  const getDocumentEditorRef = (docId: string): React.MutableRefObject<DocumentEditorSearchHandle | null> => {
+    if (!documentEditorRefsMap.current.has(docId)) {
+      documentEditorRefsMap.current.set(docId, { current: null })
+    }
+    return documentEditorRefsMap.current.get(docId)!
+  }
   // Use a mutable ref object for PDF viewer to allow reassignment
   const pdfViewerRef = useRef<PDFViewerSearchHandle | null>(null) as React.MutableRefObject<PDFViewerSearchHandle | null>
   // Map to store PDF Viewer refs for each PDF document (keep them mounted)
@@ -127,8 +262,29 @@ export default function Layout() {
     return savedState.width
   })
   const [documents, setDocuments] = useState<Document[]>([])
+  const documentsRef = useRef<Document[]>([]) // Ref to store latest documents for use in callbacks
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
   const [projectName, setProjectName] = useState<string>('LEMONA')
+  
+  // Sync documentsRef with documents state
+  useEffect(() => {
+    documentsRef.current = documents
+  }, [documents])
+  
+  // Log when documents state actually changes
+  useEffect(() => {
+    console.log('[Layout] documents state changed:', documents.length, 'docs:', documents.map(d => d.id))
+  }, [documents])
+  
+  // Log when isLoadingDocuments state actually changes
+  useEffect(() => {
+    console.log('[Layout] isLoadingDocuments state changed:', isLoadingDocuments)
+  }, [isLoadingDocuments])
+  
+  // Log when projectName state actually changes
+  useEffect(() => {
+    console.log('[Layout] projectName state changed:', projectName)
+  }, [projectName])
   // Load tabs from localStorage on mount
   const [openTabs, setOpenTabs] = useState<Document[]>(() => {
     try {
@@ -151,6 +307,20 @@ export default function Layout() {
       return null
     }
   })
+  
+  // Get setCurrentEditor from EditorContext
+  const { setCurrentEditor } = useEditorContext()
+  
+  // Update EditorContext with current active editor when activeTabId changes
+  useEffect(() => {
+    if (activeTabId) {
+      const currentEditor = getEditor(activeTabId)
+      setCurrentEditor(currentEditor)
+    } else {
+      setCurrentEditor(null)
+    }
+  }, [activeTabId, setCurrentEditor])
+  
   const editorPanelRef = useRef<ImperativePanelHandle>(null)
   const aiPanelRef = useRef<ImperativePanelHandle>(null)
   const fileExplorerPanelRef = useRef<ImperativePanelHandle>(null)
@@ -187,9 +357,83 @@ export default function Layout() {
   const pendingSearchNavRef = useRef<{ query: string; position: number } | null>(null) // Track pending search navigation
   const isNavigatingFromSearchRef = useRef<boolean>(false) // Track if we're navigating from search results
   const lastRestoredDocIdRef = useRef<string | null>(null) // Track last document ID we restored search state for
-  const restoredStateDocIdRef = useRef<string | null>(null) // Track doc ID whose state was restored
-  // Store EditorState for each document to preserve undo/redo history when switching
-  const documentEditorStatesRef = useRef<Map<string, EditorState>>(new Map())
+  // Store Editor instances for each document (multi-editor architecture)
+  const editorsMapRef = useRef<Map<string, Editor>>(new Map())
+  
+  // Helper function to check if document content is empty
+  const isDocumentEmpty = (content: any): boolean => {
+    if (!content || typeof content !== 'object') return true
+    if (!content.content || !Array.isArray(content.content)) return true
+    if (content.content.length === 0) return true
+    
+    // Check if content only has empty paragraphs
+    const hasNonEmptyContent = content.content.some((node: any) => {
+      if (node.type === 'paragraph') {
+        // Paragraph is empty if it has no content or only empty text nodes
+        if (!node.content || node.content.length === 0) return false
+        return node.content.some((child: any) => {
+          if (child.type === 'text') {
+            return child.text && child.text.trim().length > 0
+          }
+          return true // Non-text nodes are considered content
+        })
+      }
+      return true // Non-paragraph nodes are considered content
+    })
+    
+    return !hasNonEmptyContent
+  }
+  
+  // Get editor instance from map (if exists)
+  const getEditor = (docId: string): Editor | null => {
+    const editor = editorsMapRef.current.get(docId)
+    if (editor && !editor.isDestroyed) {
+      return editor
+    }
+    // Remove destroyed editor from map
+    if (editor) {
+      editorsMapRef.current.delete(docId)
+    }
+    return null
+  }
+  
+  // Clear all search highlights (temporary highlights, not saved to document)
+  const clearSearchHighlights = (editor: Editor) => {
+    if (!editor) return
+    
+    try {
+      const { state, dispatch } = editor.view
+      const { tr, doc } = state
+      const searchHighlightColors = ['#FFEB3B', '#FDD835', '#fef08a', '#4a5568', '#e3f2fd', '#5a6b7d', '#90caf9']
+      const highlightMarkType = state.schema.marks.highlight
+      
+      if (!highlightMarkType) return
+      
+      let modified = false
+      
+      // Iterate through all nodes and remove search highlight marks
+      doc.descendants((node, pos) => {
+        if (node.marks && node.marks.length > 0) {
+          node.marks.forEach(mark => {
+            if (mark.type.name === 'highlight') {
+              const color = mark.attrs?.color
+              if (color && searchHighlightColors.includes(color)) {
+                // Remove this specific mark from this node's range
+                tr.removeMark(pos, pos + node.nodeSize, mark.type)
+                modified = true
+              }
+            }
+          })
+        }
+      })
+      
+      if (modified) {
+        dispatch(tr)
+      }
+    } catch (error) {
+      console.error('Error clearing search highlights:', error)
+    }
+  }
   
   // Track manually renamed documents (persisted in localStorage)
   const [manuallyRenamedDocs, setManuallyRenamedDocs] = useState<Set<string>>(() => {
@@ -277,18 +521,71 @@ export default function Layout() {
     }
   }, [document?.id]) // Run when document changes (navigation)
 
+  // Save document immediately (used when switching documents or leaving page)
+  // Must be defined before useEffect hooks that use it
+  const saveDocumentImmediately = useCallback(async (docId: string) => {
+    const editor = getEditor(docId)
+    if (!editor || editor.isDestroyed) return
+    
+    try {
+      const content = editor.getJSON()
+      const contentString = JSON.stringify(content)
+      
+      // Update document in backend
+      await documentApi.update(docId, contentString)
+      
+      // Update local documents state
+      setDocuments(prevDocs => {
+        return prevDocs.map(doc => 
+          doc.id === docId 
+            ? { ...doc, content: contentString, updatedAt: new Date().toISOString() }
+            : doc
+        )
+      })
+      
+      // Update open tabs
+      setOpenTabs(prevTabs => {
+        return prevTabs.map(tab => 
+          tab.id === docId 
+            ? { ...tab, content: contentString, updatedAt: new Date().toISOString() }
+            : tab
+        )
+      })
+      
+      console.log('[Layout] Document saved immediately:', docId)
+    } catch (error) {
+      console.error('[Layout] Failed to save document:', error)
+    }
+  }, [])
+
   // Load document when route parameter changes
   useEffect(() => {
+    console.log('[Layout] useEffect[id] - id:', id, 'current document:', document?.id)
     if (id) {
       // When switching documents, keep the UI visible for smooth transition
       // Only set loading state if we're switching to a different document
       if (!document || document.id !== id) {
+        console.log('[Layout] Loading new document:', id, 'previous document:', document?.id)
+        
+        // Save current document before switching
+        if (document?.id) {
+          // Clear any pending debounced saves and save immediately
+          if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current)
+            saveTimeoutRef.current = null
+          }
+          saveDocumentImmediately(document.id)
+        }
+        
         // Clear search state in current editor before switching tabs
         const isPDF = document?.title.toLowerCase().endsWith('.pdf')
         if (isPDF && pdfViewerRef.current) {
           pdfViewerRef.current.clearSearch()
-        } else if (!isPDF && documentEditorRef.current) {
-          documentEditorRef.current.clearSearch()
+        } else if (!isPDF && document) {
+          const docEditorRef = getDocumentEditorRef(document.id)
+          if (docEditorRef.current) {
+            docEditorRef.current.clearSearch()
+          }
         }
         
         // Clear newly created flag when switching to a different document
@@ -298,29 +595,48 @@ export default function Layout() {
         }
         
         setIsLoadingDocument(true)
-        loadDocument(id)
+        loadDocument(id).catch((error) => {
+          console.error('Error loading document:', error)
+          // Ensure loading state is cleared even on error
+          setIsLoadingDocument(false)
+        })
       }
       // Update active tab when route changes
       setActiveTabId(id)
     } else {
+      // Save current document before leaving
+      if (document?.id) {
+        // Clear any pending debounced saves and save immediately
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current)
+          saveTimeoutRef.current = null
+        }
+        saveDocumentImmediately(document.id)
+      }
+      
       // Clear search state when closing all tabs
       if (document) {
         const isPDF = document.title.toLowerCase().endsWith('.pdf')
         if (isPDF && pdfViewerRef.current) {
           pdfViewerRef.current.clearSearch()
-        } else if (!isPDF && documentEditorRef.current) {
-          documentEditorRef.current.clearSearch()
+        } else if (!isPDF) {
+          const docEditorRef = getDocumentEditorRef(document.id)
+          if (docEditorRef.current) {
+            docEditorRef.current.clearSearch()
+          }
         }
       }
       setDocument(null)
       setIsLoadingDocument(false)
       setActiveTabId(null)
     }
-  }, [id])
+  }, [id, saveDocumentImmediately])
 
   // Add document to tabs when it loads
   useEffect(() => {
+    console.log('[Layout] useEffect[document] - document changed:', document?.id, 'projectId:', document?.projectId, 'title:', document?.title)
     if (document && !openTabs.find(tab => tab.id === document.id)) {
+      console.log('[Layout] Adding document to tabs:', document.id)
       setOpenTabs(prevTabs => [...prevTabs, document])
       setActiveTabId(document.id)
     } else if (document) {
@@ -332,9 +648,11 @@ export default function Layout() {
   }, [document])
 
   const loadDocument = async (docId: string) => {
+    console.log('[Layout] loadDocument called for:', docId)
     try {
       // Retry logic for newly created documents (increased retries and delay for file system sync)
       let doc = await documentApi.get(docId)
+      console.log('[Layout] loadDocument - initial fetch result:', doc ? `found (projectId: ${doc.projectId})` : 'not found')
       let retries = 5 // Increased from 3 to 5
       
       while (!doc && retries > 0) {
@@ -347,8 +665,16 @@ export default function Layout() {
       
       if (!doc || !doc.id) {
         console.error('Document not found or invalid:', docId)
+        // Don't navigate away immediately - let the fallback useEffect try to load documents
+        // This allows the file explorer to show other documents in the project
         setDocument(null)
+        setIsLoadingDocument(false)
+        // Only navigate away if we can't determine the project from open tabs
+        const matchingTab = openTabs.find(tab => tab.id === docId)
+        if (!matchingTab?.projectId) {
+          // No project context available, navigate away
         navigate('/documents')
+        }
         return
       }
       
@@ -384,7 +710,10 @@ export default function Layout() {
         // Only update document if this is still the current route
         // This prevents race conditions when rapidly switching files
         if (id === docId) {
+          console.log('[Layout] Setting document:', doc.id, 'projectId:', doc.projectId, 'title:', doc.title)
           setDocument(doc)
+        } else {
+          console.log('[Layout] Skipping document set - route changed. id:', id, 'docId:', docId)
         }
       }
       
@@ -417,9 +746,11 @@ export default function Layout() {
   // Load project name immediately for shell UI, then load documents
   useEffect(() => {
     const currentProjectId = document?.projectId
+    console.log('[Layout] useEffect[document?.projectId] - currentProjectId:', currentProjectId, 'previousProjectId:', previousProjectIdRef.current, 'document:', document?.id)
     
     // Only clear and reload if projectId actually changed
     if (previousProjectIdRef.current !== currentProjectId) {
+      console.log('[Layout] Project changed - clearing documents and loading new project')
       // Clear documents immediately when project changes to prevent showing stale data
       setDocuments([])
       setIsLoadingDocuments(true)
@@ -462,19 +793,51 @@ export default function Layout() {
       
       previousProjectIdRef.current = currentProjectId
       // Pass the projectId explicitly to ensure we load the correct project's documents
+      console.log('[Layout] Calling loadDocuments with projectId:', currentProjectId)
       loadDocuments(currentProjectId)
+    } else {
+      console.log('[Layout] Project unchanged, skipping reload')
     }
   }, [document?.projectId]) // Reload when project changes (removed activeTabId to prevent cross-project loading)
 
+  // Also try to load documents when we have an id but no document yet (e.g., document failed to load)
+  // This ensures the file explorer shows documents even if the current document doesn't load
+  useEffect(() => {
+    console.log('[Layout] useEffect[fallback] - id:', id, 'document:', document?.id, 'documents.length:', documents.length, 'isLoadingDocuments:', isLoadingDocuments)
+    // Only run if we have an id but no document, and documents haven't been loaded yet
+    if (id && !document && documents.length === 0 && !isLoadingDocuments) {
+      console.log('[Layout] Fallback: Trying to load documents - no document but have id')
+      // Try to get projectId from open tabs that match this id
+      const matchingTab = openTabs.find(tab => tab.id === id)
+      if (matchingTab?.projectId) {
+        console.log('[Layout] Fallback: Found projectId from tab:', matchingTab.projectId)
+        // Load documents for this project
+        loadDocuments(matchingTab.projectId)
+      } else {
+        console.log('[Layout] Fallback: No matching tab, loading all documents')
+        // Fallback: load all documents if we can't determine the project
+        loadDocuments(undefined)
+      }
+    }
+  }, [id, document, documents.length, isLoadingDocuments, openTabs])
+
   // Set selected folder based on current document's folder
   useEffect(() => {
+    console.log('[Layout] useEffect[document?.folder] - document?.folder:', document?.folder, 'document?.id:', document?.id)
     if (document?.folder === 'library') {
+      console.log('[Layout] Setting selectedFolder to library')
       setSelectedFolder('library')
     } else if (document && (!document.folder || document.folder === 'project')) {
+      console.log('[Layout] Setting selectedFolder to project')
       setSelectedFolder('project')
     }
     // Don't clear selectedFolder if document is null - keep it for creating new files
   }, [document?.folder])
+  
+  // Log when selectedFolder changes
+  useEffect(() => {
+    console.log('[Layout] selectedFolder changed:', selectedFolder)
+  }, [selectedFolder])
 
   // Keyboard shortcuts: Ctrl+F for inline search, Ctrl+Shift+F for global search, Ctrl+Shift+E to toggle FileExplorer
   useEffect(() => {
@@ -492,8 +855,18 @@ export default function Layout() {
         // Use window.document to access the DOM document (not the component's document state)
         const activeElementIsIframe = window.document.activeElement?.tagName === 'IFRAME'
         
-        // Only handle Ctrl+F if it's the search input, from iframe, active element is iframe, or not an input field
-        if (isSearchInput || isFromIframe || activeElementIsIframe || !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+        // Check if target is contentEditable (TipTap editor)
+        const isContentEditable = target.isContentEditable || target.closest('[contenteditable="true"]') !== null
+        
+        // Check if target is a regular input/textarea (not contentEditable, not search input)
+        const isRegularInput = (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) && !isSearchInput
+        
+        // Only handle Ctrl+F if:
+        // 1. It's a search input (to allow closing)
+        // 2. It's from/active in iframe (PDF viewer)
+        // 3. It's contentEditable (TipTap editor) - ALWAYS handle for editor
+        // 4. It's NOT a regular input/textarea (unless it's a search input)
+        if (isSearchInput || isFromIframe || activeElementIsIframe || isContentEditable || !isRegularInput) {
           e.preventDefault()
           e.stopPropagation()
           
@@ -501,8 +874,12 @@ export default function Layout() {
           const isPDF = document && document.title.toLowerCase().endsWith('.pdf')
           if (isPDF && pdfViewerRef.current) {
             pdfViewerRef.current.toggleSearch()
-          } else if (!isPDF && documentEditorRef.current) {
-            documentEditorRef.current.toggleSearch()
+          } else if (!isPDF && document) {
+            // Use getDocumentEditorRef for multi-editor architecture
+            const docEditorRef = getDocumentEditorRef(document.id)
+            if (docEditorRef.current) {
+              docEditorRef.current.toggleSearch()
+            }
           }
         }
         return
@@ -533,8 +910,11 @@ export default function Layout() {
               sessionStorage.removeItem('searchQuery')
               setSearchQuery('') // Clear the query state
               // Clear highlights immediately when search mode is turned off
-              if (editor && !editor.isDestroyed) {
-                clearSearchHighlights(editor)
+              if (document?.id) {
+                const currentEditor = getEditor(document.id)
+                if (currentEditor && !currentEditor.isDestroyed) {
+                  clearSearchHighlights(currentEditor)
+                }
               }
             }
           } catch (e) {
@@ -573,10 +953,13 @@ export default function Layout() {
         }
         // Only show word count for text documents (not PDFs)
         const isPDF = document && document.title.toLowerCase().endsWith('.pdf')
-        if (!isPDF && editor) {
+        if (!isPDF && document?.id) {
+          const currentEditor = getEditor(document.id)
+          if (currentEditor) {
           e.preventDefault()
           e.stopPropagation()
           setShowWordCountModal(true)
+          }
         }
         return
       }
@@ -655,21 +1038,30 @@ export default function Layout() {
           // Fallback to creation time if no order
           return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
         })
-        setDocuments(Array.isArray(sortedDocs) ? sortedDocs : [])
+        const docsToSet = Array.isArray(sortedDocs) ? sortedDocs : []
+        console.log('[Layout] About to set documents:', docsToSet.length, 'docs:', docsToSet.map(d => d.id))
+        setDocuments(docsToSet)
+        console.log('[Layout] setDocuments called with', docsToSet.length, 'documents')
       } else {
         // No project, show all documents
+        console.log('[Layout] No projectId, loading all documents')
         const docs = await documentApi.list()
         setDocuments(Array.isArray(docs) ? docs : [])
+        console.log('[Layout] Set all documents:', Array.isArray(docs) ? docs.length : 0)
       }
     } catch (error) {
-      console.error('Failed to load documents:', error)
+      console.error('[Layout] Failed to load documents:', error)
       setDocuments([])
     } finally {
+      console.log('[Layout] About to set isLoadingDocuments to false')
       setIsLoadingDocuments(false)
+      console.log('[Layout] setIsLoadingDocuments(false) called')
     }
   }
 
   const handleDocumentClick = (docId: string, searchQueryParam?: string, matchPosition?: number) => {
+    console.log('[Layout] handleDocumentClick called - docId:', docId, 'searchQueryParam:', searchQueryParam, 'current document:', document?.id)
+    try {
     // If called from search results, ensure search mode stays active
     const wasCalledFromSearch = !!searchQueryParam
     
@@ -716,10 +1108,13 @@ export default function Layout() {
       }
       
       // If clicking on same document, navigate immediately without waiting for document load
-      if (document?.id === docId && editor && !editor.isDestroyed) {
+      if (document?.id === docId) {
+        const currentEditor = getEditor(docId)
+        if (currentEditor && !currentEditor.isDestroyed) {
         setTimeout(() => {
-          if (editor && !editor.isDestroyed) {
-            navigateToMatch(editor, searchQueryParam, matchPosition)
+            const editorInstance = getEditor(docId)
+            if (editorInstance && !editorInstance.isDestroyed && searchQueryParam) {
+              navigateToMatch(editorInstance, searchQueryParam, matchPosition)
             // Clear pending nav since we've used it
             pendingSearchNavRef.current = null
             try {
@@ -729,6 +1124,7 @@ export default function Layout() {
             }
           }
         }, 100)
+        }
         // Don't navigate() since we're already on this document
         // But still ensure search mode is active
         if (wasCalledFromSearch) {
@@ -745,7 +1141,9 @@ export default function Layout() {
     
     // Add or update tab when opening a document
     const clickedDoc = documents.find(doc => doc.id === docId)
+    console.log('[Layout] handleDocumentClick - clickedDoc found:', !!clickedDoc, 'docId:', docId, 'documents.length:', documents.length)
     if (clickedDoc) {
+      console.log('[Layout] handleDocumentClick - Adding/updating tab for:', docId)
       setOpenTabs(prevTabs => {
         // Check if tab already exists
         const existingTabIndex = prevTabs.findIndex(tab => tab.id === docId)
@@ -763,7 +1161,15 @@ export default function Layout() {
     }
     
     // Always navigate, even if it's the current document (for different document case)
+    console.log('[Layout] Navigating to document:', docId)
+    try {
     navigate(`/document/${docId}`)
+    } catch (error) {
+      console.error('[Layout] Error navigating to document:', error)
+    }
+    } catch (error) {
+      console.error('[Layout] Error in handleDocumentClick:', error)
+    }
   }
 
   // Handle tab click (switch to tab)
@@ -897,45 +1303,6 @@ export default function Layout() {
       }
     }
   }, [openTabs, activeTabId, navigate, id])
-
-  
-  // Clear all search highlights (temporary highlights, not saved to document)
-  const clearSearchHighlights = (editor: Editor) => {
-    if (!editor) return
-    
-    try {
-      const { state, dispatch } = editor.view
-      const { tr, doc } = state
-      const searchHighlightColors = ['#FFEB3B', '#FDD835', '#fef08a', '#4a5568', '#e3f2fd', '#5a6b7d', '#90caf9']
-      const highlightMarkType = state.schema.marks.highlight
-      
-      if (!highlightMarkType) return
-      
-      let modified = false
-      
-      // Iterate through all nodes and remove search highlight marks
-      doc.descendants((node, pos) => {
-        if (node.marks && node.marks.length > 0) {
-          node.marks.forEach(mark => {
-            if (mark.type.name === 'highlight') {
-              const color = mark.attrs?.color
-              if (color && searchHighlightColors.includes(color)) {
-                // Remove this specific mark from this node's range
-                tr.removeMark(pos, pos + node.nodeSize, mark.type)
-                modified = true
-              }
-            }
-          })
-        }
-      })
-      
-      if (modified) {
-        dispatch(tr)
-      }
-    } catch (error) {
-      console.error('Error clearing search highlights:', error)
-    }
-  }
   
   // Highlight all matches in the document (Chrome-style temporary highlights)
   const highlightAllMatches = (editor: Editor, query: string) => {
@@ -1128,135 +1495,6 @@ export default function Layout() {
       }
     } catch (error) {
       // Silently fail
-    }
-  }
-
-  // Helper function to extract first line from TipTap content
-  const extractFirstLine = (content: any): string => {
-    if (!content || !content.content || !Array.isArray(content.content)) {
-      return ''
-    }
-    
-    // Find the first non-empty paragraph or heading
-    for (const node of content.content) {
-      if (node.type === 'paragraph' || node.type === 'heading') {
-        const extractText = (n: any): string => {
-          if (typeof n === 'string') return n
-          if (n.type === 'text') return n.text || ''
-          if (n.content && Array.isArray(n.content)) {
-            return n.content.map(extractText).join('')
-          }
-          return ''
-        }
-        const text = extractText(node).trim()
-        if (text) {
-          // Return first line (up to first newline or full text)
-          return text.split('\n')[0].trim()
-        }
-      }
-    }
-    
-    return ''
-  }
-  
-  // Helper function to check if title matches "Doc X" or "Section X" pattern
-  const isDefaultTitle = (title: string, folder?: 'library' | 'project'): boolean => {
-    const prefix = folder === 'library' ? 'Doc' : 'Section'
-    const pattern = new RegExp(`^${prefix} \\d+$`)
-    return pattern.test(title)
-  }
-  
-  // Helper function to ensure unique title by appending number suffix if needed
-  const ensureUniqueTitle = (baseTitle: string, docId: string, folder?: 'library' | 'project'): string => {
-    // Filter documents in the same folder and project
-    const sameFolderDocs = documents.filter(doc => {
-      // Same folder
-      const sameFolder = folder === 'library' 
-        ? doc.folder === 'library'
-        : (!doc.folder || doc.folder === 'project')
-      // Same project (or both have no project)
-      const sameProject = document?.projectId 
-        ? doc.projectId === document.projectId
-        : !doc.projectId
-      return sameFolder && sameProject && doc.id !== docId // Exclude current document
-    })
-    
-    const existingTitles = new Set(sameFolderDocs.map(doc => doc.title))
-    
-    // If title is unique, return it as-is
-    if (!existingTitles.has(baseTitle)) {
-      return baseTitle
-    }
-    
-    // Title exists, find next available number
-    let number = 1
-    let newTitle = `${baseTitle} (${number})`
-    
-    while (existingTitles.has(newTitle)) {
-      number++
-      newTitle = `${baseTitle} (${number})`
-    }
-    
-    return newTitle
-  }
-  
-  // Auto-update document title (doesn't mark as manually renamed)
-  // Use a ref to track pending title updates to prevent cascading updates
-  const pendingTitleUpdateRef = useRef<Set<string>>(new Set())
-  
-  const autoUpdateDocumentTitle = async (docId: string, newTitle: string, latestContent?: string) => {
-    // Prevent duplicate updates
-    if (pendingTitleUpdateRef.current.has(docId)) {
-      return
-    }
-    
-    pendingTitleUpdateRef.current.add(docId)
-    
-    try {
-      await documentApi.updateTitle(docId, newTitle)
-      
-      // Batch all state updates together to minimize re-renders
-      setDocuments(docs => {
-        const docExists = docs.some(doc => doc.id === docId)
-        if (!docExists) return docs // Don't update if doc doesn't exist (might be from different project)
-        return docs.map(doc => {
-          if (doc.id === docId) {
-            // Update title and content if provided
-            return latestContent 
-              ? { ...doc, title: newTitle, content: latestContent }
-              : { ...doc, title: newTitle }
-          }
-          return doc
-        })
-      })
-      
-      // Update current document title and content without reloading (preserves editor state)
-      if (document?.id === docId) {
-        // Update both title and content to ensure state matches what's saved
-        // This won't trigger the useEffect that updates editor content because we check contentChanged
-        setDocument(prevDoc => {
-          if (!prevDoc) return null
-          return latestContent
-            ? { ...prevDoc, title: newTitle, content: latestContent }
-            : { ...prevDoc, title: newTitle }
-        })
-        // Also update the tab if it's open
-        setOpenTabs(prevTabs => prevTabs.map(tab => {
-          if (tab.id === docId) {
-            return latestContent
-              ? { ...tab, title: newTitle, content: latestContent }
-              : { ...tab, title: newTitle }
-          }
-          return tab
-        }))
-      }
-    } catch (error) {
-      console.error('Failed to auto-update document title:', error)
-    } finally {
-      // Clear the pending flag after a short delay to allow the update to complete
-      setTimeout(() => {
-        pendingTitleUpdateRef.current.delete(docId)
-      }, 500)
     }
   }
   
@@ -1566,9 +1804,12 @@ export default function Layout() {
   }
 
   const handleCreateDocument = async () => {
+    console.log('[Layout] handleCreateDocument called - selectedFolder:', selectedFolder, 'documents.length:', documents.length, 'document?.projectId:', document?.projectId)
     try {
       // Use selected folder if available, otherwise default to 'project'
-      const folder = selectedFolder || 'project'
+      // Ensure we always pass a string value, not null or undefined
+      const folder: 'library' | 'project' = selectedFolder === 'library' ? 'library' : 'project'
+      console.log('[Layout] Creating document in folder:', folder)
       
       // Generate name based on folder: "Section X" for workspace, "Doc X" for library
       const namePrefix = folder === 'library' ? 'Doc' : 'Section'
@@ -1576,20 +1817,24 @@ export default function Layout() {
         (folder === 'library' && doc.folder === 'library') ||
         (folder === 'project' && (!doc.folder || doc.folder === 'project'))
       )
+      console.log('[Layout] Found', folderDocs.length, 'documents in folder:', folder)
       const existingTitles = folderDocs.map(doc => doc.title)
       let number = 1
       while (existingTitles.includes(`${namePrefix} ${number}`)) {
         number++
       }
       const newTitle = `${namePrefix} ${number}`
+      console.log('[Layout] Creating document with title:', newTitle)
       
       const newDoc = await documentApi.create(newTitle, folder)
+      console.log('[Layout] Document created:', newDoc.id, 'title:', newDoc.title)
       
       // Small delay to ensure file is fully written to disk before proceeding
       await new Promise(resolve => setTimeout(resolve, 100))
       
       // If current document has projectId, add new doc to same project
       if (document?.projectId) {
+        console.log('[Layout] Adding document to project:', document.projectId)
         // Calculate order based on documents in the same folder
         const folderDocs = documents.filter(doc => 
           (folder === 'library' && doc.folder === 'library') ||
@@ -1599,10 +1844,12 @@ export default function Layout() {
         const maxOrder = folderDocs.length > 0
           ? Math.max(...folderDocs.map(doc => doc.order ?? 0), -1) + 1
           : 0
+        console.log('[Layout] Adding document with order:', maxOrder)
         
         // Add document to project BEFORE navigating (await to ensure it's saved)
         try {
           await projectApi.addDocument(document.projectId, newDoc.id, maxOrder)
+          console.log('[Layout] Document added to project successfully')
           // Update document with projectId and order
           const newDocWithOrder = { ...newDoc, order: maxOrder, projectId: document.projectId }
           
@@ -1643,9 +1890,15 @@ export default function Layout() {
       // Mark as newly created document for auto-focus and placeholder hiding
       isNewlyCreatedDocRef.current = true
       
+      console.log('[Layout] Navigating to new document:', newDoc.id)
+      try {
       navigate(`/document/${newDoc.id}`)
+      } catch (navError) {
+        console.error('[Layout] Error navigating to new document:', navError)
+        throw navError
+      }
     } catch (error) {
-      console.error('Failed to create document:', error)
+      console.error('[Layout] Failed to create document:', error)
       alert('Failed to create document. Please try again.')
       isNewlyCreatedDocRef.current = false
     }
@@ -1669,597 +1922,677 @@ export default function Layout() {
     },
   })
 
-  // Create editor instance - recreated when document.id changes to ensure isolation
-  // Each document gets its own Editor/EditorView with independent history plugin
-  const editor = useEditor({
-    extensions: [
-      // StarterKit without list extensions and link/underline (we'll configure them separately)
-      StarterKit.configure({
-        bulletList: false,
-        orderedList: false,
-        listItem: false,
-        link: false,
-        underline: false,
-      }),
-      FileExplorerToggleExtension,
-      // Custom list configuration with better keyboard shortcuts
-      ListItem.extend({
-        addKeyboardShortcuts() {
-          return {
-            // Tab to indent
-            Tab: () => {
-              if (this.editor.isActive('listItem')) {
-                // Try to sink the list item (works for nested lists)
-                const result = this.editor.commands.sinkListItem('listItem')
-                // If sinkListItem fails (e.g., first item in list), return false
-                // so IndentExtension can handle it with paragraph indent
-                return result
-              }
-              return false
-            },
-            // Shift+Tab to outdent
-            'Shift-Tab': () => {
-              if (this.editor.isActive('listItem')) {
-                return this.editor.commands.liftListItem('listItem')
-              }
-              return false
-            },
-            // Backspace at the start of a list item - lift it out
-            Backspace: () => {
-              const { state } = this.editor
-              const { $from } = state.selection
-              
-              // Check if we're at the start of a list item
-              if ($from.parentOffset === 0 && this.editor.isActive('listItem')) {
-                // If the list item is empty, lift it out
+  // Helper function to create editor configuration
+  // This extracts the editor config so it can be reused for multiple editors
+  const createEditorConfig = (initialContent: string = '') => {
+    return {
+      extensions: [
+        // StarterKit without list extensions and link/underline (we'll configure them separately)
+        StarterKit.configure({
+          bulletList: false,
+          orderedList: false,
+          listItem: false,
+          link: false,
+          underline: false,
+        }),
+        FileExplorerToggleExtension,
+        // Custom list configuration with better keyboard shortcuts
+        ListItem.extend({
+          addKeyboardShortcuts() {
+            return {
+              // Tab to indent
+              Tab: () => {
+                if (this.editor.isActive('listItem')) {
+                  // Try to sink the list item (works for nested lists)
+                  const result = this.editor.commands.sinkListItem('listItem')
+                  // If sinkListItem fails (e.g., first item in list), return false
+                  // so IndentExtension can handle it with paragraph indent
+                  return result
+                }
+                return false
+              },
+              // Shift+Tab to outdent
+              'Shift-Tab': () => {
+                if (this.editor.isActive('listItem')) {
+                  return this.editor.commands.liftListItem('listItem')
+                }
+                return false
+              },
+              // Backspace at the start of a list item - lift it out
+              Backspace: () => {
+                const { state } = this.editor
+                const { $from } = state.selection
+                
+                // Check if we're at the start of a list item
+                if ($from.parentOffset === 0 && this.editor.isActive('listItem')) {
+                  // If the list item is empty, lift it out
+                  const listItemNode = $from.node($from.depth)
+                  if (listItemNode.content.size === 0) {
+                    return this.editor.commands.liftListItem('listItem')
+                  }
+                  
+                  // If at the start of a non-empty list item, lift it out
+                  return this.editor.commands.liftListItem('listItem')
+                }
+                
+                return false
+              },
+              // Enter to create new list item or exit list
+              Enter: () => {
+                const { state } = this.editor
+                const { $from } = state.selection
+                
+                // Only handle if we're in a list item
+                if (!this.editor.isActive('listItem')) {
+                  return false
+                }
+                
                 const listItemNode = $from.node($from.depth)
+                
+                // If the list item is empty, lift it out (exit the list)
                 if (listItemNode.content.size === 0) {
                   return this.editor.commands.liftListItem('listItem')
                 }
                 
-                // If at the start of a non-empty list item, lift it out
-                return this.editor.commands.liftListItem('listItem')
-              }
-              
-              return false
-            },
-            // Enter to create new list item or exit list
-            Enter: () => {
-              const { state } = this.editor
-              const { $from } = state.selection
-              
-              // Only handle if we're in a list item
-              if (!this.editor.isActive('listItem')) {
-                return false
-              }
-              
-              const listItemNode = $from.node($from.depth)
-              
-              // If the list item is empty, lift it out (exit the list)
-              if (listItemNode.content.size === 0) {
-                return this.editor.commands.liftListItem('listItem')
-              }
-              
-              // If list item has content, split it to create a new list item
-              return this.editor.commands.splitListItem('listItem')
-            },
-          }
+                // If list item has content, split it to create a new list item
+                return this.editor.commands.splitListItem('listItem')
+              },
+            }
+          },
+        }),
+        BulletList.configure({
+          HTMLAttributes: {
+            class: 'editor-bullet-list',
+          },
+        }),
+        OrderedList.configure({
+          HTMLAttributes: {
+            class: 'editor-ordered-list',
+          },
+        }),
+        TextAlign.configure({
+          types: ['heading', 'paragraph', 'title', 'subtitle'],
+        }),
+        Placeholder.configure({
+          placeholder: () => {
+            // Hide placeholder when document is loading or when it's a newly created document
+            if (isLoadingDocumentRef.current || isNewlyCreatedDocRef.current) {
+              return ''
+            }
+            // Only show placeholder for README files
+            const docTitle = currentDocTitleRef.current
+            const isReadme = docTitle?.toLowerCase() === 'readme.md' || 
+                            docTitle?.toLowerCase() === 'readme'
+            return isReadme 
+              ? 'This README helps the AI learn about the project...'
+              : '' // No placeholder for regular documents
+          },
+        }),
+        Underline,
+        Color,
+        TextStyle,
+        FontSize,
+        FontFamily,
+        LineHeight,
+        Title,
+        Subtitle,
+        Highlight.configure({
+          multicolor: true,
+        }),
+        Link.configure({
+          openOnClick: false,
+          HTMLAttributes: {
+            class: 'editor-link',
+          },
+        }),
+        ResizableImage.configure({
+          inline: true,
+          allowBase64: true,
+        }),
+        MathExtension,
+        PDFViewerExtension,
+        TableExtension,
+        ChartExtension,
+        IndentExtension,
+      ],
+      content: initialContent,
+      editorProps: {
+        transformPastedText(text: string) {
+          // Preserve line breaks when pasting - convert double line breaks to paragraph breaks
+          // This helps maintain spacing when pasting from GPT or other markdown sources
+          return text
         },
-      }),
-      BulletList.configure({
-        HTMLAttributes: {
-          class: 'editor-bullet-list',
-        },
-      }),
-      OrderedList.configure({
-        HTMLAttributes: {
-          class: 'editor-ordered-list',
-        },
-      }),
-      TextAlign.configure({
-        types: ['heading', 'paragraph', 'title', 'subtitle'],
-      }),
-      Placeholder.configure({
-        placeholder: () => {
-          // Hide placeholder when document is loading or when it's a newly created document
-          if (isLoadingDocumentRef.current || isNewlyCreatedDocRef.current) {
-            return ''
-          }
-          // Only show placeholder for README files
-          const docTitle = currentDocTitleRef.current
-          const isReadme = docTitle?.toLowerCase() === 'readme.md' || 
-                          docTitle?.toLowerCase() === 'readme'
-          return isReadme 
-            ? 'This README helps the AI learn about the project...'
-            : '' // No placeholder for regular documents
-        },
-      }),
-      Underline,
-      Color,
-      TextStyle,
-      FontSize,
-      FontFamily,
-      LineHeight,
-      Title,
-      Subtitle,
-      Highlight.configure({
-        multicolor: true,
-      }),
-      Link.configure({
-        openOnClick: false,
-        HTMLAttributes: {
-          class: 'editor-link',
-        },
-      }),
-      ResizableImage.configure({
-        inline: true,
-        allowBase64: true,
-      }),
-      MathExtension,
-      PDFViewerExtension,
-      TableExtension,
-      ChartExtension,
-      IndentExtension,
-    ],
-    content: '', // Initialize with empty content, set it asynchronously after mount
-    editorProps: {
-      transformPastedText(text) {
-        // Preserve line breaks when pasting - convert double line breaks to paragraph breaks
-        // This helps maintain spacing when pasting from GPT or other markdown sources
-        return text
-      },
-      transformPastedHTML(html) {
-        // Process pasted HTML to normalize fonts and colors
-        if (!html) return html
+        transformPastedHTML(html: string) {
+          // Process pasted HTML to normalize fonts and colors
+          if (!html) return html
 
-        // Available fonts in the editor
-        const availableFonts = ['Noto Sans SC', 'Inter', 'Open Sans', 'Roboto', 'Montserrat', 'Poppins']
-        
-        // Default text colors for each theme
-        const defaultTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
-        
-        // Parse the HTML
-        const parser = new DOMParser()
-        const doc = parser.parseFromString(html, 'text/html')
-        
-        // Helper function to check if a color is dark (for dark theme) or light (for light theme)
-        const isDarkColor = (color: string): boolean => {
-          if (!color) return false
+          // Available fonts in the editor
+          const availableFonts = ['Noto Sans SC', 'Inter', 'Open Sans', 'Roboto', 'Montserrat', 'Poppins']
           
-          // Remove # if present
-          let hex = color.replace('#', '').trim()
+          // Default text colors for each theme
+          const defaultTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
           
-          // Handle rgb/rgba
-          if (color.startsWith('rgb')) {
-            const match = color.match(/\d+/g)
-            if (match && match.length >= 3) {
-              const r = parseInt(match[0])
-              const g = parseInt(match[1])
-              const b = parseInt(match[2])
-              // Calculate luminance
-              const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-              return luminance < 0.5
-            }
-            return false
-          }
+          // Parse the HTML
+          const parser = new DOMParser()
+          const doc = parser.parseFromString(html, 'text/html')
           
-          // Handle hex colors
-          if (hex.length === 3) {
-            hex = hex.split('').map(c => c + c).join('')
-          }
-          
-          if (hex.length !== 6) return false
-          
-          const r = parseInt(hex.substr(0, 2), 16)
-          const g = parseInt(hex.substr(2, 2), 16)
-          const b = parseInt(hex.substr(4, 2), 16)
-          
-          // Calculate relative luminance
-          const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-          return luminance < 0.5
-        }
-        
-        // Helper function to normalize font family
-        const normalizeFontFamily = (fontFamily: string | null): string | null => {
-          if (!fontFamily) return null
-          
-          // Remove quotes and get first font
-          const font = fontFamily.replace(/['"]/g, '').split(',')[0].trim()
-          
-          // Check if it's one of our available fonts
-          const matchedFont = availableFonts.find(af => 
-            font.toLowerCase() === af.toLowerCase()
-          )
-          
-          // If not available, return null to use default
-          return matchedFont || null
-        }
-        
-        // Process all elements in the document
-        const processElement = (element: Element) => {
-          // Process style attribute
-          if (element.hasAttribute('style')) {
-            const style = element.getAttribute('style') || ''
-            const styleObj: Record<string, string> = {}
+          // Helper function to check if a color is dark (for dark theme) or light (for light theme)
+          const isDarkColor = (color: string): boolean => {
+            if (!color) return false
             
-            // Parse style string
-            style.split(';').forEach(declaration => {
-              const [property, value] = declaration.split(':').map(s => s.trim())
-              if (property && value) {
-                styleObj[property] = value
-              }
-            })
+            // Remove # if present
+            let hex = color.replace('#', '').trim()
             
-            // Remove or normalize font-family
-            if (styleObj['font-family']) {
-              const normalizedFont = normalizeFontFamily(styleObj['font-family'])
-              if (normalizedFont) {
-                styleObj['font-family'] = normalizedFont
-              } else {
-                delete styleObj['font-family']
+            // Handle rgb/rgba
+            if (color.startsWith('rgb')) {
+              const match = color.match(/\d+/g)
+              if (match && match.length >= 3) {
+                const r = parseInt(match[0])
+                const g = parseInt(match[1])
+                const b = parseInt(match[2])
+                // Calculate luminance
+                const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+                return luminance < 0.5
               }
+              return false
             }
             
-            // Handle color
-            if (styleObj.color) {
-              // In dark theme, if color is dark (like black), convert to light
-              // In light theme, if color is light (like white), convert to dark
-              if (theme === 'dark' && isDarkColor(styleObj.color)) {
-                styleObj.color = defaultTextColor
-              } else if (theme === 'light' && !isDarkColor(styleObj.color)) {
-                // Check if it's a very light color (like white)
-                const isVeryLight = styleObj.color.toLowerCase().includes('fff') || 
-                                   styleObj.color.toLowerCase() === 'white'
-                if (isVeryLight) {
-                  styleObj.color = defaultTextColor
+            // Handle hex colors
+            if (hex.length === 3) {
+              hex = hex.split('').map(c => c + c).join('')
+            }
+            
+            if (hex.length !== 6) return false
+            
+            const r = parseInt(hex.substr(0, 2), 16)
+            const g = parseInt(hex.substr(2, 2), 16)
+            const b = parseInt(hex.substr(4, 2), 16)
+            
+            // Calculate relative luminance
+            const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+            return luminance < 0.5
+          }
+          
+          // Helper function to normalize font family
+          const normalizeFontFamily = (fontFamily: string | null): string | null => {
+            if (!fontFamily) return null
+            
+            // Remove quotes and get first font
+            const font = fontFamily.replace(/['"]/g, '').split(',')[0].trim()
+            
+            // Check if it's one of our available fonts
+            const matchedFont = availableFonts.find(af => 
+              font.toLowerCase() === af.toLowerCase()
+            )
+            
+            // If not available, return null to use default
+            return matchedFont || null
+          }
+          
+          // Process all elements in the document
+          const processElement = (element: Element) => {
+            // Process style attribute
+            if (element.hasAttribute('style')) {
+              const style = element.getAttribute('style') || ''
+              const styleObj: Record<string, string> = {}
+              
+              // Parse style string
+              style.split(';').forEach(declaration => {
+                const [property, value] = declaration.split(':').map(s => s.trim())
+                if (property && value) {
+                  styleObj[property] = value
+                }
+              })
+              
+              // Remove or normalize font-family
+              if (styleObj['font-family']) {
+                const normalizedFont = normalizeFontFamily(styleObj['font-family'])
+                if (normalizedFont) {
+                  styleObj['font-family'] = normalizedFont
+                } else {
+                  delete styleObj['font-family']
                 }
               }
-            }
-            
-            // Rebuild style string
-            const newStyle = Object.entries(styleObj)
-              .map(([prop, val]) => `${prop}: ${val}`)
-              .join('; ')
-            
-            if (newStyle) {
-              element.setAttribute('style', newStyle)
-            } else {
-              element.removeAttribute('style')
-            }
-          }
-          
-          // Process font-family attribute if present
-          if (element.hasAttribute('font-family')) {
-            const fontFamily = element.getAttribute('font-family')
-            const normalizedFont = normalizeFontFamily(fontFamily)
-            if (normalizedFont) {
-              element.setAttribute('font-family', normalizedFont)
-            } else {
-              element.removeAttribute('font-family')
-            }
-          }
-          
-          // Process color attribute if present
-          if (element.hasAttribute('color')) {
-            const color = element.getAttribute('color')
-            if (color && theme === 'dark' && isDarkColor(color)) {
-              element.setAttribute('color', defaultTextColor)
-            } else if (color && theme === 'light') {
-              const isVeryLight = color.toLowerCase().includes('fff') || 
-                                 color.toLowerCase() === 'white'
-              if (isVeryLight) {
-                element.setAttribute('color', defaultTextColor)
-              }
-            }
-          }
-          
-          // Handle old <font> tags with face attribute
-          if (element.tagName.toLowerCase() === 'font' && element.hasAttribute('face')) {
-            const fontFamily = element.getAttribute('face')
-            const normalizedFont = normalizeFontFamily(fontFamily)
-            if (normalizedFont) {
-              element.setAttribute('face', normalizedFont)
-            } else {
-              element.removeAttribute('face')
-            }
-          }
-          
-          // Recursively process children
-          Array.from(element.children).forEach(child => processElement(child))
-        }
-        
-        // Process body content (or the root element if it's a fragment)
-        const body = doc.body || doc.documentElement
-        
-        // Process the body element and all its descendants recursively
-        if (body) {
-          processElement(body)
-        }
-        
-        // Return the processed HTML
-        return body.innerHTML || html
-      },
-      // Fix cursor jumping to beginning of nested list items when clicking
-      // This is a known issue with ProseMirror's hit testing on complex nested DOM structures
-      handleClick: (view, pos, event) => {
-        const { state } = view
-        const $pos = state.doc.resolve(pos)
-        const { listItem } = state.schema.nodes
-        
-        // Check if we're inside a list item
-        let inListItem = false
-        let listItemDepth = -1
-        for (let d = $pos.depth; d > 0; d--) {
-          if ($pos.node(d).type === listItem) {
-            inListItem = true
-            listItemDepth = d
-            break
-          }
-        }
-        
-        if (!inListItem || listItemDepth < 0) return false
-        
-        // Check if this list item has nested lists (sub-bullets)
-        const listItemNode = $pos.node(listItemDepth)
-        let hasNestedList = false
-        listItemNode.forEach((child) => {
-          if (child.type.name === 'bulletList' || child.type.name === 'orderedList') {
-            hasNestedList = true
-          }
-        })
-        
-        if (!hasNestedList) return false
-        
-        // Check if cursor ended up at the beginning of a paragraph (position 0)
-        // This is the buggy behavior we want to fix
-        if ($pos.parentOffset !== 0) return false
-        
-        // Get click X coordinate
-        const clickX = event.clientX
-        
-        // Get the coordinates of the cursor position
-        const posCoords = view.coordsAtPos(pos)
-        if (!posCoords) return false
-        
-        // If click X is significantly to the right of where cursor landed, 
-        // the user probably intended to click at the end of the line
-        const clickDistanceFromCursor = clickX - posCoords.left
-        
-        if (clickDistanceFromCursor > 30) {
-          // Find the end of the current line
-          const parent = $pos.parent
-          const endOfParent = pos + parent.content.size
-          
-          // Binary search for end of line (same Y coordinate)
-          const lineYThreshold = 5
-          let left = pos
-          let right = endOfParent
-          let bestPos = pos
-          
-          while (left <= right) {
-            const mid = Math.floor((left + right) / 2)
-            const midCoords = view.coordsAtPos(mid)
-            
-            if (midCoords && Math.abs(midCoords.top - posCoords.top) < lineYThreshold) {
-              bestPos = mid
-              left = mid + 1
-            } else {
-              right = mid - 1
-            }
-          }
-          
-          // Set cursor to the correct position
-          if (bestPos !== pos) {
-            const tr = state.tr.setSelection(TextSelection.create(state.doc, bestPos))
-            view.dispatch(tr)
-            return true // We handled the click
-          }
-        }
-        
-        return false // Let default handling proceed
-      },
-      handleKeyDown: (view, event) => {
-        // Handle Backspace on empty paragraph after a list
-        // Based on: https://discuss.prosemirror.net/t/backspace-inside-empty-paragraph-creates-a-new-list-node/3784
-        if (event.key === 'Backspace') {
-          const { state, dispatch } = view
-          const { $from } = state.selection
-          const { paragraph, bulletList, orderedList } = state.schema.nodes
-          
-          // Check if we're at the start of an empty paragraph
-          if ($from.parent.type === paragraph && 
-              $from.parent.content.size === 0 &&
-              $from.parentOffset === 0) {
-            
-            // Get position just before the paragraph
-            const beforePos = $from.before($from.depth)
-            if (beforePos <= 0) return false
-            
-            // Resolve position before paragraph to see what's there
-            const $before = state.doc.resolve(beforePos)
-            const nodeBefore = $before.nodeBefore
-            
-            // Check if node before is a list
-            if (nodeBefore && 
-                (nodeBefore.type === bulletList || nodeBefore.type === orderedList)) {
               
-              // Find the last paragraph in the list by walking backwards
-              let $lastNode = state.doc.resolve(beforePos - 1)
-              while ($lastNode.parent.type !== paragraph && $lastNode.pos > 0) {
-                $lastNode = state.doc.resolve($lastNode.pos - 1)
-              }
-              
-              if ($lastNode.parent.type === paragraph) {
-                // The cursor should go to the end of this paragraph
-                const cursorPos = $lastNode.end()
-                
-                // Delete the empty paragraph
-                const tr = state.tr
-                const paragraphStart = $from.before($from.depth)
-                const paragraphEnd = $from.after($from.depth)
-                tr.delete(paragraphStart, paragraphEnd)
-                
-                // Set cursor to end of last paragraph in list
-                // cursorPos is still valid since we're deleting content AFTER it
-                tr.setSelection(TextSelection.create(tr.doc, cursorPos))
-                
-                dispatch(tr.scrollIntoView())
-                return true
-              }
-            }
-          }
-        }
-        
-        return false
-      },
-    },
-    onTransaction: ({ editor }) => {
-      // Save EditorState after every transaction to preserve complete undo/redo history
-      // This includes undo/redo operations, so history plugin state is always up-to-date
-      if (document && editor && !editor.isDestroyed && editor.view) {
-        const currentState = editor.view.state
-        documentEditorStatesRef.current.set(document.id, currentState)
-      }
-    },
-    onUpdate: ({ editor }) => {
-      if (document) {
-        // Also save EditorState in onUpdate as a backup (though onTransaction should handle it)
-        if (editor && !editor.isDestroyed && editor.view) {
-          const currentState = editor.view.state
-          documentEditorStatesRef.current.set(document.id, currentState)
-        }
-        
-        if (saveTimeoutRef.current) {
-          clearTimeout(saveTimeoutRef.current)
-        }
-        saveTimeoutRef.current = setTimeout(async () => {
-          const content = JSON.stringify(editor.getJSON())
-          
-          // Save content FIRST and wait for it to complete
-          try {
-            await documentApi.update(document.id, content)
-          } catch (error: unknown) {
-            console.error('Failed to save document:', error)
-            return // Don't proceed with title update if content save failed
-          }
-          
-          // Auto-update file name from first line if:
-          // 1. Document hasn't been manually renamed
-          // 2. Document title matches default pattern (Doc X or Section X)
-          // 3. First line has content and is different from current title
-          // 4. Not currently updating this document's title (prevent cascading updates)
-          if (!manuallyRenamedDocs.has(document.id) && !pendingTitleUpdateRef.current.has(document.id)) {
-            // Get current document from state to ensure we have the latest title
-            const currentDoc = documents.find(d => d.id === document.id) || document
-            const currentTitle = currentDoc.title
-            const folder = currentDoc.folder || 'project'
-            
-            if (isDefaultTitle(currentTitle, folder)) {
-              const firstLine = extractFirstLine(editor.getJSON())
-              // Only update if first line has content and is different from current title
-              if (firstLine && firstLine.trim() && firstLine !== currentTitle) {
-                // Update title with first line (limit to reasonable length, remove leading/trailing whitespace)
-                const baseTitle = firstLine.trim().length > 100 
-                  ? firstLine.trim().substring(0, 100) 
-                  : firstLine.trim()
-                // Ensure title is unique by appending number suffix if needed
-                const newTitle = ensureUniqueTitle(baseTitle, document.id, folder)
-                // Only update if the new title is actually different
-                if (newTitle !== currentTitle) {
-                  // Update title AFTER content is saved
-                  // Pass the content that was just saved to ensure state stays in sync
-                  try {
-                    // Get latest content from editor (in case user typed more during the save delay)
-                    const latestContent = JSON.stringify(editor.getJSON())
-                    // Save latest content if it's different from what we just saved
-                    if (latestContent !== content) {
-                      await documentApi.update(document.id, latestContent)
-                    }
-                    // Now update title with the latest content to keep state in sync
-                    await autoUpdateDocumentTitle(document.id, newTitle, latestContent)
-                  } catch (error: unknown) {
-                    console.error('Failed to auto-update document title:', error)
+              // Handle color
+              if (styleObj.color) {
+                // In dark theme, if color is dark (like black), convert to light
+                // In light theme, if color is light (like white), convert to dark
+                if (theme === 'dark' && isDarkColor(styleObj.color)) {
+                  styleObj.color = defaultTextColor
+                } else if (theme === 'light' && !isDarkColor(styleObj.color)) {
+                  // Check if it's a very light color (like white)
+                  const isVeryLight = styleObj.color.toLowerCase().includes('fff') || 
+                                     styleObj.color.toLowerCase() === 'white'
+                  if (isVeryLight) {
+                    styleObj.color = defaultTextColor
                   }
                 }
               }
+              
+              // Rebuild style string
+              const newStyle = Object.entries(styleObj)
+                .map(([prop, val]) => `${prop}: ${val}`)
+                .join('; ')
+              
+              if (newStyle) {
+                element.setAttribute('style', newStyle)
+              } else {
+                element.removeAttribute('style')
+              }
+            }
+            
+            // Process font-family attribute if present
+            if (element.hasAttribute('font-family')) {
+              const fontFamily = element.getAttribute('font-family')
+              const normalizedFont = normalizeFontFamily(fontFamily)
+              if (normalizedFont) {
+                element.setAttribute('font-family', normalizedFont)
+              } else {
+                element.removeAttribute('font-family')
+              }
+            }
+            
+            // Process color attribute if present
+            if (element.hasAttribute('color')) {
+              const color = element.getAttribute('color')
+              if (color && theme === 'dark' && isDarkColor(color)) {
+                element.setAttribute('color', defaultTextColor)
+              } else if (color && theme === 'light') {
+                const isVeryLight = color.toLowerCase().includes('fff') || 
+                                   color.toLowerCase() === 'white'
+                if (isVeryLight) {
+                  element.setAttribute('color', defaultTextColor)
+                }
+              }
+            }
+            
+            // Handle old <font> tags with face attribute
+            if (element.tagName.toLowerCase() === 'font' && element.hasAttribute('face')) {
+              const fontFamily = element.getAttribute('face')
+              const normalizedFont = normalizeFontFamily(fontFamily)
+              if (normalizedFont) {
+                element.setAttribute('face', normalizedFont)
+              } else {
+                element.removeAttribute('face')
+              }
+            }
+            
+            // Recursively process children
+            Array.from(element.children).forEach((child: Element) => {
+              processElement(child)
+            })
+          }
+          
+          // Process body content (or the root element if it's a fragment)
+          const body = doc.body || doc.documentElement
+          
+          // Process the body element and all its descendants recursively
+          if (body) {
+            processElement(body)
+          }
+          
+          // Return the processed HTML
+          return body.innerHTML || html
+        },
+        // Fix cursor jumping to beginning of nested list items when clicking
+        // This is a known issue with ProseMirror's hit testing on complex nested DOM structures
+        handleClick: (view: any, pos: number, event: MouseEvent) => {
+          const { state } = view
+          const $pos = state.doc.resolve(pos)
+          const { listItem } = state.schema.nodes
+          
+          // Check if we're inside a list item
+          let inListItem = false
+          let listItemDepth = -1
+          for (let d = $pos.depth; d > 0; d--) {
+            if ($pos.node(d).type === listItem) {
+              inListItem = true
+              listItemDepth = d
+              break
             }
           }
-        }, 1000)
+          
+          if (!inListItem || listItemDepth < 0) return false
+          
+          // Check if this list item has nested lists (sub-bullets)
+          const listItemNode = $pos.node(listItemDepth)
+          let hasNestedList = false
+          listItemNode.forEach((child: any) => {
+            if (child.type.name === 'bulletList' || child.type.name === 'orderedList') {
+              hasNestedList = true
+            }
+          })
+          
+          if (!hasNestedList) return false
+          
+          // Check if cursor ended up at the beginning of a paragraph (position 0)
+          // This is the buggy behavior we want to fix
+          if ($pos.parentOffset !== 0) return false
+          
+          // Get click X coordinate
+          const clickX = event.clientX
+          
+          // Get the coordinates of the cursor position
+          const posCoords = view.coordsAtPos(pos)
+          if (!posCoords) return false
+          
+          // If click X is significantly to the right of where cursor landed, 
+          // the user probably intended to click at the end of the line
+          const clickDistanceFromCursor = clickX - posCoords.left
+          
+          if (clickDistanceFromCursor > 30) {
+            // Find the end of the current line
+            const parent = $pos.parent
+            const endOfParent = pos + parent.content.size
+            
+            // Binary search for end of line (same Y coordinate)
+            const lineYThreshold = 5
+            let left = pos
+            let right = endOfParent
+            let bestPos = pos
+            
+            while (left <= right) {
+              const mid = Math.floor((left + right) / 2)
+              const midCoords = view.coordsAtPos(mid)
+              
+              if (midCoords && Math.abs(midCoords.top - posCoords.top) < lineYThreshold) {
+                bestPos = mid
+                left = mid + 1
+              } else {
+                right = mid - 1
+              }
+            }
+            
+            // Set cursor to the correct position
+            if (bestPos !== pos) {
+              const tr = state.tr.setSelection(TextSelection.create(state.doc, bestPos))
+              view.dispatch(tr)
+              return true // We handled the click
+            }
+          }
+          
+          return false // Let default handling proceed
+        },
+        handleKeyDown: (view: any, event: KeyboardEvent) => {
+          // Handle Backspace on empty paragraph after a list
+          // Based on: https://discuss.prosemirror.net/t/backspace-inside-empty-paragraph-creates-a-new-list-node/3784
+          if (event.key === 'Backspace') {
+            const { state, dispatch } = view
+            const { $from } = state.selection
+            const { paragraph, bulletList, orderedList } = state.schema.nodes
+            
+            // Check if we're at the start of an empty paragraph
+            if ($from.parent.type === paragraph && 
+                $from.parent.content.size === 0 &&
+                $from.parentOffset === 0) {
+              
+              // Get position just before the paragraph
+              const beforePos = $from.before($from.depth)
+              if (beforePos <= 0) return false
+              
+              // Resolve position before paragraph to see what's there
+              const $before = state.doc.resolve(beforePos)
+              const nodeBefore = $before.nodeBefore
+              
+              // Check if node before is a list
+              if (nodeBefore && 
+                  (nodeBefore.type === bulletList || nodeBefore.type === orderedList)) {
+                
+                // Find the last paragraph in the list by walking backwards
+                let $lastNode = state.doc.resolve(beforePos - 1)
+                while ($lastNode.parent.type !== paragraph && $lastNode.pos > 0) {
+                  $lastNode = state.doc.resolve($lastNode.pos - 1)
+                }
+                
+                if ($lastNode.parent.type === paragraph) {
+                  // The cursor should go to the end of this paragraph
+                  const cursorPos = $lastNode.end()
+                  
+                  // Delete the empty paragraph
+                  const tr = state.tr
+                  const paragraphStart = $from.before($from.depth)
+                  const paragraphEnd = $from.after($from.depth)
+                  
+                  tr.delete(paragraphStart, paragraphEnd)
+                  
+                  // Set cursor to end of last paragraph in list
+                  // cursorPos is still valid since we're deleting content AFTER it
+                  tr.setSelection(TextSelection.create(tr.doc, cursorPos))
+                  
+                  dispatch(tr.scrollIntoView())
+                  return true
+                }
+              }
+            }
+          }
+          
+          return false
+        },
+      },
+    }
+  }
+
+  // Store editor instance in map
+  const setEditor = (docId: string, editor: Editor): void => {
+    editorsMapRef.current.set(docId, editor)
+    // If this is the active editor, update EditorContext using requestAnimationFrame
+    // This ensures toolbar gets the editor smoothly without flash when a new file is created
+    if (activeTabId === docId) {
+      // Use requestAnimationFrame to batch the update with React's render cycle
+      // This prevents the flash effect when toolbar transitions from null to editor
+      requestAnimationFrame(() => {
+        setCurrentEditor(editor)
+      })
+    }
+  }
+
+  // Helper function to extract first line text from TipTap JSON content
+  const extractFirstLineText = (content: any): string => {
+    if (!content || !content.content || !Array.isArray(content.content)) {
+      return ''
+    }
+    
+    // Find first non-empty paragraph or heading
+    for (const node of content.content) {
+      if (node.type === 'paragraph' || node.type === 'heading') {
+        const extractText = (n: any): string => {
+          if (typeof n === 'string') return n
+          if (n.type === 'text') return n.text || ''
+          if (n.content && Array.isArray(n.content)) {
+            return n.content.map(extractText).join('')
+          }
+          return ''
+        }
+        const text = extractText(node).trim()
+        if (text) {
+          return text
+        }
       }
-    },
-  }, [document?.id]) // Recreate editor when document.id changes - ensures independent Editor/EditorView for each document
-  
-  // Save the current editor state right before the editor instance is destroyed/recreated
-  // This catches cases where useEditor re-creates the editor due to document.id change
-  useEffect(() => {
-    return () => {
-      if (editor && currentDocIdRef.current && !editor.isDestroyed && editor.view) {
-        documentEditorStatesRef.current.set(currentDocIdRef.current, editor.view.state)
+    }
+    
+    return ''
+  }
+
+  // Helper function to check if user has multiple paragraphs (has pressed Enter/newline)
+  const hasMultipleParagraphs = (content: any): boolean => {
+    if (!content || !content.content || !Array.isArray(content.content)) {
+      return false
+    }
+    
+    let paragraphCount = 0
+    const extractText = (n: any): string => {
+      if (typeof n === 'string') return n
+      if (n.type === 'text') return n.text || ''
+      if (n.content && Array.isArray(n.content)) {
+        return n.content.map(extractText).join('')
+      }
+      return ''
+    }
+    
+    // Count non-empty paragraphs and headings
+    for (const node of content.content) {
+      if (node.type === 'paragraph' || node.type === 'heading') {
+        const text = extractText(node).trim()
+        if (text) {
+          paragraphCount++
+          if (paragraphCount >= 2) {
+            return true // User has at least 2 paragraphs, meaning they've pressed Enter
+          }
+        }
       }
     }
-  }, [editor])
-
-  // Save EditorState before switching documents
-  useEffect(() => {
-    if (!editor || !document) return
     
-    // Save current document's EditorState before switching (if we have a current document)
-    const documentChanged = currentDocIdRef.current !== null && currentDocIdRef.current !== document.id
-    if (documentChanged && currentDocIdRef.current && editor && !editor.isDestroyed && editor.view) {
-      const currentState = editor.view.state
-      documentEditorStatesRef.current.set(currentDocIdRef.current, currentState)
+    return false
+  }
+
+  // Helper function to check if title is default format (Doc X or Section X)
+  const isDefaultTitle = (title: string): boolean => {
+    // Check for "Doc X" or "Section X" format (case-insensitive)
+    const docPattern = /^Doc \d+$/i
+    const sectionPattern = /^Section \d+$/i
+    return docPattern.test(title) || sectionPattern.test(title)
+  }
+
+  // Handle editor content updates with debounced auto-save
+  const handleEditorUpdate = useCallback((editor: Editor, docId: string) => {
+    if (!editor || editor.isDestroyed) return
+    
+    // Clear existing timeout for content save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
     }
-  }, [document?.id, editor])
-
-  // Restore saved EditorState immediately when editor is created for a document
-  // This must happen BEFORE the content update effect runs
-  useEffect(() => {
-    if (!editor || !document || editor.isDestroyed || !editor.view) return
     
-    // Check if we have a saved EditorState for this document
-    const savedState = documentEditorStatesRef.current.get(document.id)
-    
-    // Check if this is a document switch (not just content update from server)
-    const documentChanged = currentDocIdRef.current !== document.id
-    
-    // Restore EditorState if:
-    // 1. We have a saved state
-    // 2. This is a document switch (documentChanged is true)
-    // This ensures we restore the complete EditorState including history when switching back to a document
-    if (savedState && documentChanged) {
-      // Restore the complete EditorState including history plugin state
-      // This preserves the full undo/redo history
-      editor.view.updateState(savedState)
-      
-      // Extract content from the restored state to update lastContentRef
-      // This ensures content update effect won't call setContent and reset history
-      const restoredContent = JSON.stringify(editor.getJSON())
-      
-      // Update refs to match the restored state
-      currentDocIdRef.current = document.id
-      currentDocTitleRef.current = document.title
-      lastContentRef.current = restoredContent // Use content from restored state, not document.content
-      restoredStateDocIdRef.current = document.id
+    // Clear existing timeout for title update
+    if (titleUpdateTimeoutRef.current) {
+      clearTimeout(titleUpdateTimeoutRef.current)
     }
-  }, [editor, document?.id]) // Run when editor or document.id changes
+    
+    // Debounce save operation (save after 1 second of inactivity)
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        const content = editor.getJSON()
+        const contentString = JSON.stringify(content)
+        
+        // Update document in backend
+        await documentApi.update(docId, contentString)
+        
+        // Update local documents state
+        setDocuments(prevDocs => {
+          return prevDocs.map(doc => 
+            doc.id === docId 
+              ? { ...doc, content: contentString, updatedAt: new Date().toISOString() }
+              : doc
+          )
+        })
+        
+        // Update open tabs
+        setOpenTabs(prevTabs => {
+          return prevTabs.map(tab => 
+            tab.id === docId 
+              ? { ...tab, content: contentString, updatedAt: new Date().toISOString() }
+              : tab
+          )
+        })
+        
+        console.log('[Layout] Document saved:', docId)
+      } catch (error) {
+        console.error('[Layout] Failed to save document:', error)
+      }
+    }, 1000) // 1 second debounce for content save
+    
+    // Check for title update when user presses Enter (has multiple paragraphs)
+    // Only check if title hasn't been auto-updated yet for this document
+    if (!titleUpdatedRef.current.has(docId)) {
+      const content = editor.getJSON()
+      const currentDoc = documentsRef.current.find(doc => doc.id === docId)
+      
+      // Only update title if:
+      // 1. Title is default format (Doc X or Section X)
+      // 2. User has pressed Enter (has multiple paragraphs)
+      // 3. First line has content
+      if (currentDoc && isDefaultTitle(currentDoc.title) && hasMultipleParagraphs(content)) {
+        const firstLineText = extractFirstLineText(content)
+        if (firstLineText) {
+          // Clear any pending title update timeout
+          if (titleUpdateTimeoutRef.current) {
+            clearTimeout(titleUpdateTimeoutRef.current)
+          }
+          
+          // Update title immediately when user presses Enter (with short delay)
+          titleUpdateTimeoutRef.current = setTimeout(async () => {
+            try {
+              // Take first 50 characters as new title
+              const titleCandidate = firstLineText.length > 50 
+                ? firstLineText.substring(0, 50).trim() 
+                : firstLineText.trim()
+              
+              if (titleCandidate && titleCandidate !== currentDoc.title) {
+                const updatedDocument = await documentApi.updateTitle(docId, titleCandidate)
+                
+                // Mark as updated to prevent future auto-updates
+                titleUpdatedRef.current.add(docId)
+                
+                // Update local documents state with new title
+                setDocuments(prevDocs => {
+                  return prevDocs.map(doc => 
+                    doc.id === docId 
+                      ? { ...doc, title: titleCandidate, updatedAt: new Date().toISOString() }
+                      : doc
+                  )
+                })
+                
+                // Update open tabs with new title
+                setOpenTabs(prevTabs => {
+                  return prevTabs.map(tab => 
+                    tab.id === docId 
+                      ? { ...tab, title: titleCandidate, updatedAt: new Date().toISOString() }
+                      : tab
+                  )
+                })
+                
+                // Update current document if it's the active one
+                setDocument(prevDoc => {
+                  if (prevDoc?.id === docId) {
+                    return updatedDocument
+                  }
+                  return prevDoc
+                })
+                
+                console.log('[Layout] Auto-updated document title after newline:', docId, 'new title:', titleCandidate)
+              }
+            } catch (titleError) {
+              console.error('[Layout] Failed to auto-update document title:', titleError)
+            }
+          }, 500) // Short delay after detecting newline (500ms)
+        }
+      }
+    }
+  }, [])
 
-  // Handle app close: clear undo/redo history and restore documents to last saved state
+
+  // OLD SINGLE EDITOR INSTANCE - REMOVED
+  // In multi-editor architecture, each document has its own editor instance
+  // created in DocumentEditorWrapper component
+
+  // Handle app close: restore documents to last saved state
   useEffect(() => {
     const handleWindowWillClose = async () => {
-      // Clear all undo/redo history
-      documentEditorStatesRef.current.clear()
       
       // Reload current document from backend to restore to last saved state
-      if (document?.id && editor && !editor.isDestroyed) {
-        try {
-          // Reload document from backend
-          const savedDoc = await documentApi.get(document.id)
-          if (savedDoc && editor && !editor.isDestroyed) {
-            // Update editor content to match saved state (this discards unsaved changes)
-            editor.commands.setContent(savedDoc.content || '')
+      if (document?.id) {
+        const editor = getEditor(document.id)
+        if (editor && !editor.isDestroyed) {
+          try {
+            // Reload document from backend
+            const savedDoc = await documentApi.get(document.id)
+            if (savedDoc && editor && !editor.isDestroyed) {
+              // Update editor content to match saved state (this discards unsaved changes)
+              editor.commands.setContent(savedDoc.content || '')
+      }
+    } catch (error) {
+            console.error('Failed to restore document on close:', error)
           }
-        } catch (error) {
-          console.error('Failed to restore document on close:', error)
         }
       }
     }
@@ -2273,9 +2606,16 @@ export default function Layout() {
     }
     
     // Fallback to beforeunload for non-Electron environments (e.g., web)
-    const handleBeforeUnload = () => {
-      // Clear all undo/redo history synchronously
-      documentEditorStatesRef.current.clear()
+    const handleBeforeUnload = async () => {
+      // Save current document before leaving
+      if (document?.id) {
+        // Clear any pending debounced saves and save immediately
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current)
+          saveTimeoutRef.current = null
+        }
+        await saveDocumentImmediately(document.id)
+      }
     }
     
     window.addEventListener('beforeunload', handleBeforeUnload)
@@ -2283,56 +2623,34 @@ export default function Layout() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
     }
-  }, [document?.id, editor])
+  }, [document?.id, saveDocumentImmediately])
 
   // Search results use temporary highlights (Chrome-style) that are not saved to the document
 
   // Update editor content when document changes
   useEffect(() => {
-    if (!editor) return
-    
-    // If document is null, save current state (if any) before clearing refs
-    // This captures history when the app clears document while switching
     if (!document) {
-      if (editor && currentDocIdRef.current && !editor.isDestroyed && editor.view) {
-        documentEditorStatesRef.current.set(currentDocIdRef.current, editor.view.state)
-      }
       lastContentRef.current = ''
       currentDocIdRef.current = null
       currentDocTitleRef.current = null
       return
     }
     
+    // Get the editor instance for this document
+    const editor = getEditor(document.id)
+    if (!editor) return
+    
+    // Note: In multi-editor architecture, each document has its own editor instance
+    // Content is set when the editor is created, not when switching documents
+    // This effect is kept for backward compatibility but may not be needed in the new architecture
+    
     // Skip if content hasn't changed AND document ID is the same
     const documentChanged = currentDocIdRef.current !== document.id
     const contentChanged = lastContentRef.current !== document.content
-
-    // If we just restored this document's state, skip the content update entirely
-    if (restoredStateDocIdRef.current === document.id) {
-      restoredStateDocIdRef.current = null
-      currentDocTitleRef.current = document.title
-      return
-    }
     
-    // If only title changed (not content or ID), skip editor update to preserve editor state
+    // If only title changed (not content or ID), skip editor update
     if (!documentChanged && !contentChanged) {
-      // Still update the title ref even if we skip editor update
       currentDocTitleRef.current = document.title
-      return
-    }
-    
-    // Check if EditorState was already restored in the previous effect
-    // If EditorState was restored (documentChanged && savedState exists), skip content update
-    // This preserves the complete undo/redo history even if document.content differs
-    const savedState = documentEditorStatesRef.current.get(document.id)
-    const wasStateRestored = savedState && documentChanged
-
-    // If EditorState was restored elsewhere, skip content update to preserve history
-    // The restored state already contains the correct content and history
-    if (wasStateRestored) {
-      currentDocIdRef.current = document.id
-      currentDocTitleRef.current = document.title
-      // Don't update lastContentRef here - it was already set to restored content in the restore effect
       return
     }
     
@@ -2358,23 +2676,28 @@ export default function Layout() {
          try {
           const content = JSON.parse(docContent)
           
-            // Check if editor is still mounted and ready
-          if (editor && !editor.isDestroyed && editor.view) {
+            // Get the editor instance for this document
+            // In multi-editor architecture, we get the editor from the map
+            const currentEditor = getEditor(document.id)
+            if (!currentEditor || currentEditor.isDestroyed || !currentEditor.view) {
+              return
+            }
+            
             // Always clear search highlights before setting new content
             // This ensures highlights don't persist when navigating between documents
-            clearSearchHighlights(editor)
+            clearSearchHighlights(currentEditor)
             
             // Check if this is a new tab (document not in openTabs before)
             const isNewTab = !openTabs.some(tab => tab.id === document.id)
             
             // If this is a newly created document, focus immediately before setting content
             // This prevents placeholder from showing
-            if (isNewlyCreatedDocRef.current && editor && !editor.isDestroyed && editor.view) {
+            if (isNewlyCreatedDocRef.current && currentEditor && !currentEditor.isDestroyed && currentEditor.view) {
               try {
-                const editorElement = editor.view.dom as HTMLElement
+                const editorElement = currentEditor.view.dom as HTMLElement
                 if (editorElement) {
                   editorElement.focus()
-                  editor.commands.focus('start')
+                  currentEditor.commands.focus('start')
                 }
               } catch (e) {
                 // Ignore focus errors
@@ -2398,7 +2721,7 @@ export default function Layout() {
             })()
             
             // Get scroll container and disable scroll behavior temporarily to prevent animation
-            const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
+            const scrollContainer = currentEditor.view.dom.closest('.scrollable-container') as HTMLElement
             let originalScrollBehavior: string | null = null
             
             if (scrollContainer) {
@@ -2414,20 +2737,44 @@ export default function Layout() {
               }
             }
             
-            // Set content - EditorState restoration is handled in the previous effect (line 2176)
-            // This effect only runs when content needs to be updated from server
-            // If EditorState was already restored, this effect would have been skipped (line 2227)
-            editor.commands.setContent(content, { emitUpdate: false })
-            // Save the newly created state
-            const newState = editor.view.state
-            documentEditorStatesRef.current.set(document.id, newState)
+            // Note: In multi-editor architecture, each editor instance has its own content
+            // Content is set when the editor is created in DocumentEditorWrapper
+            // This setContent call is only needed if document content is updated from server
+            // and the editor already exists
+            if (contentChanged) {
+              // Only update content if it changed from server
+              currentEditor.commands.setContent(content, { emitUpdate: false })
+            }
             
             lastContentRef.current = docContent
             
             // Clear search highlights after setting content (in case they were preserved)
             // This ensures that when switching back to a document, old highlights are cleared
-            if (documentEditorRef.current) {
-              documentEditorRef.current.clearSearch()
+            const docEditorRef = getDocumentEditorRef(document.id)
+            if (docEditorRef.current) {
+              docEditorRef.current.clearSearch()
+            }
+            
+            // Auto-focus editor if document is empty (newly created or empty existing document)
+            // This provides better UX - user can immediately start typing
+            const isEmpty = isDocumentEmpty(content)
+            if (isEmpty && currentEditor && !currentEditor.isDestroyed && currentEditor.view) {
+              // Use requestAnimationFrame to ensure content is fully rendered before focusing
+              requestAnimationFrame(() => {
+                if (isCancelled) return
+                const focusEditor = getEditor(document.id)
+                if (focusEditor && !focusEditor.isDestroyed && focusEditor.view) {
+                  try {
+                    const editorElement = focusEditor.view.dom as HTMLElement
+                    if (editorElement) {
+                      editorElement.focus()
+                      focusEditor.commands.focus('start')
+                    }
+                  } catch (e) {
+                    // Ignore focus errors
+                  }
+                }
+              })
             }
             
             // Restore scroll position immediately after content is set (synchronously, no animation)
@@ -2443,7 +2790,7 @@ export default function Layout() {
               // This ensures scroll position is correct even if content layout changed
               // Keep scroll-behavior as 'auto' during this to prevent any animation
               requestAnimationFrame(() => {
-                if (isCancelled || !editor || editor.isDestroyed || !scrollContainer) {
+                if (isCancelled || !currentEditor || currentEditor.isDestroyed || !scrollContainer) {
                   // Restore scroll-behavior even if cancelled
                   if (originalScrollBehavior !== null) {
                     scrollContainer.style.scrollBehavior = originalScrollBehavior || ''
@@ -2475,8 +2822,8 @@ export default function Layout() {
             // This handles cases where content from server might have highlights
             if (!isSearchMode || !searchQuery.trim()) {
               setTimeout(() => {
-                if (editor && !editor.isDestroyed) {
-                  clearSearchHighlights(editor)
+                if (currentEditor && !currentEditor.isDestroyed) {
+                  clearSearchHighlights(currentEditor)
                 }
               }, 50)
             }
@@ -2499,11 +2846,7 @@ export default function Layout() {
                     pendingSearchNavRef.current = pendingNav
                   } else {
                     // Clear stale sessionStorage entry
-                    try {
-                      sessionStorage.removeItem('pendingSearchNav')
-                    } catch (e) {
-                      // Silently fail
-                    }
+                    sessionStorage.removeItem('pendingSearchNav')
                   }
                 }
               } catch (e) {
@@ -2511,110 +2854,1366 @@ export default function Layout() {
               }
             }
             
-            if (pendingNav) {
-              const { query, position } = pendingNav
+            // If we have pending navigation, execute it after content is set
+            if (pendingNav && pendingNav.query && pendingNav.position !== undefined) {
+              // Use a small delay to ensure editor is ready
+              setTimeout(() => {
+                const navEditor = getEditor(document.id)
+                if (navEditor && !navEditor.isDestroyed) {
+                  navigateToMatch(navEditor, pendingNav!.query, pendingNav!.position)
+                  // Clear pending nav since we've used it
+                  pendingSearchNavRef.current = null
+                  try {
+                    sessionStorage.removeItem('pendingSearchNav')
+                  } catch (e) {
+                    // Silently fail
+                  }
+                }
+              }, 200)
+            }
+            
+            // Restore focus if this is a newly created document
+            // Only focus if we're navigating from search (not from clicking in file explorer)
+            if (isNewlyCreatedDocRef.current && !isNavigatingFromSearchRef.current) {
+              // Focus after a delay to ensure editor is ready
+              focusTimeoutId = setTimeout(() => {
+                if (isCancelled) return
+                const focusEditor = getEditor(document.id)
+                if (focusEditor && !focusEditor.isDestroyed && focusEditor.view) {
+                  try {
+                    const editorElement = focusEditor.view.dom as HTMLElement
+                    if (editorElement) {
+                      editorElement.focus()
+                      focusEditor.commands.focus('start')
+                    }
+                  } catch (e) {
+                    // Ignore focus errors
+                  }
+                }
+                // Clear the flag after focusing
+                isNewlyCreatedDocRef.current = false
+              }, 100)
+            } else if (isNewlyCreatedDocRef.current) {
+              // Clear flag even if we're not focusing (navigating from search)
+              isNewlyCreatedDocRef.current = false
+            }
+            
+            // Clear navigating flag after handling
+            isNavigatingFromSearchRef.current = false
+            
+            // If search mode is active and we have a query, highlight matches
+            if (isSearchMode && searchQuery.trim()) {
+              setTimeout(() => {
+                const highlightEditor = getEditor(document.id)
+                if (highlightEditor && !highlightEditor.isDestroyed) {
+                  highlightAllMatches(highlightEditor, searchQuery)
+                }
+              }, 300)
+            }
+          } catch (error) {
+            console.error('Failed to parse document content:', error)
+          }
+        }, 100) // Increased delay to ensure full render cycle completion
+      })
+    
+    return () => {
+      isCancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
+      if (focusTimeoutId) clearTimeout(focusTimeoutId)
+    }
+  }, [document?.id, document?.content, searchQuery, openTabs])
+
+  // Automatically highlight all matches when search query changes and search mode is active
+  // Also clear highlights when search mode is turned off
+  useEffect(() => {
+    if (!document) return
+    const currentEditor = getEditor(document.id)
+    if (!currentEditor) return
+    
+    if (isSearchMode && searchQuery.trim()) {
+      // Wait a bit for editor to be ready, then highlight all matches
+      const timeoutId = setTimeout(() => {
+        if (currentEditor && !currentEditor.isDestroyed) {
+          highlightAllMatches(currentEditor, searchQuery)
+        }
+      }, 300)
+      
+      return () => clearTimeout(timeoutId)
+    } else {
+      // Clear highlights when search mode is off or query is empty
+      // This ensures ALL temporary highlights are cleared, not just in current document
+      // Use a small delay to ensure editor is ready
+      const clearTimeoutId = setTimeout(() => {
+        if (currentEditor && !currentEditor.isDestroyed) {
+          clearSearchHighlights(currentEditor)
+        }
+      }, 100)
+      
+      return () => clearTimeout(clearTimeoutId)
+    }
+  }, [searchQuery, isSearchMode, document?.id, theme])
+  
+  // Additional effect: Clear highlights whenever search mode is turned off
+  // This ensures highlights are cleared even when switching documents
+  useEffect(() => {
+    if (!document) return
+    const currentEditor = getEditor(document.id)
+    if (!currentEditor) return
+    
+    if (!isSearchMode) {
+      // Search mode is off - clear highlights immediately
+      const clearTimeoutId = setTimeout(() => {
+        if (currentEditor && !currentEditor.isDestroyed) {
+          clearSearchHighlights(currentEditor)
+        }
+      }, 50)
+      
+      return () => clearTimeout(clearTimeoutId)
+    }
+  }, [isSearchMode, document?.id])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Save AI panel state to localStorage when open/close state changes
+  // (width changes are handled in handlePanelResize with debouncing)
+  useEffect(() => {
+    saveAIPanelState({
+      isOpen: isAIPanelOpen,
+      width: aiPanelWidth
+    })
+  }, [isAIPanelOpen])
+
+  // Restore panel sizes when AI panel state changes
+  // Note: This should NOT run when fileExplorerSize changes (user resizing file explorer)
+  useEffect(() => {
+    // Don't interfere if user is actively resizing either panel
+    if (isUserResizingRef.current || isFileExplorerResizingRef.current) return
+    
+    const timer = setTimeout(() => {
+      if (isAIPanelOpen && aiPanelRef.current && editorPanelRef.current && fileExplorerPanelRef.current) {
+        // AI panel is opening
+        // Ensure File Explorer keeps its size
+        const currentFileExplorerSize = fileExplorerPanelRef.current.getSize()
+        if (Math.abs(currentFileExplorerSize - fileExplorerSize) > 0.1) {
+          fileExplorerPanelRef.current.resize(fileExplorerSize)
+        }
+      }
+    }, 100)
+    
+    return () => clearTimeout(timer)
+  }, [isAIPanelOpen, fileExplorerSize])
+
+  // Handle app close: restore documents to last saved state
+  useEffect(() => {
+    const handleWindowWillClose = async () => {
+      
+      // Reload current document from backend to restore to last saved state
+      if (document?.id) {
+        const editor = getEditor(document.id)
+        if (editor && !editor.isDestroyed) {
+          try {
+            // Reload document from backend
+            const savedDoc = await documentApi.get(document.id)
+            if (savedDoc && editor && !editor.isDestroyed) {
+              // Update editor content to match saved state (this discards unsaved changes)
+              editor.commands.setContent(savedDoc.content || '')
+            }
+          } catch (error) {
+            console.error('Failed to restore document on close:', error)
+          }
+        }
+      }
+    }
+
+    // Listen for window-will-close event from Electron main process
+    if (window.electron) {
+      const unsubscribe = window.electron.on('window-will-close', handleWindowWillClose)
+      return () => {
+        if (unsubscribe) unsubscribe()
+      }
+    }
+    
+    // Fallback to beforeunload for non-Electron environments (e.g., web)
+    const handleBeforeUnload = async () => {
+      // Save current document before leaving
+      if (document?.id) {
+        // Clear any pending debounced saves and save immediately
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current)
+          saveTimeoutRef.current = null
+        }
+        await saveDocumentImmediately(document.id)
+      }
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [document?.id, saveDocumentImmediately])
+
+  // Search results use temporary highlights (Chrome-style) that are not saved to the document
+
+  // Update editor content when document changes
+  useEffect(() => {
+    if (!document) {
+      lastContentRef.current = ''
+      currentDocIdRef.current = null
+      currentDocTitleRef.current = null
+      return
+    }
+    
+    // Get the editor instance for this document
+    const editor = getEditor(document.id)
+    if (!editor) return
+    
+    // Note: In multi-editor architecture, each document has its own editor instance
+    // Content is set when the editor is created, not when switching documents
+    // This effect is kept for backward compatibility but may not be needed in the new architecture
+    
+    // Skip if content hasn't changed AND document ID is the same
+    const documentChanged = currentDocIdRef.current !== document.id
+    const contentChanged = lastContentRef.current !== document.content
+    
+    // If only title changed (not content or ID), skip editor update
+    if (!documentChanged && !contentChanged) {
+      currentDocTitleRef.current = document.title
+      return
+    }
+    
+    // Update current doc ID and title refs
+    currentDocIdRef.current = document.id
+    currentDocTitleRef.current = document.title
+    
+    // Capture current document in closure to avoid stale reference
+    const docContent = document.content
+    
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let focusTimeoutId: ReturnType<typeof setTimeout> | null = null
+    let isCancelled = false
+    
+    // Use queueMicrotask + setTimeout to ensure we're completely outside React's render
+    queueMicrotask(() => {
+      if (isCancelled) return
+      
+      // Additional delay to ensure DOM is ready and React has finished
+      timeoutId = setTimeout(() => {
+        if (isCancelled) return
+        
+         try {
+          const content = JSON.parse(docContent)
+          
+            // Get the editor instance for this document
+            // In multi-editor architecture, we get the editor from the map
+            const currentEditor = getEditor(document.id)
+            if (!currentEditor || currentEditor.isDestroyed || !currentEditor.view) {
+              return
+            }
+            
+            // Always clear search highlights before setting new content
+            // This ensures highlights don't persist when navigating between documents
+            clearSearchHighlights(currentEditor)
+            
+            // Check if this is a new tab (document not in openTabs before)
+            const isNewTab = !openTabs.some(tab => tab.id === document.id)
+            
+            // If this is a newly created document, focus immediately before setting content
+            // This prevents placeholder from showing
+            if (isNewlyCreatedDocRef.current && currentEditor && !currentEditor.isDestroyed && currentEditor.view) {
+              try {
+                const editorElement = currentEditor.view.dom as HTMLElement
+                if (editorElement) {
+                  editorElement.focus()
+                  currentEditor.commands.focus('start')
+                }
+              } catch (e) {
+                // Ignore focus errors
+              }
+            }
+            
+            // Restore scroll position BEFORE setting content to prevent any scrolling animation
+            // Only restore scroll position if this is NOT a new tab (i.e., switching to existing tab)
+            // If it's a new tab, show top of document instead
+            const savedScrollTop = (() => {
+              // If it's a new tab, don't restore scroll position - show top instead
+              if (isNewTab) {
+                return null
+              }
+              try {
+                const saved = localStorage.getItem(`documentScroll_${document.id}`)
+                return saved ? parseFloat(saved) : null
+              } catch {
+                return null
+              }
+            })()
+            
+            // Get scroll container and disable scroll behavior temporarily to prevent animation
+            const scrollContainer = currentEditor.view.dom.closest('.scrollable-container') as HTMLElement
+            let originalScrollBehavior: string | null = null
+            
+            if (scrollContainer) {
+              // Save original scroll-behavior and set to 'auto' to disable smooth scrolling
+              originalScrollBehavior = scrollContainer.style.scrollBehavior || ''
+              scrollContainer.style.scrollBehavior = 'auto'
               
-              // Clear both ref and sessionStorage immediately (before setTimeout)
-              // This prevents it from being used again if component re-renders
+              // Set scroll position BEFORE setting content to prevent any scroll animation
+              if (savedScrollTop !== null && savedScrollTop > 0) {
+                scrollContainer.scrollTop = savedScrollTop
+              } else if (isNewTab) {
+                scrollContainer.scrollTop = 0
+              }
+            }
+            
+            // Note: In multi-editor architecture, each editor instance has its own content
+            // Content is set when the editor is created in DocumentEditorWrapper
+            // This setContent call is only needed if document content is updated from server
+            // and the editor already exists
+            if (contentChanged) {
+              // Only update content if it changed from server
+              currentEditor.commands.setContent(content, { emitUpdate: false })
+            }
+            
+            lastContentRef.current = docContent
+            
+            // Clear search highlights after setting content (in case they were preserved)
+            // This ensures that when switching back to a document, old highlights are cleared
+            const docEditorRef = getDocumentEditorRef(document.id)
+            if (docEditorRef.current) {
+              docEditorRef.current.clearSearch()
+            }
+            
+            // Auto-focus editor if document is empty (newly created or empty existing document)
+            // This provides better UX - user can immediately start typing
+            const isEmpty = isDocumentEmpty(content)
+            if (isEmpty && currentEditor && !currentEditor.isDestroyed && currentEditor.view) {
+              // Use requestAnimationFrame to ensure content is fully rendered before focusing
+              requestAnimationFrame(() => {
+                if (isCancelled) return
+                const focusEditor = getEditor(document.id)
+                if (focusEditor && !focusEditor.isDestroyed && focusEditor.view) {
+                  try {
+                    const editorElement = focusEditor.view.dom as HTMLElement
+                    if (editorElement) {
+                      editorElement.focus()
+                      focusEditor.commands.focus('start')
+                    }
+                  } catch (e) {
+                    // Ignore focus errors
+                  }
+                }
+              })
+            }
+            
+            // Restore scroll position immediately after content is set (synchronously, no animation)
+            if (scrollContainer) {
+              // Set scroll position synchronously immediately after setContent
+              if (savedScrollTop !== null && savedScrollTop > 0) {
+                scrollContainer.scrollTop = savedScrollTop
+              } else if (isNewTab) {
+                scrollContainer.scrollTop = 0
+              }
+              
+              // Use requestAnimationFrame to ensure DOM layout is complete, then set scroll again
+              // This ensures scroll position is correct even if content layout changed
+              // Keep scroll-behavior as 'auto' during this to prevent any animation
+              requestAnimationFrame(() => {
+                if (isCancelled || !currentEditor || currentEditor.isDestroyed || !scrollContainer) {
+                  // Restore scroll-behavior even if cancelled
+                  if (originalScrollBehavior !== null) {
+                    scrollContainer.style.scrollBehavior = originalScrollBehavior || ''
+                  }
+                  return
+                }
+                
+                // Ensure scroll-behavior is still 'auto' before setting scroll
+                scrollContainer.style.scrollBehavior = 'auto'
+                
+                // Set scroll position synchronously (no animation)
+                if (savedScrollTop !== null && savedScrollTop > 0) {
+                  scrollContainer.scrollTop = savedScrollTop
+                } else if (isNewTab) {
+                  scrollContainer.scrollTop = 0
+                }
+                
+                // Restore original scroll-behavior after setting scroll position
+                // Use a tiny delay to ensure scroll position is applied
+                setTimeout(() => {
+                  if (scrollContainer && originalScrollBehavior !== null) {
+                    scrollContainer.style.scrollBehavior = originalScrollBehavior || ''
+                  }
+                }, 0)
+              })
+            }
+            
+            // After content is set, clear highlights again if search mode is off
+            // This handles cases where content from server might have highlights
+            if (!isSearchMode || !searchQuery.trim()) {
+              setTimeout(() => {
+                if (currentEditor && !currentEditor.isDestroyed) {
+                  clearSearchHighlights(currentEditor)
+                }
+              }, 50)
+            }
+            
+            // Check if we have a pending search navigation
+            // First check the ref
+            let pendingNav = pendingSearchNavRef.current
+            
+            // If ref is null, try to restore from sessionStorage (backup)
+            if (!pendingNav) {
+              try {
+                const stored = sessionStorage.getItem('pendingSearchNav')
+                if (stored) {
+                  const parsed = JSON.parse(stored)
+                  
+                  // Only use if it matches current document
+                  if (parsed.targetDocId === document.id) {
+                    pendingNav = { query: parsed.query, position: parsed.position }
+                    // Also restore to ref for consistency
+                    pendingSearchNavRef.current = pendingNav
+                  } else {
+                    // Clear stale sessionStorage entry
+                    sessionStorage.removeItem('pendingSearchNav')
+                  }
+                }
+              } catch (e) {
+                // Silently fail
+              }
+            }
+            
+            // If we have pending navigation, execute it after content is set
+            if (pendingNav && pendingNav.query && pendingNav.position !== undefined) {
+              // Use a small delay to ensure editor is ready
+              setTimeout(() => {
+                const navEditor = getEditor(document.id)
+                if (navEditor && !navEditor.isDestroyed) {
+                  navigateToMatch(navEditor, pendingNav!.query, pendingNav!.position)
+                  // Clear pending nav since we've used it
+                  pendingSearchNavRef.current = null
+                  try {
+                    sessionStorage.removeItem('pendingSearchNav')
+                  } catch (e) {
+                    // Silently fail
+                  }
+                }
+              }, 200)
+            }
+            
+            // Restore focus if this is a newly created document
+            // Only focus if we're navigating from search (not from clicking in file explorer)
+            if (isNewlyCreatedDocRef.current && !isNavigatingFromSearchRef.current) {
+              // Focus after a delay to ensure editor is ready
+              focusTimeoutId = setTimeout(() => {
+                if (isCancelled) return
+                const focusEditor = getEditor(document.id)
+                if (focusEditor && !focusEditor.isDestroyed && focusEditor.view) {
+                  try {
+                    const editorElement = focusEditor.view.dom as HTMLElement
+                    if (editorElement) {
+                      editorElement.focus()
+                      focusEditor.commands.focus('start')
+                    }
+                  } catch (e) {
+                    // Ignore focus errors
+                  }
+                }
+                // Clear the flag after focusing
+                isNewlyCreatedDocRef.current = false
+              }, 100)
+            } else if (isNewlyCreatedDocRef.current) {
+              // Clear flag even if we're not focusing (navigating from search)
+              isNewlyCreatedDocRef.current = false
+            }
+            
+            // Clear navigating flag after handling
+            isNavigatingFromSearchRef.current = false
+            
+            // If search mode is active and we have a query, highlight matches
+            if (isSearchMode && searchQuery.trim()) {
+              setTimeout(() => {
+                const highlightEditor = getEditor(document.id)
+                if (highlightEditor && !highlightEditor.isDestroyed) {
+                  highlightAllMatches(highlightEditor, searchQuery)
+                }
+              }, 300)
+            }
+          } catch (error) {
+            console.error('Failed to parse document content:', error)
+          }
+        }, 100) // Increased delay to ensure full render cycle completion
+      })
+    
+    return () => {
+      isCancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
+      if (focusTimeoutId) clearTimeout(focusTimeoutId)
+    }
+  }, [document?.id, document?.content, searchQuery, openTabs])
+
+  // Automatically highlight all matches when search query changes and search mode is active
+  // Also clear highlights when search mode is turned off
+  useEffect(() => {
+    if (!document) return
+    const currentEditor = getEditor(document.id)
+    if (!currentEditor) return
+    
+    if (isSearchMode && searchQuery.trim()) {
+      // Wait a bit for editor to be ready, then highlight all matches
+      const timeoutId = setTimeout(() => {
+        if (currentEditor && !currentEditor.isDestroyed) {
+          highlightAllMatches(currentEditor, searchQuery)
+        }
+      }, 300)
+      
+      return () => clearTimeout(timeoutId)
+    } else {
+      // Clear highlights when search mode is off or query is empty
+      // This ensures ALL temporary highlights are cleared, not just in current document
+      // Use a small delay to ensure editor is ready
+      const clearTimeoutId = setTimeout(() => {
+        if (currentEditor && !currentEditor.isDestroyed) {
+          clearSearchHighlights(currentEditor)
+        }
+      }, 100)
+      
+      return () => clearTimeout(clearTimeoutId)
+    }
+  }, [searchQuery, isSearchMode, document?.id, theme])
+  
+  // Additional effect: Clear highlights whenever search mode is turned off
+  // This ensures highlights are cleared even when switching documents
+  useEffect(() => {
+    if (!document) return
+    const currentEditor = getEditor(document.id)
+    if (!currentEditor) return
+    
+    if (!isSearchMode) {
+      // Search mode is off - clear highlights immediately
+      const clearTimeoutId = setTimeout(() => {
+        if (currentEditor && !currentEditor.isDestroyed) {
+          clearSearchHighlights(currentEditor)
+        }
+      }, 50)
+      
+      return () => clearTimeout(clearTimeoutId)
+    }
+  }, [isSearchMode, document?.id])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Save AI panel state to localStorage when open/close state changes
+  // (width changes are handled in handlePanelResize with debouncing)
+  useEffect(() => {
+    saveAIPanelState({
+      isOpen: isAIPanelOpen,
+      width: aiPanelWidth
+    })
+  }, [isAIPanelOpen])
+
+  // Restore panel sizes when AI panel state changes
+  // Note: This should NOT run when fileExplorerSize changes (user resizing file explorer)
+  useEffect(() => {
+    // Don't interfere if user is actively resizing either panel
+    if (isUserResizingRef.current || isFileExplorerResizingRef.current) return
+    
+    const timer = setTimeout(() => {
+      if (isAIPanelOpen && aiPanelRef.current && editorPanelRef.current && fileExplorerPanelRef.current) {
+        // AI panel is opening
+        // Ensure File Explorer keeps its size
+        const currentFileExplorerSize = fileExplorerPanelRef.current.getSize()
+        if (Math.abs(currentFileExplorerSize - fileExplorerSize) > 0.1) {
+          fileExplorerPanelRef.current.resize(fileExplorerSize)
+        }
+      }
+    }, 100)
+    
+    return () => clearTimeout(timer)
+  }, [isAIPanelOpen, fileExplorerSize])
+  
+  // Handle app close: restore documents to last saved state
+  useEffect(() => {
+    const handleWindowWillClose = async () => {
+      
+      // Reload current document from backend to restore to last saved state
+      if (document?.id) {
+        const editor = getEditor(document.id)
+        if (editor && !editor.isDestroyed) {
+        try {
+          // Reload document from backend
+          const savedDoc = await documentApi.get(document.id)
+          if (savedDoc && editor && !editor.isDestroyed) {
+            // Update editor content to match saved state (this discards unsaved changes)
+            editor.commands.setContent(savedDoc.content || '')
+          }
+        } catch (error) {
+          console.error('Failed to restore document on close:', error)
+          }
+        }
+      }
+    }
+
+    // Listen for window-will-close event from Electron main process
+    if (window.electron) {
+      const unsubscribe = window.electron.on('window-will-close', handleWindowWillClose)
+      return () => {
+        if (unsubscribe) unsubscribe()
+      }
+    }
+    
+    // Fallback to beforeunload for non-Electron environments (e.g., web)
+    const handleBeforeUnload = async () => {
+      // Save current document before leaving
+      if (document?.id) {
+        // Clear any pending debounced saves and save immediately
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current)
+          saveTimeoutRef.current = null
+        }
+        await saveDocumentImmediately(document.id)
+      }
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [document?.id, saveDocumentImmediately])
+
+  // Search results use temporary highlights (Chrome-style) that are not saved to the document
+
+  // Update editor content when document changes
+  useEffect(() => {
+    if (!document) {
+      lastContentRef.current = ''
+      currentDocIdRef.current = null
+      currentDocTitleRef.current = null
+      return
+    }
+    
+    // Get the editor instance for this document
+    const editor = getEditor(document.id)
+    if (!editor) return
+    
+    // Note: In multi-editor architecture, each document has its own editor instance
+    // Content is set when the editor is created, not when switching documents
+    // This effect is kept for backward compatibility but may not be needed in the new architecture
+    
+    // Skip if content hasn't changed AND document ID is the same
+    const documentChanged = currentDocIdRef.current !== document.id
+    const contentChanged = lastContentRef.current !== document.content
+    
+    // If only title changed (not content or ID), skip editor update
+    if (!documentChanged && !contentChanged) {
+      currentDocTitleRef.current = document.title
+      return
+    }
+    
+    // Update current doc ID and title refs
+    currentDocIdRef.current = document.id
+    currentDocTitleRef.current = document.title
+    
+    // Capture current document in closure to avoid stale reference
+    const docContent = document.content
+    
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let focusTimeoutId: ReturnType<typeof setTimeout> | null = null
+    let isCancelled = false
+    
+    // Use queueMicrotask + setTimeout to ensure we're completely outside React's render
+    queueMicrotask(() => {
+      if (isCancelled) return
+      
+      // Additional delay to ensure DOM is ready and React has finished
+      timeoutId = setTimeout(() => {
+        if (isCancelled) return
+        
+         try {
+          const content = JSON.parse(docContent)
+          
+            // Get the editor instance for this document
+            // In multi-editor architecture, we get the editor from the map
+            const currentEditor = getEditor(document.id)
+            if (!currentEditor || currentEditor.isDestroyed || !currentEditor.view) {
+              return
+            }
+            
+            // Always clear search highlights before setting new content
+            // This ensures highlights don't persist when navigating between documents
+            clearSearchHighlights(currentEditor)
+            
+            // Check if this is a new tab (document not in openTabs before)
+            const isNewTab = !openTabs.some(tab => tab.id === document.id)
+            
+            // If this is a newly created document, focus immediately before setting content
+            // This prevents placeholder from showing
+            if (isNewlyCreatedDocRef.current && currentEditor && !currentEditor.isDestroyed && currentEditor.view) {
+              try {
+                const editorElement = currentEditor.view.dom as HTMLElement
+                if (editorElement) {
+                  editorElement.focus()
+                  currentEditor.commands.focus('start')
+                }
+              } catch (e) {
+                // Ignore focus errors
+              }
+            }
+            
+            // Restore scroll position BEFORE setting content to prevent any scrolling animation
+            // Only restore scroll position if this is NOT a new tab (i.e., switching to existing tab)
+            // If it's a new tab, show top of document instead
+            const savedScrollTop = (() => {
+              // If it's a new tab, don't restore scroll position - show top instead
+              if (isNewTab) {
+                return null
+              }
+              try {
+                const saved = localStorage.getItem(`documentScroll_${document.id}`)
+                return saved ? parseFloat(saved) : null
+              } catch {
+                return null
+              }
+            })()
+            
+            // Get scroll container and disable scroll behavior temporarily to prevent animation
+            const scrollContainer = currentEditor.view.dom.closest('.scrollable-container') as HTMLElement
+            let originalScrollBehavior: string | null = null
+            
+            if (scrollContainer) {
+              // Save original scroll-behavior and set to 'auto' to disable smooth scrolling
+              originalScrollBehavior = scrollContainer.style.scrollBehavior || ''
+              scrollContainer.style.scrollBehavior = 'auto'
+              
+              // Set scroll position BEFORE setting content to prevent any scroll animation
+              if (savedScrollTop !== null && savedScrollTop > 0) {
+                scrollContainer.scrollTop = savedScrollTop
+              } else if (isNewTab) {
+                scrollContainer.scrollTop = 0
+              }
+            }
+            
+            // Note: In multi-editor architecture, each editor instance has its own content
+            // Content is set when the editor is created in DocumentEditorWrapper
+            // This setContent call is only needed if document content is updated from server
+            // and the editor already exists
+            if (contentChanged) {
+              // Only update content if it changed from server
+              currentEditor.commands.setContent(content, { emitUpdate: false })
+            }
+            
+            lastContentRef.current = docContent
+            
+            // Clear search highlights after setting content (in case they were preserved)
+            // This ensures that when switching back to a document, old highlights are cleared
+            const docEditorRef = getDocumentEditorRef(document.id)
+            if (docEditorRef.current) {
+              docEditorRef.current.clearSearch()
+            }
+            
+            // Auto-focus editor if document is empty (newly created or empty existing document)
+            // This provides better UX - user can immediately start typing
+            const isEmpty = isDocumentEmpty(content)
+            if (isEmpty && currentEditor && !currentEditor.isDestroyed && currentEditor.view) {
+              // Use requestAnimationFrame to ensure content is fully rendered before focusing
+              requestAnimationFrame(() => {
+                if (isCancelled) return
+                const focusEditor = getEditor(document.id)
+                if (focusEditor && !focusEditor.isDestroyed && focusEditor.view) {
+                  try {
+                    const editorElement = focusEditor.view.dom as HTMLElement
+                    if (editorElement) {
+                      editorElement.focus()
+                      focusEditor.commands.focus('start')
+                    }
+                  } catch (e) {
+                    // Ignore focus errors
+                  }
+                }
+              })
+            }
+            
+            // Restore scroll position immediately after content is set (synchronously, no animation)
+            if (scrollContainer) {
+              // Set scroll position synchronously immediately after setContent
+              if (savedScrollTop !== null && savedScrollTop > 0) {
+                scrollContainer.scrollTop = savedScrollTop
+              } else if (isNewTab) {
+                scrollContainer.scrollTop = 0
+              }
+              
+              // Use requestAnimationFrame to ensure DOM layout is complete, then set scroll again
+              // This ensures scroll position is correct even if content layout changed
+              // Keep scroll-behavior as 'auto' during this to prevent any animation
+              requestAnimationFrame(() => {
+                if (isCancelled || !currentEditor || currentEditor.isDestroyed || !scrollContainer) {
+                  // Restore scroll-behavior even if cancelled
+                  if (originalScrollBehavior !== null) {
+                    scrollContainer.style.scrollBehavior = originalScrollBehavior || ''
+                  }
+                  return
+                }
+                
+                // Ensure scroll-behavior is still 'auto' before setting scroll
+                scrollContainer.style.scrollBehavior = 'auto'
+                
+                // Set scroll position synchronously (no animation)
+                if (savedScrollTop !== null && savedScrollTop > 0) {
+                  scrollContainer.scrollTop = savedScrollTop
+                } else if (isNewTab) {
+                  scrollContainer.scrollTop = 0
+                }
+                
+                // Restore original scroll-behavior after setting scroll position
+                // Use a tiny delay to ensure scroll position is applied
+                setTimeout(() => {
+                  if (scrollContainer && originalScrollBehavior !== null) {
+                    scrollContainer.style.scrollBehavior = originalScrollBehavior || ''
+                  }
+                }, 0)
+              })
+            }
+            
+            // After content is set, clear highlights again if search mode is off
+            // This handles cases where content from server might have highlights
+            if (!isSearchMode || !searchQuery.trim()) {
+              setTimeout(() => {
+                if (currentEditor && !currentEditor.isDestroyed) {
+                  clearSearchHighlights(currentEditor)
+                }
+              }, 50)
+            }
+            
+            // Check if we have a pending search navigation
+            // First check the ref
+            let pendingNav = pendingSearchNavRef.current
+            
+            // If ref is null, try to restore from sessionStorage (backup)
+            if (!pendingNav) {
+              try {
+                const stored = sessionStorage.getItem('pendingSearchNav')
+                if (stored) {
+                  const parsed = JSON.parse(stored)
+                  
+                  // Only use if it matches current document
+                  if (parsed.targetDocId === document.id) {
+                    pendingNav = { query: parsed.query, position: parsed.position }
+                    // Also restore to ref for consistency
+                    pendingSearchNavRef.current = pendingNav
+                  } else {
+                    // Clear stale sessionStorage entry
+                      sessionStorage.removeItem('pendingSearchNav')
+                  }
+                }
+              } catch (e) {
+                // Silently fail
+              }
+            }
+            
+            // If we have pending navigation, execute it after content is set
+            if (pendingNav && pendingNav.query && pendingNav.position !== undefined) {
+              // Use a small delay to ensure editor is ready
+              setTimeout(() => {
+                const navEditor = getEditor(document.id)
+                if (navEditor && !navEditor.isDestroyed) {
+                  navigateToMatch(navEditor, pendingNav!.query, pendingNav!.position)
+                  // Clear pending nav since we've used it
               pendingSearchNavRef.current = null
               try {
                 sessionStorage.removeItem('pendingSearchNav')
               } catch (e) {
                 // Silently fail
-              }
-              
-              setTimeout(() => {
-                if (editor && !editor.isDestroyed) {
-                  navigateToMatch(editor, query, position)
-                  
-                  // Clear flag AFTER navigation completes (with small delay to ensure scroll completes)
-                  setTimeout(() => {
-                    isNavigatingFromSearchRef.current = false
-                  }, 100) // Small delay to ensure scroll completes
-                }
-              }, 300)
-            } else {
-              // No pending navigation - reset the flag
-              isNavigatingFromSearchRef.current = false
-              
-              if (searchQuery.trim() && isSearchMode) {
-                // Highlight all matches if search query is present but no specific position
-                setTimeout(() => {
-                  if (editor && !editor.isDestroyed) {
-                    highlightAllMatches(editor, searchQuery)
                   }
-                }, 200)
-              }
+                }
+              }, 200)
             }
             
-            // Handle focus and cursor position based on scenario
-            // Skip focus if we're navigating from search results OR have pending search navigation
-            if (!isNavigatingFromSearchRef.current && !pendingNav) {
-              // Check if document is empty (new file)
-              const isEmpty = !content || 
-                             (typeof content === 'object' && 
-                              (!content.content || 
-                               (Array.isArray(content.content) && content.content.length === 0) ||
-                               (Array.isArray(content.content) && content.content.length === 1 && 
-                                content.content[0]?.type === 'paragraph' && 
-                                (!content.content[0]?.content || content.content[0]?.content.length === 0))))
+            // Restore focus if this is a newly created document
+            // Only focus if we're navigating from search (not from clicking in file explorer)
+            if (isNewlyCreatedDocRef.current && !isNavigatingFromSearchRef.current) {
+              // Focus after a delay to ensure editor is ready
+              focusTimeoutId = setTimeout(() => {
+                if (isCancelled) return
+                const focusEditor = getEditor(document.id)
+                if (focusEditor && !focusEditor.isDestroyed && focusEditor.view) {
+                  try {
+                    const editorElement = focusEditor.view.dom as HTMLElement
+                    if (editorElement) {
+                      editorElement.focus()
+                      focusEditor.commands.focus('start')
+                    }
+                  } catch (e) {
+                    // Ignore focus errors
+                  }
+                }
+                // Clear the flag after focusing
+                isNewlyCreatedDocRef.current = false
+              }, 100)
+            } else if (isNewlyCreatedDocRef.current) {
+              // Clear flag even if we're not focusing (navigating from search)
+              isNewlyCreatedDocRef.current = false
+            }
+            
+            // Clear navigating flag after handling
+              isNavigatingFromSearchRef.current = false
               
-              // Check if this is a new tab (document not in openTabs before)
-              const isNewTab = !openTabs.some(tab => tab.id === document.id)
-              
-              if (isEmpty || isNewlyCreatedDocRef.current) {
-                // Scenario 1: New file - autofocus at top
-                // Also handle newly created documents (even if not empty, they should be focused)
-                const focusEditor = (attempt: number = 0) => {
-                  if (isCancelled || attempt > 5) {
-                    // Clear the flag even if focus failed
-                    isNewlyCreatedDocRef.current = false
+            // If search mode is active and we have a query, highlight matches
+            if (isSearchMode && searchQuery.trim()) {
+                setTimeout(() => {
+                  const highlightEditor = getEditor(document.id)
+                  if (highlightEditor && !highlightEditor.isDestroyed) {
+                    highlightAllMatches(highlightEditor, searchQuery)
+                  }
+              }, 300)
+            }
+          } catch (error) {
+            console.error('Failed to parse document content:', error)
+          }
+        }, 100) // Increased delay to ensure full render cycle completion
+      })
+    
+    return () => {
+      isCancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
+      if (focusTimeoutId) clearTimeout(focusTimeoutId)
+    }
+  }, [document?.id, document?.content, searchQuery, openTabs])
+
+  // Automatically highlight all matches when search query changes and search mode is active
+  // Also clear highlights when search mode is turned off
+  useEffect(() => {
+    if (!document) return
+    const currentEditor = getEditor(document.id)
+    if (!currentEditor) return
+    
+    if (isSearchMode && searchQuery.trim()) {
+      // Wait a bit for editor to be ready, then highlight all matches
+      const timeoutId = setTimeout(() => {
+        if (currentEditor && !currentEditor.isDestroyed) {
+          highlightAllMatches(currentEditor, searchQuery)
+        }
+      }, 300)
+      
+      return () => clearTimeout(timeoutId)
+    } else {
+      // Clear highlights when search mode is off or query is empty
+      // This ensures ALL temporary highlights are cleared, not just in current document
+      // Use a small delay to ensure editor is ready
+      const clearTimeoutId = setTimeout(() => {
+        if (currentEditor && !currentEditor.isDestroyed) {
+          clearSearchHighlights(currentEditor)
+        }
+      }, 100)
+      
+      return () => clearTimeout(clearTimeoutId)
+    }
+  }, [searchQuery, isSearchMode, document?.id, theme])
+  
+  // Additional effect: Clear highlights whenever search mode is turned off
+  // This ensures highlights are cleared even when switching documents
+  useEffect(() => {
+    if (!document) return
+    const currentEditor = getEditor(document.id)
+    if (!currentEditor) return
+    
+    if (!isSearchMode) {
+      // Search mode is off - clear highlights immediately
+      const clearTimeoutId = setTimeout(() => {
+        if (currentEditor && !currentEditor.isDestroyed) {
+          clearSearchHighlights(currentEditor)
+        }
+      }, 50)
+      
+      return () => clearTimeout(clearTimeoutId)
+    }
+  }, [isSearchMode, document?.id])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Save AI panel state to localStorage when open/close state changes
+  // (width changes are handled in handlePanelResize with debouncing)
+  useEffect(() => {
+    saveAIPanelState({
+      isOpen: isAIPanelOpen,
+      width: aiPanelWidth
+    })
+  }, [isAIPanelOpen])
+
+  // Restore panel sizes when AI panel state changes
+  // Note: This should NOT run when fileExplorerSize changes (user resizing file explorer)
+  useEffect(() => {
+    // Don't interfere if user is actively resizing either panel
+    if (isUserResizingRef.current || isFileExplorerResizingRef.current) return
+    
+    const timer = setTimeout(() => {
+      if (isAIPanelOpen && aiPanelRef.current && editorPanelRef.current && fileExplorerPanelRef.current) {
+        // AI panel is opening
+        // Ensure File Explorer keeps its size
+        const currentFileExplorerSize = fileExplorerPanelRef.current.getSize()
+        if (Math.abs(currentFileExplorerSize - fileExplorerSize) > 0.1) {
+          fileExplorerPanelRef.current.resize(fileExplorerSize)
+        }
+      }
+    }, 100)
+    
+    return () => clearTimeout(timer)
+  }, [isAIPanelOpen, fileExplorerSize])
+
+  // Handle app close: restore documents to last saved state
+  useEffect(() => {
+    const handleWindowWillClose = async () => {
+      
+      // Reload current document from backend to restore to last saved state
+      if (document?.id) {
+        const editor = getEditor(document.id)
+        if (editor && !editor.isDestroyed) {
+          try {
+            // Reload document from backend
+            const savedDoc = await documentApi.get(document.id)
+            if (savedDoc && editor && !editor.isDestroyed) {
+              // Update editor content to match saved state (this discards unsaved changes)
+              editor.commands.setContent(savedDoc.content || '')
+            }
+          } catch (error) {
+            console.error('Failed to restore document on close:', error)
+          }
+        }
+      }
+    }
+
+    // Listen for window-will-close event from Electron main process
+    if (window.electron) {
+      const unsubscribe = window.electron.on('window-will-close', handleWindowWillClose)
+      return () => {
+        if (unsubscribe) unsubscribe()
+      }
+    }
+    
+    // Fallback to beforeunload for non-Electron environments (e.g., web)
+    const handleBeforeUnload = async () => {
+      // Save current document before leaving
+      if (document?.id) {
+        // Clear any pending debounced saves and save immediately
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current)
+          saveTimeoutRef.current = null
+        }
+        await saveDocumentImmediately(document.id)
+      }
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [document?.id, saveDocumentImmediately])
+
+  // Search results use temporary highlights (Chrome-style) that are not saved to the document
+
+  // Update editor content when document changes
+  useEffect(() => {
+    if (!document) {
+      lastContentRef.current = ''
+      currentDocIdRef.current = null
+      currentDocTitleRef.current = null
                     return
                   }
                   
-                  if (editor && !editor.isDestroyed && editor.view) {
-                    const editorElement = editor.view.dom as HTMLElement
-                    
-                    if (editorElement) {
-                      editorElement.focus()
-                      
-                      if (!editorElement.isContentEditable) {
-                        editorElement.contentEditable = 'true'
-                      }
-                      
-                      // Focus at the beginning (top)
-                      try {
-                        editor.commands.focus('start')
-                        // Clear the flag after successful focus
-                        isNewlyCreatedDocRef.current = false
-                      } catch (e) {
-                        // Ignore focus errors, but still clear the flag
-                        isNewlyCreatedDocRef.current = false
-                      }
-                    } else {
-                      // Retry if editor element not ready
-                      setTimeout(() => focusEditor(attempt + 1), 50)
-                    }
-                  } else {
-                    // Retry if editor not ready
-                    setTimeout(() => focusEditor(attempt + 1), 50)
-                  }
+    // Get the editor instance for this document
+    const editor = getEditor(document.id)
+    if (!editor) return
+    
+    // Note: In multi-editor architecture, each document has its own editor instance
+    // Content is set when the editor is created, not when switching documents
+    // This effect is kept for backward compatibility but may not be needed in the new architecture
+    
+    // Skip if content hasn't changed AND document ID is the same
+    const documentChanged = currentDocIdRef.current !== document.id
+    const contentChanged = lastContentRef.current !== document.content
+    
+    // If only title changed (not content or ID), skip editor update
+    if (!documentChanged && !contentChanged) {
+      currentDocTitleRef.current = document.title
+      return
+    }
+    
+    // Update current doc ID and title refs
+    currentDocIdRef.current = document.id
+    currentDocTitleRef.current = document.title
+    
+    // Capture current document in closure to avoid stale reference
+    const docContent = document.content
+    
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    let focusTimeoutId: ReturnType<typeof setTimeout> | null = null
+    let isCancelled = false
+    
+    // Use queueMicrotask + setTimeout to ensure we're completely outside React's render
+    queueMicrotask(() => {
+      if (isCancelled) return
+      
+      // Additional delay to ensure DOM is ready and React has finished
+      timeoutId = setTimeout(() => {
+        if (isCancelled) return
+        
+         try {
+          const content = JSON.parse(docContent)
+          
+            // Get the editor instance for this document
+            // In multi-editor architecture, we get the editor from the map
+            const currentEditor = getEditor(document.id)
+            if (!currentEditor || currentEditor.isDestroyed || !currentEditor.view) {
+              return
+            }
+            
+            // Always clear search highlights before setting new content
+            // This ensures highlights don't persist when navigating between documents
+            clearSearchHighlights(currentEditor)
+            
+            // Check if this is a new tab (document not in openTabs before)
+            const isNewTab = !openTabs.some(tab => tab.id === document.id)
+            
+            // If this is a newly created document, focus immediately before setting content
+            // This prevents placeholder from showing
+            if (isNewlyCreatedDocRef.current && currentEditor && !currentEditor.isDestroyed && currentEditor.view) {
+              try {
+                const editorElement = currentEditor.view.dom as HTMLElement
+                if (editorElement) {
+                  editorElement.focus()
+                  currentEditor.commands.focus('start')
                 }
-                
-                requestAnimationFrame(() => {
-                  if (isCancelled) return
-                  setTimeout(() => focusEditor(0), 50)
-                })
-              } else if (isNewTab) {
-                // Scenario 2: Opening existing file (no tab) - show top, no autofocus
-                // Scroll position is already set to 0 before and after setContent above
-                // Don't focus - let user click to focus
-              } else {
-                // Scenario 3: Switching to existing tab - restore scroll position, no autofocus
-                // Scroll position is already restored before and after setContent above
-                // Don't focus - let user click to focus
+                      } catch (e) {
+                // Ignore focus errors
               }
             }
+            
+            // Restore scroll position BEFORE setting content to prevent any scrolling animation
+            // Only restore scroll position if this is NOT a new tab (i.e., switching to existing tab)
+            // If it's a new tab, show top of document instead
+            const savedScrollTop = (() => {
+              // If it's a new tab, don't restore scroll position - show top instead
+              if (isNewTab) {
+                return null
+              }
+              try {
+                const saved = localStorage.getItem(`documentScroll_${document.id}`)
+                return saved ? parseFloat(saved) : null
+              } catch {
+                return null
+              }
+            })()
+            
+            // Get scroll container and disable scroll behavior temporarily to prevent animation
+            const scrollContainer = currentEditor.view.dom.closest('.scrollable-container') as HTMLElement
+            let originalScrollBehavior: string | null = null
+            
+            if (scrollContainer) {
+              // Save original scroll-behavior and set to 'auto' to disable smooth scrolling
+              originalScrollBehavior = scrollContainer.style.scrollBehavior || ''
+              scrollContainer.style.scrollBehavior = 'auto'
+              
+              // Set scroll position BEFORE setting content to prevent any scroll animation
+              if (savedScrollTop !== null && savedScrollTop > 0) {
+                scrollContainer.scrollTop = savedScrollTop
+              } else if (isNewTab) {
+                scrollContainer.scrollTop = 0
+              }
+            }
+            
+            // Note: In multi-editor architecture, each editor instance has its own content
+            // Content is set when the editor is created in DocumentEditorWrapper
+            // This setContent call is only needed if document content is updated from server
+            // and the editor already exists
+            if (contentChanged) {
+              // Only update content if it changed from server
+              currentEditor.commands.setContent(content, { emitUpdate: false })
+            }
+            
+            lastContentRef.current = docContent
+            
+            // Clear search highlights after setting content (in case they were preserved)
+            // This ensures that when switching back to a document, old highlights are cleared
+            const docEditorRef = getDocumentEditorRef(document.id)
+            if (docEditorRef.current) {
+              docEditorRef.current.clearSearch()
+            }
+            
+            // Auto-focus editor if document is empty (newly created or empty existing document)
+            // This provides better UX - user can immediately start typing
+            const isEmpty = isDocumentEmpty(content)
+            if (isEmpty && currentEditor && !currentEditor.isDestroyed && currentEditor.view) {
+              // Use requestAnimationFrame to ensure content is fully rendered before focusing
+              requestAnimationFrame(() => {
+                if (isCancelled) return
+                const focusEditor = getEditor(document.id)
+                if (focusEditor && !focusEditor.isDestroyed && focusEditor.view) {
+                  try {
+                    const editorElement = focusEditor.view.dom as HTMLElement
+                    if (editorElement) {
+                      editorElement.focus()
+                      focusEditor.commands.focus('start')
+                    }
+                  } catch (e) {
+                    // Ignore focus errors
+                  }
+                }
+              })
+            }
+            
+            // Restore scroll position immediately after content is set (synchronously, no animation)
+            if (scrollContainer) {
+              // Set scroll position synchronously immediately after setContent
+              if (savedScrollTop !== null && savedScrollTop > 0) {
+                scrollContainer.scrollTop = savedScrollTop
+              } else if (isNewTab) {
+                scrollContainer.scrollTop = 0
+              }
+              
+              // Use requestAnimationFrame to ensure DOM layout is complete, then set scroll again
+              // This ensures scroll position is correct even if content layout changed
+              // Keep scroll-behavior as 'auto' during this to prevent any animation
+                requestAnimationFrame(() => {
+                if (isCancelled || !currentEditor || currentEditor.isDestroyed || !scrollContainer) {
+                  // Restore scroll-behavior even if cancelled
+                  if (originalScrollBehavior !== null) {
+                    scrollContainer.style.scrollBehavior = originalScrollBehavior || ''
+                  }
+                  return
+                }
+                
+                // Ensure scroll-behavior is still 'auto' before setting scroll
+                scrollContainer.style.scrollBehavior = 'auto'
+                
+                // Set scroll position synchronously (no animation)
+                if (savedScrollTop !== null && savedScrollTop > 0) {
+                  scrollContainer.scrollTop = savedScrollTop
+              } else if (isNewTab) {
+                  scrollContainer.scrollTop = 0
+                }
+                
+                // Restore original scroll-behavior after setting scroll position
+                // Use a tiny delay to ensure scroll position is applied
+                setTimeout(() => {
+                  if (scrollContainer && originalScrollBehavior !== null) {
+                    scrollContainer.style.scrollBehavior = originalScrollBehavior || ''
+                  }
+                }, 0)
+              })
+            }
+            
+            // After content is set, clear highlights again if search mode is off
+            // This handles cases where content from server might have highlights
+            if (!isSearchMode || !searchQuery.trim()) {
+              setTimeout(() => {
+                if (currentEditor && !currentEditor.isDestroyed) {
+                  clearSearchHighlights(currentEditor)
+                }
+              }, 50)
+            }
+            
+            // Check if we have a pending search navigation
+            // First check the ref
+            let pendingNav = pendingSearchNavRef.current
+            
+            // If ref is null, try to restore from sessionStorage (backup)
+            if (!pendingNav) {
+              try {
+                const stored = sessionStorage.getItem('pendingSearchNav')
+                if (stored) {
+                  const parsed = JSON.parse(stored)
+                  
+                  // Only use if it matches current document
+                  if (parsed.targetDocId === document.id) {
+                    pendingNav = { query: parsed.query, position: parsed.position }
+                    // Also restore to ref for consistency
+                    pendingSearchNavRef.current = pendingNav
+              } else {
+                    // Clear stale sessionStorage entry
+                    sessionStorage.removeItem('pendingSearchNav')
+                  }
+                }
+              } catch (e) {
+                // Silently fail
+              }
+            }
+            
+            // If we have pending navigation, execute it after content is set
+            if (pendingNav && pendingNav.query && pendingNav.position !== undefined) {
+              // Use a small delay to ensure editor is ready
+              setTimeout(() => {
+                const navEditor = getEditor(document.id)
+                if (navEditor && !navEditor.isDestroyed) {
+                  navigateToMatch(navEditor, pendingNav!.query, pendingNav!.position)
+                  // Clear pending nav since we've used it
+                  pendingSearchNavRef.current = null
+                  try {
+                    sessionStorage.removeItem('pendingSearchNav')
+                  } catch (e) {
+                    // Silently fail
+                  }
+                }
+              }, 200)
+            }
+            
+            // Restore focus if this is a newly created document
+            // Only focus if we're navigating from search (not from clicking in file explorer)
+            if (isNewlyCreatedDocRef.current && !isNavigatingFromSearchRef.current) {
+              // Focus after a delay to ensure editor is ready
+              focusTimeoutId = setTimeout(() => {
+                if (isCancelled) return
+                const focusEditor = getEditor(document.id)
+                if (focusEditor && !focusEditor.isDestroyed && focusEditor.view) {
+                  try {
+                    const editorElement = focusEditor.view.dom as HTMLElement
+                    if (editorElement) {
+                      editorElement.focus()
+                      focusEditor.commands.focus('start')
+                    }
+                  } catch (e) {
+                    // Ignore focus errors
+                  }
+                }
+                // Clear the flag after focusing
+                isNewlyCreatedDocRef.current = false
+              }, 100)
+            } else if (isNewlyCreatedDocRef.current) {
+              // Clear flag even if we're not focusing (navigating from search)
+              isNewlyCreatedDocRef.current = false
+            }
+            
+            // Clear navigating flag after handling
+            isNavigatingFromSearchRef.current = false
+            
+            // If search mode is active and we have a query, highlight matches
+            if (isSearchMode && searchQuery.trim()) {
+              setTimeout(() => {
+                const highlightEditor = getEditor(document.id)
+                if (highlightEditor && !highlightEditor.isDestroyed) {
+                  highlightAllMatches(highlightEditor, searchQuery)
+                }
+              }, 300)
           }
         } catch (error) {
           console.error('Failed to parse document content:', error)
@@ -2627,18 +4226,20 @@ export default function Layout() {
       if (timeoutId) clearTimeout(timeoutId)
       if (focusTimeoutId) clearTimeout(focusTimeoutId)
     }
-  }, [document?.id, document?.content, editor, searchQuery, openTabs])
+  }, [document?.id, document?.content, searchQuery, openTabs])
 
   // Automatically highlight all matches when search query changes and search mode is active
   // Also clear highlights when search mode is turned off
   useEffect(() => {
-    if (!editor || !document) return
+    if (!document) return
+    const currentEditor = getEditor(document.id)
+    if (!currentEditor) return
     
     if (isSearchMode && searchQuery.trim()) {
       // Wait a bit for editor to be ready, then highlight all matches
       const timeoutId = setTimeout(() => {
-        if (editor && !editor.isDestroyed) {
-          highlightAllMatches(editor, searchQuery)
+        if (currentEditor && !currentEditor.isDestroyed) {
+          highlightAllMatches(currentEditor, searchQuery)
         }
       }, 300)
       
@@ -2648,31 +4249,127 @@ export default function Layout() {
       // This ensures ALL temporary highlights are cleared, not just in current document
       // Use a small delay to ensure editor is ready
       const clearTimeoutId = setTimeout(() => {
-        if (editor && !editor.isDestroyed) {
-          clearSearchHighlights(editor)
+        if (currentEditor && !currentEditor.isDestroyed) {
+          clearSearchHighlights(currentEditor)
         }
       }, 100)
       
       return () => clearTimeout(clearTimeoutId)
     }
-  }, [searchQuery, isSearchMode, editor, document?.id, theme])
+  }, [searchQuery, isSearchMode, document?.id, theme])
   
   // Additional effect: Clear highlights whenever search mode is turned off
   // This ensures highlights are cleared even when switching documents
   useEffect(() => {
-    if (!editor || !document) return
+    if (!document) return
+    const currentEditor = getEditor(document.id)
+    if (!currentEditor) return
     
     if (!isSearchMode) {
       // Search mode is off - clear highlights immediately
       const clearTimeoutId = setTimeout(() => {
-        if (editor && !editor.isDestroyed) {
-          clearSearchHighlights(editor)
+        if (currentEditor && !currentEditor.isDestroyed) {
+          clearSearchHighlights(currentEditor)
         }
       }, 50)
       
       return () => clearTimeout(clearTimeoutId)
     }
-  }, [isSearchMode, editor, document?.id])
+  }, [isSearchMode, document?.id])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Save AI panel state to localStorage when open/close state changes
+  // (width changes are handled in handlePanelResize with debouncing)
+  useEffect(() => {
+    saveAIPanelState({
+      isOpen: isAIPanelOpen,
+      width: aiPanelWidth
+    })
+  }, [isAIPanelOpen])
+
+  // Restore panel sizes when AI panel state changes
+  // Note: This should NOT run when fileExplorerSize changes (user resizing file explorer)
+  useEffect(() => {
+    // Don't interfere if user is actively resizing either panel
+    if (isUserResizingRef.current || isFileExplorerResizingRef.current) return
+    
+    const timer = setTimeout(() => {
+      if (isAIPanelOpen && aiPanelRef.current && editorPanelRef.current && fileExplorerPanelRef.current) {
+        // AI panel is opening
+        // Ensure File Explorer keeps its size
+        const currentFileExplorerSize = fileExplorerPanelRef.current.getSize()
+        if (Math.abs(currentFileExplorerSize - fileExplorerSize) > 0.1) {
+          fileExplorerPanelRef.current.resize(fileExplorerSize)
+        }
+      }
+    }, 100)
+    
+    return () => clearTimeout(timer)
+  }, [isAIPanelOpen, fileExplorerSize])
+
+  // Handle keyboard shortcuts and other effects
+  // Keyboard shortcuts are handled in the keyboard event handler below
+
+  // Render the layout
+
+  // Automatically highlight all matches when search query changes and search mode is active
+  // Also clear highlights when search mode is turned off
+  useEffect(() => {
+    if (!document?.id) return
+    const currentEditor = getEditor(document.id)
+    if (!currentEditor) return
+    
+    if (isSearchMode && searchQuery.trim()) {
+      // Wait a bit for editor to be ready, then highlight all matches
+      const timeoutId = setTimeout(() => {
+        const editorInstance = getEditor(document.id)
+        if (editorInstance && !editorInstance.isDestroyed) {
+          highlightAllMatches(editorInstance, searchQuery)
+        }
+      }, 300)
+      
+      return () => clearTimeout(timeoutId)
+    } else {
+      // Clear highlights when search mode is off or query is empty
+      // This ensures ALL temporary highlights are cleared, not just in current document
+      // Use a small delay to ensure editor is ready
+      const clearTimeoutId = setTimeout(() => {
+        const editorInstance = getEditor(document.id)
+        if (editorInstance && !editorInstance.isDestroyed) {
+          clearSearchHighlights(editorInstance)
+        }
+      }, 100)
+      
+      return () => clearTimeout(clearTimeoutId)
+    }
+  }, [searchQuery, isSearchMode, document?.id, theme])
+  
+  // Additional effect: Clear highlights whenever search mode is turned off
+  // This ensures highlights are cleared even when switching documents
+  useEffect(() => {
+    if (!document) return
+    const currentEditor = getEditor(document.id)
+    if (!currentEditor) return
+    
+    if (!isSearchMode) {
+      // Search mode is off - clear highlights immediately
+      const clearTimeoutId = setTimeout(() => {
+        if (currentEditor && !currentEditor.isDestroyed) {
+          clearSearchHighlights(currentEditor)
+        }
+      }, 50)
+      
+      return () => clearTimeout(clearTimeoutId)
+    }
+  }, [isSearchMode, document?.id])
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -2840,6 +4537,8 @@ export default function Layout() {
   // Show shell UI immediately - no full-screen loading blocker
   // Skeletons will handle loading states for progressive reveal
 
+  console.log('[Layout] Render - document:', document?.id, 'isLoadingDocument:', isLoadingDocument, 'documents.length:', documents.length, 'isLoadingDocuments:', isLoadingDocuments, 'projectName:', projectName, 'bgColor:', bgColor)
+
   return (
     <div style={{ 
       height: '100vh', 
@@ -2855,7 +4554,7 @@ export default function Layout() {
         onTitleUpdate={handleTitleUpdate}
         documents={documents}
         projectName={projectName}
-        editor={editor}
+        editor={document?.id ? getEditor(document.id) : null}
         onToggleFileExplorer={() => {
           if (fileExplorerPanelRef.current) {
             const currentSize = fileExplorerPanelRef.current.getSize()
@@ -2894,7 +4593,7 @@ export default function Layout() {
         overflow: 'visible'
       }}>
         <Toolbar 
-          editor={editor}
+          editor={document?.id ? getEditor(document.id) : null}
           onExport={handleExport}
           documents={documents}
           projectName={projectName}
@@ -2916,8 +4615,11 @@ export default function Layout() {
                   sessionStorage.removeItem('searchQuery')
                   setSearchQuery('') // Clear the query state
                   // Clear highlights immediately when search mode is turned off
-                  if (editor && !editor.isDestroyed) {
-                    clearSearchHighlights(editor)
+                  if (document?.id) {
+                    const currentEditor = getEditor(document.id)
+                    if (currentEditor && !currentEditor.isDestroyed) {
+                      clearSearchHighlights(currentEditor)
+                    }
                   }
                 }
               } catch (e) {
@@ -3036,10 +4738,13 @@ export default function Layout() {
             
             {/* File Explorer Content */}
             <div style={{ flex: 1, overflow: 'hidden', backgroundColor: bgColor, padding: 0, margin: 0 }}>
-              {isLoadingDocuments ? (
-                <FileExplorerSkeleton projectName={projectName} />
-              ) : (
-                <FileExplorer
+              {(() => {
+                console.log('[Layout] FileExplorer render check - isLoadingDocuments:', isLoadingDocuments, 'documents.length:', documents.length, 'projectName:', projectName)
+                if (isLoadingDocuments) {
+                  return <FileExplorerSkeleton projectName={projectName} />
+                }
+                return (
+                  <FileExplorer
                   documents={documents}
                   currentDocumentId={document?.id || null}
                   onDocumentClick={handleDocumentClick}
@@ -3061,7 +4766,14 @@ export default function Layout() {
                       )
                     )
                   }}
-                  onSelectedFolderChange={setSelectedFolder}
+                  onSelectedFolderChange={(folder) => {
+                    console.log('[Layout] onSelectedFolderChange called with:', folder, 'current selectedFolder:', selectedFolder)
+                    try {
+                      setSelectedFolder(folder)
+                    } catch (error) {
+                      console.error('[Layout] Error setting selectedFolder:', error)
+                    }
+                  }}
                   onFileUploaded={async (newDoc, isBatchUpload = false) => {
                     // Optimistically add the new document to the list without full reload
                     // This avoids re-rendering the entire file explorer and prevents deleted files from reappearing
@@ -3129,7 +4841,8 @@ export default function Layout() {
                     }
                   }}
                 />
-              )}
+                )
+              })()}
             </div>
           </div>
         </Panel>
@@ -3147,9 +4860,8 @@ export default function Layout() {
         
         {/* Editor Panel */}
         <Panel 
-          id="editor-panel"
-          order={2}
           ref={editorPanelRef}
+          order={2}
           defaultSize={isAIPanelOpen 
             ? ((100 - fileExplorerSize) - ((aiPanelWidth / 100) * (100 - fileExplorerSize))) 
             : (100 - fileExplorerSize)
@@ -3194,18 +4906,33 @@ export default function Layout() {
                   )
                 })}
               
-              {/* Render DocumentEditor for non-PDF documents */}
-              {document && !document.title.toLowerCase().endsWith('.pdf') && (
-                <DocumentEditor 
-                  ref={documentEditorRef}
-                  document={document}
-                  editor={editor}
-                  onDocumentChange={setDocument}
-                  showToolbarOnly={false}
-                  isAIPanelOpen={isAIPanelOpen}
-                  aiPanelWidth={aiPanelWidth}
-                />
-              )}
+              {/* Render DocumentEditor for non-PDF documents - one for each open tab */}
+              {openTabs
+                .filter(tab => !tab.title.toLowerCase().endsWith('.pdf'))
+                .map(tab => {
+                  // Find the document for this tab (use current document if it's the active one)
+                  const tabDocument = document?.id === tab.id ? document : (documents.find(doc => doc.id === tab.id) || tab)
+                  const isActive = activeTabId === tab.id
+                  
+                  const tabDocumentEditorRef = getDocumentEditorRef(tab.id)
+                  
+                  return (
+                    <DocumentEditorWrapper
+                      key={tab.id}
+                      document={tabDocument}
+                      isActive={isActive}
+                      onEditorCreated={(docId, editor) => {
+                        setEditor(docId, editor)
+                      }}
+                      onDocumentChange={setDocument}
+                      isAIPanelOpen={isAIPanelOpen}
+                      aiPanelWidth={aiPanelWidth}
+                      createEditorConfigFn={createEditorConfig}
+                      editorRef={tabDocumentEditorRef}
+                      onUpdate={handleEditorUpdate}
+                    />
+                  )
+                })}
               
             </div>
           )}
@@ -3267,7 +4994,6 @@ export default function Layout() {
       
       {/* Word Count Modal */}
       <WordCountModal
-        editor={editor}
         documents={documents}
         currentDocument={document}
         isOpen={showWordCountModal}
