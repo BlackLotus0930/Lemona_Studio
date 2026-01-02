@@ -8,11 +8,12 @@ interface TextRephrasePopupProps {
   onReplace: (newText: string) => void
   onClose: () => void
   onInputFocus?: (isFocused: boolean) => void
+  onReadSelection?: () => { text: string; range: { from: number; to: number } | null }
 }
 
 type ActionType = 'improve' | 'rephrase' | 'lengthen' | 'shorten' | 'custom'
 
-export default function TextRephrasePopup({ selectedText, position, onReplace, onClose, onInputFocus }: TextRephrasePopupProps) {
+export default function TextRephrasePopup({ selectedText, position, onReplace, onClose, onInputFocus, onReadSelection }: TextRephrasePopupProps) {
   const { theme } = useTheme()
   const [isExpanded, setIsExpanded] = useState(false)
   const [activeAction, setActiveAction] = useState<ActionType>('improve')
@@ -107,6 +108,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
     }
   }, [isExpanded])
 
+
   // Reset position locks when popup closes
   useEffect(() => {
     return () => {
@@ -188,7 +190,20 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
 
       if (!instruction.trim()) return
 
-      const result = await aiApi.rephraseText(selectedText, instruction)
+      // Improve Button: 点击时才读取 selection
+      let textToProcess = selectedText
+      if (!textToProcess && onReadSelection) {
+        const selection = onReadSelection()
+        textToProcess = selection.text
+      }
+      
+      if (!textToProcess || textToProcess.trim().length === 0) {
+        setError('No text selected')
+        setIsLoading(false)
+        return
+      }
+
+      const result = await aiApi.rephraseText(textToProcess, instruction)
       let improved = typeof result === 'string' ? result : (result.data || result)
       
       // Remove any "Next step" or follow-up text that might still appear
@@ -216,7 +231,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
     } finally {
       setIsLoading(false)
     }
-  }, [selectedText])
+  }, [selectedText, onReadSelection])
 
   // Handle expand and improve
   const handleExpandAndImprove = useCallback(() => {
@@ -240,6 +255,47 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
     window.addEventListener('rephrase-popup-open', handlePopupOpen)
     return () => window.removeEventListener('rephrase-popup-open', handlePopupOpen)
   }, [isExpanded, handleExpandAndImprove])
+
+  // 调整 popup 位置，防止被屏幕下缘遮挡（距离底部 30px）
+  const adjustPositionForBottom = useCallback(() => {
+    if (!popupRef.current || !isExpanded) {
+      return
+    }
+
+    requestAnimationFrame(() => {
+      if (!popupRef.current) return
+
+      const rect = popupRef.current.getBoundingClientRect()
+      const windowHeight = window.innerHeight
+      const bottomMargin = 30 // 距离下屏幕 30px
+
+      // 如果 popup 底部超出屏幕，向上调整
+      if (rect.bottom > windowHeight - bottomMargin) {
+        const overflow = rect.bottom - (windowHeight - bottomMargin)
+        setAdjustedPosition(prev => ({
+          ...prev,
+          y: prev.y - overflow
+        }))
+      }
+    })
+  }, [isExpanded])
+
+  // 展开时检查位置（还没生成）
+  useEffect(() => {
+    if (isExpanded && !improvedText && !isLoading) {
+      adjustPositionForBottom()
+    }
+  }, [isExpanded, improvedText, isLoading, adjustPositionForBottom])
+
+  // 生成完成后再次检查位置
+  useEffect(() => {
+    if (improvedText && isExpanded) {
+      // 等待内容渲染完成
+      setTimeout(() => {
+        adjustPositionForBottom()
+      }, 100)
+    }
+  }, [improvedText, isExpanded, adjustPositionForBottom])
 
   // Keyboard shortcuts
   useEffect(() => {

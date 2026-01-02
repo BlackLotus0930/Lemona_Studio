@@ -12,6 +12,7 @@
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
+    "@floating-ui/react": "^0.27.16",
     "@mui/icons-material": "^5.15.0",
     "@mui/material": "^5.15.0",
     "@tiptap/extension-color": "^3.14.0",
