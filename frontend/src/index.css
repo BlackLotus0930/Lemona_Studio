@@ -341,6 +341,12 @@ code {
   list-style-type: decimal;
 }
 
+.ProseMirror ol li::marker,
+.ProseMirror ol ol li::marker,
+.ProseMirror ol ol ol li::marker {
+  font-size: 0.90em;
+}
+
 .ProseMirror li {
   margin: 0.25em 0;
   padding-left: 0.25em;
