@@ -249,6 +249,20 @@ export default function ChatHistoryDropdown({
     setEditingName('')
   }
 
+  // Handle delete
+  const handleDelete = async (chatId: string) => {
+    // Call the parent delete handler
+    await onDeleteChat(chatId)
+    
+    // Remove from local state to update the modal immediately
+    setLoadedChats(prevChats => prevChats.filter(chat => chat.id !== chatId))
+    
+    // Clear editing state if this chat was being edited
+    if (editingChatId === chatId) {
+      setEditingChatId(null)
+    }
+  }
+
   // Handle key press in edit input
   const handleEditKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -318,12 +332,7 @@ export default function ChatHistoryDropdown({
                   }
                 }}
                 onEdit={() => handleEdit(item.id, item.name)}
-                onDelete={() => {
-                  onDeleteChat(item.id)
-                  if (editingChatId === item.id) {
-                    setEditingChatId(null)
-                  }
-                }}
+                onDelete={() => handleDelete(item.id)}
                 onSaveEdit={handleSaveEdit}
                 onEditNameChange={setEditingName}
                 onEditKeyDown={handleEditKeyDown}
@@ -369,12 +378,7 @@ export default function ChatHistoryDropdown({
                   }
                 }}
                 onEdit={() => handleEdit(item.id, item.name)}
-                onDelete={() => {
-                  onDeleteChat(item.id)
-                  if (editingChatId === item.id) {
-                    setEditingChatId(null)
-                  }
-                }}
+                onDelete={() => handleDelete(item.id)}
                 onSaveEdit={handleSaveEdit}
                 onEditNameChange={setEditingName}
                 onEditKeyDown={handleEditKeyDown}
@@ -420,12 +424,7 @@ export default function ChatHistoryDropdown({
                   }
                 }}
                 onEdit={() => handleEdit(item.id, item.name)}
-                onDelete={() => {
-                  onDeleteChat(item.id)
-                  if (editingChatId === item.id) {
-                    setEditingChatId(null)
-                  }
-                }}
+                onDelete={() => handleDelete(item.id)}
                 onSaveEdit={handleSaveEdit}
                 onEditNameChange={setEditingName}
                 onEditKeyDown={handleEditKeyDown}
