@@ -296,6 +296,66 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     loadChatHistory()
   }, [document?.id]) // Only reload when document changes, not when activeChatId changes
 
+  // Auto-scroll active tab into view when it changes
+  useEffect(() => {
+    if (!activeChatId || !chatTabsScrollRef.current) return
+    
+    // Use setTimeout to ensure DOM has updated
+    const timeoutId = setTimeout(() => {
+      const container = chatTabsScrollRef.current
+      if (!container) return
+      
+      // Find the active tab element
+      const activeTab = container.querySelector(`[data-chat-id="${activeChatId}"]`) as HTMLElement
+      if (!activeTab) return
+      
+      // Get the container's bounding rect and the tab's bounding rect
+      const containerRect = container.getBoundingClientRect()
+      const tabRect = activeTab.getBoundingClientRect()
+      
+      // Calculate if the tab is hidden behind the buttons on the right
+      // The buttons take up approximately 120px (3 buttons * ~40px each)
+      const buttonsWidth = 120
+      const visibleRight = containerRect.right - buttonsWidth
+      const padding = 8 // Padding to ensure tab is fully visible
+      
+      // Check if tab is outside visible area
+      if (tabRect.right > visibleRight || tabRect.left < containerRect.left) {
+        // Calculate relative positions within the scrollable container
+        const tabLeftRelative = tabRect.left - containerRect.left + container.scrollLeft
+        const tabWidth = tabRect.width
+        const containerWidth = container.clientWidth
+        const currentScrollLeft = container.scrollLeft
+        
+        // Calculate desired scroll position
+        let desiredScrollLeft = currentScrollLeft
+        
+        // If tab is to the right of visible area (hidden behind buttons)
+        if (tabRect.right > visibleRight) {
+          // Scroll so tab's right edge is visible, accounting for buttons
+          desiredScrollLeft = tabLeftRelative + tabWidth - (containerWidth - buttonsWidth) + padding
+        } 
+        // If tab is to the left of visible area
+        else if (tabRect.left < containerRect.left) {
+          // Scroll so tab's left edge is visible
+          desiredScrollLeft = tabLeftRelative - padding
+        }
+        
+        // Ensure scroll position is within bounds
+        const maxScrollLeft = container.scrollWidth - containerWidth
+        desiredScrollLeft = Math.max(0, Math.min(desiredScrollLeft, maxScrollLeft))
+        
+        // Scroll to the desired position
+        container.scrollTo({
+          left: desiredScrollLeft,
+          behavior: 'smooth'
+        })
+      }
+    }, 50) // Small delay to ensure DOM update
+    
+    return () => clearTimeout(timeoutId)
+  }, [activeChatId, chats])
+
   // Add scroll detection and edge detection to show scrollbar
   useEffect(() => {
     const container = headerScrollRef.current
@@ -618,6 +678,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
             return (
             <div
               key={chat.id}
+              data-chat-id={chat.id}
               draggable
               onDragStart={(e) => handleChatDragStart(e, chat.id)}
               onDragOver={(e) => handleChatDragOver(e, chat.id)}
@@ -957,6 +1018,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
       <div style={{ flex: 1, overflow: 'hidden' }}>
         <ChatInterface 
           documentId={document?.id}
+          projectId={document?.projectId}
           chatId={activeChatId}
           documentContent={documentContent}
           isStreaming={isStreaming}

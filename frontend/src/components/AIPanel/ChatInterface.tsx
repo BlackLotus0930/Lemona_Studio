@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { AIChatMessage, ChatAttachment } from '@shared/types'
-import { aiApi, chatApi } from '../../services/api'
+import { AIChatMessage, ChatAttachment, Document } from '@shared/types'
+import { aiApi, chatApi, documentApi, settingsApi } from '../../services/api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTheme } from '../../contexts/ThemeContext'
@@ -30,9 +30,16 @@ import AttachFileIcon from '@mui/icons-material/AttachFile'
 import FormatQuoteIcon from '@mui/icons-material/FormatQuote'
 // @ts-ignore
 import StopIcon from '@mui/icons-material/Stop'
+// @ts-ignore
+import FolderIcon from '@mui/icons-material/Folder'
+// @ts-ignore
+import FileCopyOutlinedIcon from '@mui/icons-material/FileCopyOutlined'
+// @ts-ignore
+import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
 
 interface ChatInterfaceProps {
   documentId?: string
+  projectId?: string
   chatId: string
   documentContent?: string
   isStreaming: boolean
@@ -42,7 +49,7 @@ interface ChatInterfaceProps {
   onInputSet?: () => void
 }
 
-export default function ChatInterface({ documentId, chatId, documentContent, isStreaming, setIsStreaming, onFirstMessage, initialInput, onInputSet }: ChatInterfaceProps) {
+export default function ChatInterface({ documentId, projectId, chatId, documentContent, isStreaming, setIsStreaming, onFirstMessage, initialInput, onInputSet }: ChatInterfaceProps) {
   const { theme } = useTheme()
   const [messages, setMessages] = useState<AIChatMessage[]>([])
   const [input, setInput] = useState(initialInput || '')
@@ -100,6 +107,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const updateMessageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentAssistantMessageIdRef = useRef<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const mentionOverlayRef = useRef<HTMLDivElement>(null)
   const inputContainerRef = useRef<HTMLDivElement>(null)
   const unifiedContainerRef = useRef<HTMLDivElement>(null)
   const previousMessageCountRef = useRef<number>(0)
@@ -117,27 +125,34 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
   const scrollPositionsRef = useRef<Map<string, number>>(new Map())
   const previousChatIdRef = useRef<string | null>(null)
   
-  // Load Google API key from localStorage on mount
+  // @mention autocomplete state (inline)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
+  const [libraryDocuments, setLibraryDocuments] = useState<Document[]>([])
+  const mentionStartIndexRef = useRef<number>(-1)
+  const [currentSuggestion, setCurrentSuggestion] = useState<string | null>(null)
+  
+  // Load API keys from localStorage on mount and sync to main process
   useEffect(() => {
     try {
-      const savedKey = localStorage.getItem('googleApiKey')
-      if (savedKey) {
-        setGoogleApiKey(savedKey)
+      const googleKey = localStorage.getItem('googleApiKey') || undefined
+      const openaiKey = localStorage.getItem('openaiApiKey') || undefined
+      
+      if (googleKey) {
+        setGoogleApiKey(googleKey)
+      }
+      if (openaiKey) {
+        setOpenaiApiKey(openaiKey)
+      }
+      
+      // Sync both keys to main process for auto-indexing
+      if (googleKey || openaiKey) {
+        settingsApi.saveApiKeys(googleKey, openaiKey).catch((error) => {
+          console.error('Failed to sync API keys to main process:', error)
+        })
       }
     } catch (error) {
-      console.error('Failed to load Google API key:', error)
-    }
-  }, [])
-
-  // Load OpenAI API key from localStorage on mount
-  useEffect(() => {
-    try {
-      const savedKey = localStorage.getItem('openaiApiKey')
-      if (savedKey) {
-        setOpenaiApiKey(savedKey)
-      }
-    } catch (error) {
-      console.error('Failed to load OpenAI API key:', error)
+      console.error('Failed to load API keys:', error)
     }
   }, [])
 
@@ -179,8 +194,49 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     }
   }, [googleApiKey, openaiApiKey]) // Removed selectedModel from dependencies to avoid loops
 
-  // Save Google API key to localStorage
-  const handleApiKeyChange = (value: string) => {
+
+  // Load documents for @mention autocomplete (current project files + library)
+  useEffect(() => {
+    const loadMentionDocuments = async () => {
+      try {
+        const allDocuments = await documentApi.list()
+        
+        // Filter to only show:
+        // 1. Files in the library folder (doc.folder === 'library') - these are shared across projects
+        // 2. Files in the current project (doc.projectId === projectId AND folder is 'project' or undefined)
+        const mentionableDocs = allDocuments.filter((doc: Document) => {
+          // Exclude README files
+          if (doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md') {
+            return false
+          }
+          
+          // Include library documents (explicitly marked as library, available across all projects)
+          if (doc.folder === 'library') {
+            return true
+          }
+          
+          // Include documents from the current project only
+          // Must have matching projectId (folder can be 'project' or undefined/null)
+          if (projectId && doc.projectId === projectId) {
+            // This is a project file (already excluded library files above)
+            return true
+          }
+          
+          return false
+        })
+        
+        setLibraryDocuments(mentionableDocs)
+      } catch (error) {
+        console.error('Failed to load documents for mentions:', error)
+        setLibraryDocuments([])
+      }
+    }
+    loadMentionDocuments()
+  }, [projectId])
+
+
+  // Save Google API key to localStorage and main process
+  const handleApiKeyChange = async (value: string) => {
     setGoogleApiKey(value)
     try {
       if (value) {
@@ -188,19 +244,33 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
       } else {
         localStorage.removeItem('googleApiKey')
       }
+      // Also save to main process for auto-indexing (save both keys together)
+      try {
+        const currentOpenaiKey = localStorage.getItem('openaiApiKey') || undefined
+        await settingsApi.saveApiKeys(value || undefined, currentOpenaiKey)
+      } catch (error) {
+        console.error('Failed to save Google API key to main process:', error)
+      }
     } catch (error) {
       console.error('Failed to save Google API key:', error)
     }
   }
 
-  // Save OpenAI API key to localStorage
-  const handleOpenaiApiKeyChange = (value: string) => {
+  // Save OpenAI API key to localStorage and main process
+  const handleOpenaiApiKeyChange = async (value: string) => {
     setOpenaiApiKey(value)
     try {
       if (value) {
         localStorage.setItem('openaiApiKey', value)
       } else {
         localStorage.removeItem('openaiApiKey')
+      }
+      // Also save to main process for auto-indexing (save both keys together)
+      try {
+        const currentGoogleKey = localStorage.getItem('googleApiKey') || undefined
+        await settingsApi.saveApiKeys(currentGoogleKey, value || undefined)
+      } catch (error) {
+        console.error('Failed to save OpenAI API key to main process:', error)
       }
     } catch (error) {
       console.error('Failed to save OpenAI API key:', error)
@@ -472,6 +542,24 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     
     return () => {
       observer.disconnect()
+    }
+  }, [input])
+
+  // Sync overlay scroll position with textarea
+  useEffect(() => {
+    const textarea = textareaRef.current
+    const overlay = mentionOverlayRef.current
+    if (!textarea || !overlay) return
+
+    const syncScroll = () => {
+      overlay.style.transform = `translateY(-${textarea.scrollTop}px)`
+    }
+
+    textarea.addEventListener('scroll', syncScroll)
+    syncScroll() // Initial sync
+    
+    return () => {
+      textarea.removeEventListener('scroll', syncScroll)
     }
   }, [input])
 
@@ -755,6 +843,55 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     }
   }
 
+  // Highlight @mentions in message content
+  const highlightMentions = (text: string): React.ReactNode => {
+    const mentionRegex = /@(Library|[^\s@]+)/g
+    const parts: React.ReactNode[] = []
+    let lastIndex = 0
+    let match
+    
+    while ((match = mentionRegex.exec(text)) !== null) {
+      // Add text before the mention
+      if (match.index > lastIndex) {
+        parts.push(text.slice(lastIndex, match.index))
+      }
+      
+      // Add highlighted mention
+      const mentionText = match[0]
+      const mentionName = match[1]
+      const isLibrary = mentionName === 'Library'
+      const isFile = libraryDocuments.some(doc => doc.title === mentionName || doc.id === mentionName)
+      
+      parts.push(
+        <span
+          key={`mention-${match.index}`}
+          style={{
+            backgroundColor: theme === 'dark' 
+              ? (isLibrary ? '#2d4a5c' : isFile ? '#3d2d4a' : '#3d3d3d')
+              : (isLibrary ? '#e8f0fe' : isFile ? '#f3e5f5' : '#f1f3f4'),
+            color: theme === 'dark' ? '#ffffff' : textColor, // White for dark theme, regular text color for light theme
+            padding: '2px 6px',
+            borderRadius: '4px',
+            fontWeight: 'normal', // Same weight as regular text
+            fontSize: '13px'
+          }}
+        >
+          {mentionText}
+        </span>
+      )
+      
+      lastIndex = match.index + match[0].length
+    }
+    
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(text.slice(lastIndex))
+    }
+    
+    return parts.length > 0 ? <>{parts}</> : text
+  }
+
+
   // Helper function to format error messages in a user-friendly way
   const formatErrorMessage = (error: any): string => {
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -797,6 +934,128 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
     
     // Generic error - show a friendly message
     return 'Unable to process your request. Please try again or check your API keys in Settings.'
+  }
+
+  // Handle @mention detection and inline autocomplete
+  const detectMention = (text: string, cursorPosition: number) => {
+    const textBeforeCursor = text.slice(0, cursorPosition)
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@')
+    
+    // Check if @ exists
+    if (lastAtIndex === -1) {
+      setCurrentSuggestion(null)
+      return
+    }
+    
+    const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1)
+    
+    // If there's whitespace or newline immediately after @, it's not a mention
+    if (textAfterAt.match(/^\s/)) {
+      setCurrentSuggestion(null)
+      return
+    }
+    
+    // Check if mention is already complete (has space after it)
+    const mentionText = textBeforeCursor.slice(lastAtIndex + 1)
+    if (mentionText.includes(' ')) {
+      setCurrentSuggestion(null)
+      return
+    }
+    
+    // Check if cursor is after a space that follows the mention
+    if (cursorPosition > 0) {
+      const charBeforeCursor = text[cursorPosition - 1]
+      if (charBeforeCursor === ' ') {
+        const textBeforeSpace = text.slice(0, cursorPosition - 1)
+        const lastAtBeforeSpace = textBeforeSpace.lastIndexOf('@')
+        if (lastAtBeforeSpace !== -1 && lastAtBeforeSpace === lastAtIndex) {
+          setCurrentSuggestion(null)
+          return
+        }
+      }
+    }
+    
+    // Check if there's already a space or end of word before @ (valid mention context)
+    const charBeforeAt = lastAtIndex > 0 ? textBeforeCursor[lastAtIndex - 1] : ' '
+    if (charBeforeAt !== ' ' && charBeforeAt !== '\n' && lastAtIndex > 0) {
+      setCurrentSuggestion(null)
+      return
+    }
+    
+    mentionStartIndexRef.current = lastAtIndex
+    setMentionQuery(textAfterAt)
+    
+    // Get the best suggestion
+    const mentions = getFilteredMentions()
+    if (mentions.length > 0) {
+      const selectedMention = mentions[selectedMentionIndex] || mentions[0]
+      const mentionText = selectedMention.type === 'library' ? '@Library' : `@${selectedMention.name}`
+      const remainingText = mentionText.slice(textAfterAt.length + 1) // +1 for @
+      setCurrentSuggestion(remainingText)
+    } else {
+      setCurrentSuggestion(null)
+    }
+  }
+
+  const getFilteredMentions = () => {
+    const query = mentionQuery.toLowerCase().trim()
+    const mentions: Array<{ type: 'library' | 'file', id?: string, name: string, folder?: string }> = []
+    
+    // Always include @Library option (only if query matches or is empty)
+    // This searches all library documents
+    // Do NOT include workspace files (project files) - only Library is mentionable
+    if (!query || 'library'.includes(query)) {
+      mentions.push({ type: 'library', name: 'Library' })
+    }
+    
+    return mentions
+  }
+
+  const insertMention = (mention: { type: 'library' | 'file', id?: string, name: string }) => {
+    if (!textareaRef.current || mentionStartIndexRef.current === -1) return
+    
+    const textarea = textareaRef.current
+    const currentValue = textarea.value
+    const cursorPosition = textarea.selectionStart
+    
+    // Store the mention start position before it gets reset
+    const mentionStartPos = mentionStartIndexRef.current
+    
+    // Find the end of the mention query (cursor position or next space)
+    let mentionEnd = cursorPosition
+    const textAfterAt = currentValue.slice(mentionStartPos + 1, cursorPosition)
+    const spaceIndex = textAfterAt.indexOf(' ')
+    if (spaceIndex !== -1) {
+      mentionEnd = mentionStartPos + 1 + spaceIndex
+    }
+    
+    // Build the mention text (ensure space after)
+    const mentionText = mention.type === 'library' ? '@Library' : `@${mention.name}`
+    
+    // Replace the @query with the mention (always add space after)
+    const newValue = 
+      currentValue.slice(0, mentionStartPos) +
+      mentionText + ' ' +
+      currentValue.slice(mentionEnd)
+    
+    setInput(newValue)
+    setCurrentSuggestion(null)
+    
+    // Set cursor position after the mention and space (highlighting is now persistent via overlay)
+    // Use requestAnimationFrame to ensure the DOM has updated
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        if (textareaRef.current) {
+          // Calculate cursor position: start of mention + mention text length + space (1 char)
+          // This places the cursor AFTER the space
+          const newCursorPos = mentionStartPos + mentionText.length + 1
+          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+          textareaRef.current.focus()
+        }
+      }, 0)
+    })
+    
+    mentionStartIndexRef.current = -1
   }
 
   const handleStopGeneration = async () => {
@@ -1102,7 +1361,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                   cursor: 'text'
                 }}
               >
-                {message.content}
+                {highlightMentions(message.content)}
                 {message.attachments && message.attachments.length > 0 && (
                   <div style={{
                     marginTop: '8px',
@@ -1554,7 +1813,7 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
       <div 
         ref={inputContainerRef}
         style={{
-          padding: '12px 14px',
+          padding: '6px 14px 12px 14px',
           backgroundColor: brighterBg
         }}>
         {/* Attachments Preview */}
@@ -1675,14 +1934,112 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
           
 
               {/* Text Input Section - On Top */}
+              <div style={{ position: 'relative', width: '100%' }}>
               <textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onFocus={() => setIsInputFocused(true)}
-                onBlur={() => setIsInputFocused(false)}
+                onChange={(e) => {
+                  setInput(e.target.value)
+                  const cursorPosition = e.target.selectionStart
+                  detectMention(e.target.value, cursorPosition)
+                }}
+                onFocus={() => {
+                  setIsInputFocused(true)
+                  if (textareaRef.current) {
+                    const cursorPosition = textareaRef.current.selectionStart
+                    detectMention(textareaRef.current.value, cursorPosition)
+                  }
+                }}
+                onBlur={() => {
+                  setIsInputFocused(false)
+                  setCurrentSuggestion(null)
+                }}
                 onPaste={handlePaste}
                 onKeyDown={(e) => {
+                  // Handle Tab to accept inline autocomplete
+                  if (e.key === 'Tab' && currentSuggestion) {
+                    e.preventDefault()
+                    const mentions = getFilteredMentions()
+                    const selectedMention = mentions[selectedMentionIndex] || mentions[0]
+                    if (selectedMention) {
+                      insertMention(selectedMention)
+                    }
+                    return
+                  }
+                  
+                  // Handle Arrow keys to cycle through suggestions
+                  if (currentSuggestion) {
+                    const mentions = getFilteredMentions()
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault()
+                      const newIndex = selectedMentionIndex < mentions.length - 1 ? selectedMentionIndex + 1 : 0
+                      setSelectedMentionIndex(newIndex)
+                      const selectedMention = mentions[newIndex]
+                      if (selectedMention) {
+                        const mentionText = selectedMention.type === 'library' ? '@Library' : `@${selectedMention.name}`
+                        const textAfterAt = textareaRef.current?.value.slice(mentionStartIndexRef.current + 1, textareaRef.current?.selectionStart || 0) || ''
+                        const remainingText = mentionText.slice(textAfterAt.length + 1)
+                        setCurrentSuggestion(remainingText)
+                      }
+                      return
+                    }
+                    
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault()
+                      const newIndex = selectedMentionIndex > 0 ? selectedMentionIndex - 1 : mentions.length - 1
+                      setSelectedMentionIndex(newIndex)
+                      const selectedMention = mentions[newIndex]
+                      if (selectedMention) {
+                        const mentionText = selectedMention.type === 'library' ? '@Library' : `@${selectedMention.name}`
+                        const textAfterAt = textareaRef.current?.value.slice(mentionStartIndexRef.current + 1, textareaRef.current?.selectionStart || 0) || ''
+                        const remainingText = mentionText.slice(textAfterAt.length + 1)
+                        setCurrentSuggestion(remainingText)
+                      }
+                      return
+                    }
+                    
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      setCurrentSuggestion(null)
+                      return
+                    }
+                  }
+                  
+                  // Handle Backspace to delete entire mention at once
+                  if (e.key === 'Backspace' && textareaRef.current) {
+                    const cursorPosition = textareaRef.current.selectionStart
+                    const text = textareaRef.current.value
+                    
+                    // Find if cursor is within a mention
+                    const mentionRegex = /@(Library|[^\s@]+)/g
+                    let match
+                    mentionRegex.lastIndex = 0
+                    
+                    while ((match = mentionRegex.exec(text)) !== null) {
+                      const mentionStart = match.index
+                      const mentionEnd = match.index + match[0].length
+                      
+                      // Check if cursor is at the start, end, or within the mention
+                      // Also check if cursor is right after the mention (to delete it)
+                      if (cursorPosition >= mentionStart && cursorPosition <= mentionEnd + 1) {
+                        e.preventDefault()
+                        
+                        // Delete the entire mention (including @ symbol)
+                        const newValue = text.slice(0, mentionStart) + text.slice(mentionEnd)
+                        setInput(newValue)
+                        
+                        // Set cursor position where the mention was
+                        setTimeout(() => {
+                          if (textareaRef.current) {
+                            textareaRef.current.setSelectionRange(mentionStart, mentionStart)
+                            textareaRef.current.focus()
+                          }
+                        }, 0)
+                        return
+                      }
+                    }
+                  }
+                  
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
                     handleSend()
@@ -1699,14 +2056,15 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                   backgroundColor: 'transparent',
                   fontSize: '13px',
                   outline: 'none',
-                  color: textColor,
+                  color: textColor, // Keep text visible for proper cursor alignment
                   resize: 'none',
                   overflowY: 'hidden',
                   overflowX: 'hidden',
                   fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                   lineHeight: '1.6',
-                  minHeight: '32px',
-                  maxHeight: '200px'
+                  minHeight: '24px',
+                  maxHeight: '200px',
+                  caretColor: textColor // Keep caret visible
                 }}
                 onInput={(e) => {
                   const target = e.target as HTMLTextAreaElement
@@ -1722,6 +2080,126 @@ export default function ChatInterface({ documentId, chatId, documentContent, isS
                   }
                 }}
               />
+          
+          {/* Persistent Mention Highlighting Overlay - Backgrounds only */}
+          {input && (() => {
+            const mentionRegex = /@(Library|[^\s@]+)/g
+            const highlights: Array<{ start: number, end: number, text: string, isLibrary: boolean, isFile: boolean }> = []
+            let match
+            
+            mentionRegex.lastIndex = 0
+            while ((match = mentionRegex.exec(input)) !== null) {
+              const mentionName = match[1]
+              const isLibrary = mentionName === 'Library'
+              const isFile = libraryDocuments.some(doc => doc.title === mentionName || doc.id === mentionName)
+              highlights.push({
+                start: match.index,
+                end: match.index + match[0].length,
+                text: match[0],
+                isLibrary,
+                isFile
+              })
+            }
+            
+            if (highlights.length === 0) return null
+            
+            return (
+              <div
+                ref={mentionOverlayRef}
+                style={{
+                  position: 'absolute',
+                  pointerEvents: 'none',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  padding: '4px 6px',
+                  fontSize: '13px',
+                  fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
+                  lineHeight: '1.6',
+                  whiteSpace: 'pre-wrap',
+                  wordWrap: 'break-word',
+                  overflowY: 'hidden',
+                  overflowX: 'hidden',
+                  zIndex: 1,
+                  color: 'transparent' // Make all text transparent
+                }}
+              >
+                {/* Render text with highlights matching textarea layout */}
+                {(() => {
+                  const parts: React.ReactNode[] = []
+                  let lastIndex = 0
+                  
+                  highlights.forEach((highlight) => {
+                    // Add text before highlight
+                    if (highlight.start > lastIndex) {
+                      parts.push(input.slice(lastIndex, highlight.start))
+                    }
+                    
+                    // Add highlighted mention (no horizontal padding to avoid covering next character)
+                    parts.push(
+                      <span
+                        key={`hl-${highlight.start}`}
+                        style={{
+                          backgroundColor: theme === 'dark' 
+                            ? (highlight.isLibrary ? '#2d4a5c' : highlight.isFile ? '#3d2d4a' : '#3d3d3d')
+                            : (highlight.isLibrary ? '#e8f0fe' : highlight.isFile ? '#f3e5f5' : '#f1f3f4'),
+                          color: theme === 'dark' ? '#ffffff' : textColor, // White for dark theme, regular text color for light theme
+                          borderRadius: '4px',
+                          fontWeight: 'normal', // Same weight as regular text
+                          padding: '2px 0', // Only vertical padding to avoid covering adjacent characters
+                          display: 'inline',
+                          boxDecorationBreak: 'clone' as any
+                        }}
+                      >
+                        {highlight.text}
+                      </span>
+                    )
+                    
+                    lastIndex = highlight.end
+                  })
+                  
+                  // Add remaining text
+                  if (lastIndex < input.length) {
+                    parts.push(input.slice(lastIndex))
+                  }
+                  
+                  return parts.length > 0 ? <>{parts}</> : input
+                })()}
+              </div>
+            )
+          })()}
+          
+          {/* Inline Autocomplete Suggestion */}
+          {currentSuggestion && textareaRef.current && (
+            <div
+              style={{
+                position: 'absolute',
+                pointerEvents: 'none',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                padding: '4px 6px',
+                fontSize: '13px',
+                fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
+                lineHeight: '1.6',
+                color: 'transparent',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word',
+                overflow: 'hidden',
+                zIndex: 2
+              }}
+            >
+              {input}
+              <span style={{
+                color: theme === 'dark' ? 'rgba(214, 214, 221, 0.4)' : 'rgba(95, 99, 104, 0.4)'
+              }}>
+                {currentSuggestion}
+              </span>
+            </div>
+          )}
+              </div>
           
           {/* Bottom Controls Section */}
           <div style={{

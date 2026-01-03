@@ -1,10 +1,11 @@
 import { app, BrowserWindow, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { setupIPC } from './ipc.js';
 import { migrateDocuments } from './services/migration.js';
 import { documentService } from './services/documentService.js';
+import { getVectorStore, cleanupVectorIndex } from './services/vectorStore.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // Get project root directory (Lemona/)
@@ -138,6 +139,15 @@ app.whenReady().then(async () => {
     setupCSP();
     // Migrate documents first
     await migrateDocuments();
+    // Clean up logically deleted documents first
+    console.log('🧹 Cleaning up deleted documents...');
+    const deletedCleanupResult = await documentService.cleanupDeletedDocuments();
+    if (deletedCleanupResult.removed > 0) {
+        console.log(`✅ Removed ${deletedCleanupResult.removed} deleted document(s)`);
+    }
+    if (deletedCleanupResult.errors.length > 0) {
+        console.warn(`⚠️  Deleted documents cleanup errors:`, deletedCleanupResult.errors);
+    }
     // Clean up orphaned/corrupted documents
     console.log('🧹 Cleaning up orphaned documents...');
     const cleanupResult = await documentService.cleanupOrphanedFiles();
@@ -147,6 +157,21 @@ app.whenReady().then(async () => {
     if (cleanupResult.errors.length > 0) {
         console.warn(`⚠️  Cleanup errors:`, cleanupResult.errors);
     }
+    // Clean up vector index: remove corrupted files and orphaned chunks
+    console.log('🧹 Cleaning up vector index...');
+    const vectorCleanupResult = await cleanupVectorIndex();
+    if (vectorCleanupResult.corruptedFilesRemoved > 0) {
+        console.log(`✅ Removed ${vectorCleanupResult.corruptedFilesRemoved} corrupted file(s)`);
+    }
+    if (vectorCleanupResult.orphanedChunksRemoved > 0) {
+        console.log(`✅ Removed ${vectorCleanupResult.orphanedChunksRemoved} orphaned chunk(s)`);
+    }
+    if (vectorCleanupResult.errors.length > 0) {
+        console.warn(`⚠️  Vector cleanup errors:`, vectorCleanupResult.errors);
+    }
+    // Validate index integrity for all projects
+    console.log('🔍 Validating index integrity...');
+    await validateAllIndexes();
     // Then create window
     createWindow();
     app.on('activate', () => {
@@ -155,6 +180,67 @@ app.whenReady().then(async () => {
         }
     });
 });
+/**
+ * Validate index integrity for all projects
+ * Checks each project's index and reports any issues
+ */
+async function validateAllIndexes() {
+    try {
+        const baseIndexDir = path.join(app.getPath('userData'), 'vectorIndex');
+        // Check if base index directory exists
+        if (!existsSync(baseIndexDir)) {
+            console.log('✅ No index directory found (first run)');
+            return;
+        }
+        // Get all project directories
+        const projectDirs = readdirSync(baseIndexDir, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory())
+            .map(dirent => dirent.name);
+        if (projectDirs.length === 0) {
+            console.log('✅ No project indexes found');
+            return;
+        }
+        console.log(`📊 Found ${projectDirs.length} project index(es) to validate`);
+        // Validate each project's index
+        const validationResults = [];
+        for (const projectDir of projectDirs) {
+            try {
+                const projectId = projectDir === 'library' ? 'library' : projectDir;
+                const vectorStore = getVectorStore(projectId);
+                const result = await vectorStore.validateIntegrity();
+                validationResults.push({
+                    projectId,
+                    ...result
+                });
+                if (result.valid) {
+                    console.log(`✅ Project "${projectId}": Index valid (${result.indexCount} chunks)`);
+                }
+                else if (result.needsRebuild) {
+                    console.warn(`⚠️  Project "${projectId}": Index needs rebuild (metadata: ${result.metadataCount}, index: ${result.indexCount})`);
+                }
+                else {
+                    console.warn(`⚠️  Project "${projectId}": Index mismatch (metadata: ${result.metadataCount}, index: ${result.indexCount})`);
+                }
+            }
+            catch (error) {
+                console.error(`❌ Failed to validate index for project "${projectDir}":`, error.message);
+            }
+        }
+        // Summary
+        const validCount = validationResults.filter(r => r.valid).length;
+        const needsRebuildCount = validationResults.filter(r => r.needsRebuild).length;
+        if (validCount === validationResults.length) {
+            console.log(`✅ All ${validationResults.length} project index(es) are valid`);
+        }
+        else {
+            console.warn(`⚠️  Index validation summary: ${validCount} valid, ${needsRebuildCount} need rebuild, ${validationResults.length - validCount - needsRebuildCount} have mismatches`);
+            console.warn(`💡 Projects with issues need to be re-indexed to restore search capability`);
+        }
+    }
+    catch (error) {
+        console.error('❌ Failed to validate indexes:', error);
+    }
+}
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         app.quit();

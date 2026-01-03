@@ -19,6 +19,28 @@ const __dirname = path.dirname(__filename)
 const pdfjsWorker = require.resolve('pdfjs-dist/legacy/build/pdf.worker.js')
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
+// Suppress canvas warnings - we only need text extraction, not rendering
+// This prevents warnings about missing canvas.node module
+if (typeof process !== 'undefined' && process.env) {
+  // Suppress canvas-related warnings by setting environment variable
+  process.env.CANVAS_PREBUILT = 'false'
+}
+
+// Override console.warn to filter out canvas warnings
+const originalWarn = console.warn
+console.warn = (...args: any[]) => {
+  const message = args.join(' ')
+  // Filter out canvas-related warnings
+  if (message.includes('Cannot polyfill') && 
+      (message.includes('DOMMatrix') || message.includes('Path2D')) &&
+      message.includes('canvas.node')) {
+    // Suppress this specific warning
+    return
+  }
+  // Call original warn for other messages
+  originalWarn.apply(console, args)
+}
+
 export interface PDFExtractionOptions {
   parsePerPage?: boolean // Extract text per page (default: true)
   extractParagraphs?: boolean // Extract paragraphs separately (default: true)

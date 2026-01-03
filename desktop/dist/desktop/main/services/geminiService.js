@@ -1,6 +1,7 @@
 // Desktop Gemini Service - Uses Google Generative AI
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { projectService } from './projectService.js';
+import { searchLibraryWithMentions } from './semanticSearchService.js';
 // Store API key instances per API key to allow multiple users
 const genAICache = new Map();
 function getModel(apiKey, modelName = 'gemini-2.5-flash') {
@@ -147,7 +148,7 @@ function getCurrentEditingContext(documentContent, cursorPosition, maxTokens = 1
         return documentContent.slice(0, maxTokens * 4);
     }
 }
-async function buildContext(documentContent, projectId, chatHistory, cursorPosition, apiKey) {
+async function buildContext(documentContent, projectId, chatHistory, cursorPosition, apiKey, userMessage, openaiApiKey) {
     let systemInstruction = SYSTEM_PROMPT;
     // 1️⃣ Add project context FIRST (README, project overview, intent)
     // This gives AI the background about "what project am I working on"
@@ -240,6 +241,26 @@ async function buildContext(documentContent, projectId, chatHistory, cursorPosit
         };
         contextHistory = [summaryMessage, ...contextHistory];
     }
+    // 4️⃣ Add library search results if @mentions detected
+    if (userMessage && (apiKey || openaiApiKey)) {
+        try {
+            // CRITICAL: Use projectId if provided (for project-specific search),
+            // otherwise use 'library' for general library search
+            // This ensures we search in the same index where documents were indexed
+            const searchProjectId = projectId || 'library';
+            console.log(`[Gemini] Searching library with projectId: ${searchProjectId}`);
+            const searchResult = await searchLibraryWithMentions(userMessage, apiKey, // geminiApiKey
+            openaiApiKey, 3, // top-k
+            searchProjectId);
+            if (searchResult.results.length > 0 && searchResult.formattedResults) {
+                systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`;
+            }
+        }
+        catch (error) {
+            // Don't fail the entire request if library search fails
+            console.warn('[Gemini] Library search failed:', error.message);
+        }
+    }
     return { systemInstruction, chatHistory: contextHistory };
 }
 // Summarize old chat history to preserve context without using too many tokens
@@ -298,9 +319,9 @@ function extractTextFromTipTap(node) {
     return '';
 }
 export const geminiService = {
-    async chat(apiKey, message, documentContent, projectId, chatHistory, modelName) {
+    async chat(apiKey, message, documentContent, projectId, chatHistory, modelName, openaiApiKey) {
         const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash');
-        const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey);
+        const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey);
         const conversationHistory = [...(history || [])];
         conversationHistory.push({
             id: `msg_${Date.now()}`,
@@ -333,9 +354,9 @@ export const geminiService = {
             throw new Error(`Failed to generate response: ${error.message || 'Unknown error'}`);
         }
     },
-    async *streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments) {
+    async *streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, openaiApiKey) {
         const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash');
-        const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey);
+        const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey);
         const conversationHistory = [...(history || [])];
         conversationHistory.push({
             id: `msg_${Date.now()}`,

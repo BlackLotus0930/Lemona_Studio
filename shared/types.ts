@@ -23,6 +23,8 @@ export interface Document {
   folder?: 'library' | 'project'; // Optional: Folder this document belongs to ('library' or 'project')
   // PDF text extraction
   pdfText?: PDFTextContent; // Optional: Extracted text from PDF files, organized by page/paragraph
+  // Logical deletion
+  deleted?: boolean; // Optional: Whether this document has been logically deleted
 }
 
 export interface PDFTextContent {
@@ -76,5 +78,24 @@ export interface AutocompleteSuggestion {
 export interface ExportOptions {
   format: 'pdf' | 'docx';
   filename?: string;
+}
+
+export interface IndexingStatus {
+  documentId: string;
+  status: 'pending' | 'indexing' | 'completed' | 'error';
+  chunksCount?: number;
+  indexedAt?: string;
+  error?: string;
+}
+
+export interface LibrarySearchResult {
+  chunk: {
+    id: string;
+    fileId: string;
+    fileName: string;
+    text: string;
+    chunkIndex: number;
+  };
+  score: number;
 }
 

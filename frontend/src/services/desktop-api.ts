@@ -42,8 +42,8 @@ export const documentApi = {
   updateFolder: (id: string, folder: 'library' | 'project') => invokeOrFetch('document:updateFolder', id, folder),
   delete: (id: string) => invokeOrFetch('document:delete', id),
   list: () => invokeOrFetch('document:getAll'),
-  uploadFile: (filePath: string, fileName: string, folder: 'library' | 'project') => 
-    invokeOrFetch('document:uploadFile', filePath, fileName, folder),
+  uploadFile: (filePath: string, fileName: string, folder: 'library' | 'project', projectId?: string) => 
+    invokeOrFetch('document:uploadFile', filePath, fileName, folder, projectId),
   extractPDFText: (documentId: string) => invokeOrFetch('pdf:extractText', documentId),
   getPDFFileContent: (documentId: string) => invokeOrFetch('pdf:getFileContent', documentId),
   getImageFileContent: (documentId: string, imageId: string) => invokeOrFetch('image:getFileContent', documentId, imageId),
@@ -91,33 +91,46 @@ export const aiApi = {
     // Create a ReadableStream that reads from IPC events
     const stream = new ReadableStream({
       async start(controller) {
+        let isStreamClosed = false
+        
         try {
           // Start stream and get streamId
           const { streamId } = await window.electron!.invoke('ai:streamChat', googleApiKey, openaiApiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, attachments, style)
-          console.log('[Desktop API] Stream started with ID:', streamId)
           
           // Note: preload script strips the event, so callbacks receive args directly
           const onChunk = (receivedStreamId: string, chunk: string) => {
-            console.log('[Desktop API] Received chunk for stream:', receivedStreamId)
-            if (receivedStreamId === streamId) {
-              // Format as SSE (Server-Sent Events) for compatibility with existing code
-              const sseData = `data: ${JSON.stringify({ chunk })}\n\n`
-              controller.enqueue(new TextEncoder().encode(sseData))
+            if (receivedStreamId === streamId && !isStreamClosed) {
+              try {
+                // Format as SSE (Server-Sent Events) for compatibility with existing code
+                const sseData = `data: ${JSON.stringify({ chunk })}\n\n`
+                controller.enqueue(new TextEncoder().encode(sseData))
+              } catch (error) {
+                // Stream may have been closed, ignore the error
+                console.warn('[Desktop API] Failed to enqueue chunk (stream may be closed):', error)
+              }
             }
           }
           
           const onEnd = (receivedStreamId: string) => {
-            console.log('[Desktop API] Stream ended:', receivedStreamId)
-            if (receivedStreamId === streamId) {
-              controller.close()
+            if (receivedStreamId === streamId && !isStreamClosed) {
+              isStreamClosed = true
+              try {
+                controller.close()
+              } catch (error) {
+                console.warn('[Desktop API] Failed to close stream:', error)
+              }
               cleanup()
             }
           }
           
           const onError = (receivedStreamId: string, error: string) => {
-            console.log('[Desktop API] Stream error:', receivedStreamId, error)
-            if (receivedStreamId === streamId) {
-              controller.error(new Error(error))
+            if (receivedStreamId === streamId && !isStreamClosed) {
+              isStreamClosed = true
+              try {
+                controller.error(new Error(error))
+              } catch (err) {
+                console.warn('[Desktop API] Failed to error stream:', err)
+              }
               cleanup()
             }
           }
@@ -132,7 +145,14 @@ export const aiApi = {
           window.electron!.on('ai:streamEnd', onEnd)
           window.electron!.on('ai:streamError', onError)
         } catch (error) {
-          controller.error(error)
+          if (!isStreamClosed) {
+            isStreamClosed = true
+            try {
+              controller.error(error)
+            } catch (err) {
+              console.warn('[Desktop API] Failed to error stream on init:', err)
+            }
+          }
         }
       }
     })
@@ -174,5 +194,32 @@ export const projectApi = {
   reorderDocuments: (projectId: string, documentIds: string[]) => invokeOrFetch('project:reorderDocuments', projectId, documentIds),
   getDocuments: (projectId: string) => invokeOrFetch('project:getDocuments', projectId),
   delete: (id: string) => invokeOrFetch('project:delete', id),
+}
+
+export const settingsApi = {
+  saveApiKeys: async (geminiApiKey?: string, openaiApiKey?: string) => {
+    try {
+      return await invokeOrFetch('settings:saveApiKeys', geminiApiKey, openaiApiKey)
+    } catch (error: any) {
+      // If handler not registered, log warning but don't fail (app may need restart)
+      if (error?.message?.includes('No handler registered')) {
+        console.warn('[Settings API] Handler not registered - app may need restart. API keys saved to localStorage only.')
+        return { success: false, needsRestart: true }
+      }
+      throw error
+    }
+  },
+  getApiKeys: async () => {
+    try {
+      return await invokeOrFetch('settings:getApiKeys')
+    } catch (error: any) {
+      // If handler not registered, return empty keys (app may need restart)
+      if (error?.message?.includes('No handler registered')) {
+        console.warn('[Settings API] Handler not registered - app may need restart.')
+        return { geminiApiKey: '', openaiApiKey: '' }
+      }
+      throw error
+    }
+  },
 }
 

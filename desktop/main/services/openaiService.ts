@@ -4,6 +4,7 @@ import { AIChatMessage, AutocompleteSuggestion, ChatAttachment } from '../../../
 import { projectService } from './projectService.js'
 import { documentService } from './documentService.js'
 import { createRequire } from 'module'
+import { searchLibraryWithMentions } from './semanticSearchService.js'
 
 // Import pdfjs-dist for PDF text extraction
 const require = createRequire(import.meta.url)
@@ -211,7 +212,7 @@ async function getReadmeContent(projectId: string): Promise<string | null> {
   }
 }
 
-async function buildContext(documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], style?: string, cursorPosition?: number, apiKey?: string): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[] }> {
+async function buildContext(documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], style?: string, cursorPosition?: number, apiKey?: string, userMessage?: string, geminiApiKey?: string): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[] }> {
   let systemInstruction = `You are Lemona's AI writing companion.
 
 You are supportive, curious, and engaged, like a thoughtful collaborator sitting beside the user while they write.
@@ -374,6 +375,30 @@ Your role is not to finish the work, but to help the user stay in the work.`
     contextHistory = [summaryMessage, ...contextHistory]
   }
 
+  // 4️⃣ Add library search results if @mentions detected
+  if (userMessage && (geminiApiKey || apiKey)) {
+    try {
+      // CRITICAL: Use projectId if provided (for project-specific search),
+      // otherwise use 'library' for general library search
+      // This ensures we search in the same index where documents were indexed
+      const searchProjectId = projectId || 'library'
+      const searchResult = await searchLibraryWithMentions(
+        userMessage,
+        geminiApiKey, // Prefer Gemini
+        apiKey, // Fallback to OpenAI
+        3, // top-k
+        searchProjectId
+      )
+
+      if (searchResult.results.length > 0 && searchResult.formattedResults) {
+        systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`
+      }
+    } catch (error: any) {
+      // Don't fail the entire request if library search fails
+      console.warn('[OpenAI] Library search failed:', error.message)
+    }
+  }
+
   return { systemInstruction, chatHistory: contextHistory }
 }
 
@@ -441,10 +466,10 @@ Summary:`
 }
 
 export const openaiService = {
-  async chat(apiKey: string, message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string, style?: string, attachments?: ChatAttachment[]): Promise<AIChatMessage> {
+  async chat(apiKey: string, message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string, style?: string, attachments?: ChatAttachment[], geminiApiKey?: string): Promise<AIChatMessage> {
     const client = getClient(apiKey)
     const model = getModelName(modelName || 'gpt-5-nano', attachments && attachments.length > 0)
-    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey)
+    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey)
     
     try {
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -495,11 +520,12 @@ export const openaiService = {
     useWebSearch?: boolean,
     modelName?: string,
     attachments?: ChatAttachment[],
-    style?: string
+    style?: string,
+    geminiApiKey?: string
   ): AsyncGenerator<string> {
     const client = getClient(apiKey)
     const model = getModelName(modelName || 'gpt-5-nano', attachments && attachments.length > 0)
-    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey)
+    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey)
     
     try {
       // If web search is enabled, use OpenAI's Responses API with native web_search tool

@@ -3,6 +3,7 @@ import { GoogleGenerativeAI, GenerativeModel, Part } from '@google/generative-ai
 import { AIChatMessage, AIQuestion, AutocompleteSuggestion, ChatAttachment } from '../../../shared/types.js'
 import { projectService } from './projectService.js'
 import { documentService } from './documentService.js'
+import { searchLibraryWithMentions } from './semanticSearchService.js'
 
 // Store API key instances per API key to allow multiple users
 const genAICache: Map<string, GoogleGenerativeAI> = new Map()
@@ -170,7 +171,9 @@ async function buildContext(
   projectId?: string,
   chatHistory?: AIChatMessage[],
   cursorPosition?: number,
-  apiKey?: string
+  apiKey?: string,
+  userMessage?: string,
+  openaiApiKey?: string
 ): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[] }> {
   let systemInstruction = SYSTEM_PROMPT
 
@@ -275,6 +278,30 @@ async function buildContext(
     contextHistory = [summaryMessage, ...contextHistory]
   }
 
+  // 4️⃣ Add library search results if @mentions detected
+  if (userMessage && (apiKey || openaiApiKey)) {
+    try {
+      // CRITICAL: Use projectId if provided (for project-specific search),
+      // otherwise use 'library' for general library search
+      // This ensures we search in the same index where documents were indexed
+      const searchProjectId = projectId || 'library'
+      const searchResult = await searchLibraryWithMentions(
+        userMessage,
+        apiKey, // geminiApiKey
+        openaiApiKey,
+        3, // top-k
+        searchProjectId
+      )
+
+      if (searchResult.results.length > 0 && searchResult.formattedResults) {
+        systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`
+      }
+    } catch (error: any) {
+      // Don't fail the entire request if library search fails
+      console.warn('[Gemini] Library search failed:', error.message)
+    }
+  }
+
   return { systemInstruction, chatHistory: contextHistory }
 }
 
@@ -338,9 +365,9 @@ function extractTextFromTipTap(node: any): string {
 }
 
 export const geminiService = {
-  async chat(apiKey: string, message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string): Promise<AIChatMessage> {
+  async chat(apiKey: string, message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string, openaiApiKey?: string): Promise<AIChatMessage> {
     const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
-    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey)
+    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey)
     const conversationHistory = [...(history || [])]
     conversationHistory.push({
       id: `msg_${Date.now()}`,
@@ -381,10 +408,11 @@ export const geminiService = {
     chatHistory?: AIChatMessage[],
     useWebSearch?: boolean,
     modelName?: string,
-    attachments?: ChatAttachment[]
+    attachments?: ChatAttachment[],
+    openaiApiKey?: string
   ): AsyncGenerator<string> {
     const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
-    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey)
+    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey)
     const conversationHistory = [...(history || [])]
     conversationHistory.push({
       id: `msg_${Date.now()}`,

@@ -1,10 +1,12 @@
 import { app, BrowserWindow, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { setupIPC } from './ipc.js';
 import { migrateDocuments } from './services/migration.js';
 import { documentService } from './services/documentService.js';
+import { getVectorStore, cleanupVectorIndex } from './services/vectorStore.js';
+import { projectService } from './services/projectService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -152,15 +154,17 @@ app.whenReady().then(async () => {
   // Migrate documents first
   await migrateDocuments();
   
+  // Clean up logically deleted documents first
+  const deletedCleanupResult = await documentService.cleanupDeletedDocuments();
+  
   // Clean up orphaned/corrupted documents
-  console.log('🧹 Cleaning up orphaned documents...');
   const cleanupResult = await documentService.cleanupOrphanedFiles();
-  if (cleanupResult.removed > 0) {
-    console.log(`✅ Removed ${cleanupResult.removed} orphaned/corrupted document(s)`);
-  }
-  if (cleanupResult.errors.length > 0) {
-    console.warn(`⚠️  Cleanup errors:`, cleanupResult.errors);
-  }
+  
+  // Clean up vector index: remove corrupted files and orphaned chunks
+  const vectorCleanupResult = await cleanupVectorIndex();
+  
+  // Validate index integrity for all projects
+  await validateAllIndexes();
   
   // Then create window
   createWindow();
@@ -171,6 +175,57 @@ app.whenReady().then(async () => {
     }
   });
 });
+
+/**
+ * Validate index integrity for all projects
+ * Checks each project's index and reports any issues
+ */
+async function validateAllIndexes(): Promise<void> {
+  try {
+    const baseIndexDir = path.join(app.getPath('userData'), 'vectorIndex');
+    
+    // Check if base index directory exists
+    if (!existsSync(baseIndexDir)) {
+      return;
+    }
+
+    // Get all project directories
+    const projectDirs = readdirSync(baseIndexDir, { withFileTypes: true })
+      .filter(dirent => dirent.isDirectory())
+      .map(dirent => dirent.name);
+
+    if (projectDirs.length === 0) {
+      return;
+    }
+
+    // Validate each project's index
+    const validationResults: Array<{ projectId: string; valid: boolean; needsRebuild: boolean; indexCount: number; metadataCount: number }> = [];
+
+    for (const projectDir of projectDirs) {
+      try {
+        const projectId = projectDir === 'library' ? 'library' : projectDir;
+        const vectorStore = getVectorStore(projectId);
+        const result = await vectorStore.validateIntegrity();
+        
+        validationResults.push({
+          projectId,
+          ...result
+        });
+      } catch (error: any) {
+        console.error(`❌ Failed to validate index for project "${projectDir}":`, error.message);
+      }
+    }
+
+    // Summary
+    const validCount = validationResults.filter(r => r.valid).length;
+    const needsRebuildCount = validationResults.filter(r => r.needsRebuild).length;
+    
+    if (validCount !== validationResults.length) {
+    }
+  } catch (error: any) {
+    console.error('❌ Failed to validate indexes:', error);
+  }
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

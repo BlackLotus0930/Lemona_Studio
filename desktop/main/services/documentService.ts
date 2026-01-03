@@ -5,6 +5,9 @@ import fs from 'fs/promises'
 import path from 'path'
 import { extractPDFTextAsync } from './pdfTextExtractor.js'
 import { parseDocx, convertHtmlToTipTap } from './docxParser.js'
+import { indexLibraryFile, reindexFile } from './indexingService.js'
+import { getVectorStore, cleanupVectorIndex, getProjectLockManager } from './vectorStore.js'
+import { getApiKeys } from './apiKeyStore.js'
 
 // Use Electron's userData directory for documents
 const DOCUMENTS_DIR = path.join(app.getPath('userData'), 'documents')
@@ -77,6 +80,11 @@ export const documentService = {
               continue
             }
             
+            // Filter out logically deleted documents
+            if (doc.deleted === true) {
+              continue
+            }
+            
             documents.push(doc)
           } catch (fileError) {
             console.error(`Error reading file ${file}:`, fileError)
@@ -140,11 +148,28 @@ export const documentService = {
       return null
     }
 
+    const wasLibraryFile = document.folder === 'library'
     document.content = content
     document.updatedAt = new Date().toISOString()
 
     const filePath = getDocumentPath(id)
     await fs.writeFile(filePath, JSON.stringify(document, null, 2))
+    
+    // Re-index library files if content was updated (for incremental updates)
+    if (wasLibraryFile) {
+      const fileExt = document.title.toLowerCase().split('.').pop() || ''
+      // Only re-index if it's a supported file type (PDF/DOCX) or TipTap content
+      if (fileExt === 'pdf' || fileExt === 'docx' || (!fileExt || fileExt === 'md')) {
+        console.log(`[Auto-Reindexing] Triggering re-index for updated library file: ${document.title} (${id})`)
+        // Trigger re-indexing asynchronously (non-blocking)
+        reindexFile(id).then((status) => {
+          console.log(`[Auto-Reindexing] Completed re-indexing for ${id}: ${status.status}, ${status.chunksCount || 0} chunks`)
+        }).catch((error) => {
+          console.error(`[Auto-Reindexing] Failed to re-index ${id}:`, error)
+          // Don't throw - re-indexing failure shouldn't break update
+        })
+      }
+    }
     
     return document
   },
@@ -180,47 +205,130 @@ export const documentService = {
   },
 
   async delete(id: string): Promise<boolean> {
+    const projectLockManager = getProjectLockManager()
+    let releaseLock: (() => void) | null = null
+    
     try {
-      // First, get the document to find associated file
+      // Step 1: Get document, check if exists (idempotency)
       const document = await this.getById(id)
+      if (!document) {
+        // Document doesn't exist - consider it already deleted (idempotent)
+        console.log(`[documentService.delete] Document ${id} does not exist, considering already deleted`)
+        return true
+      }
       
-      const filePath = getDocumentPath(id)
-      console.log('[documentService.delete] Attempting to delete document:', id, 'at path:', filePath)
+      // Check if already deleted (idempotency)
+      if (document.deleted === true) {
+        console.log(`[documentService.delete] Document ${id} is already marked as deleted`)
+        return true
+      }
       
-      // Delete the document JSON file
+      // Step 2: Acquire write lock for the project
+      // Use 'library' for library folder, projectId for project files
+      const projectId = document.folder === 'library' ? 'library' : document.projectId
+      
+      // Only acquire lock if document is indexed (library or project file)
+      if (document.folder === 'library' || document.projectId) {
+        releaseLock = await projectLockManager.acquireWriteLock(projectId)
+        console.log(`[documentService.delete] Acquired write lock for project: ${projectId || 'global'}`)
+      }
+      
       try {
-        await fs.access(filePath)
-        await fs.unlink(filePath)
-        console.log('[documentService.delete] Successfully deleted document JSON:', id)
-      } catch (accessError) {
-        console.log('[documentService.delete] Document JSON file does not exist (may have been already deleted):', filePath)
-      }
-      
-      // Also delete the associated file (PDF, image, etc.) if it exists
-      if (document && document.title) {
-        const associatedFilePath = getFilePath(id, document.title)
-        try {
-          await fs.access(associatedFilePath)
-          await fs.unlink(associatedFilePath)
-          console.log('[documentService.delete] Successfully deleted associated file:', associatedFilePath)
-        } catch (fileError) {
-          // File doesn't exist or already deleted - this is okay
-          console.log('[documentService.delete] Associated file does not exist (may have been already deleted):', associatedFilePath)
+        // Step 3: Remove from vector index (if indexed)
+        if (document.folder === 'library' || document.projectId) {
+          try {
+            const vectorStore = getVectorStore(projectId)
+            await vectorStore.loadIndex()
+            // Use skipLock=true since we already hold the write lock
+            await vectorStore.removeChunksByFile(id, false, true) // autoSave=false, skipLock=true
+            console.log(`[documentService.delete] Removed chunks from index for file: ${id} (project: ${projectId || 'global'})`)
+            
+            // Step 4: Immediately save index and metadata (atomic)
+            await vectorStore.saveIndex()
+            console.log(`[documentService.delete] Successfully saved index after removing chunks for file: ${id}`)
+          } catch (indexError: any) {
+            // If index removal fails, don't proceed with deletion (ensure consistency)
+            console.error(`[documentService.delete] Failed to remove from index:`, indexError.message)
+            throw new Error(`Failed to remove from index: ${indexError.message}`)
+          }
         }
+        
+        // Step 5: Mark document as deleted (logical deletion)
+        document.deleted = true
+        document.updatedAt = new Date().toISOString()
+        
+        // Step 6: Save document with deleted flag
+        const filePath = getDocumentPath(id)
+        await fs.writeFile(filePath, JSON.stringify(document, null, 2))
+        console.log(`[documentService.delete] Successfully marked document as deleted: ${id}`)
+        
+        // Step 7: Release write lock
+        if (releaseLock) {
+          releaseLock()
+          releaseLock = null
+        }
+        
+        // Step 8: Background async deletion of disk files (non-blocking)
+        // Delete the document JSON file and associated file asynchronously
+        setImmediate(async () => {
+          try {
+            const docPath = getDocumentPath(id)
+            try {
+              await fs.access(docPath)
+              await fs.unlink(docPath)
+              console.log(`[documentService.delete] Background: Successfully deleted document JSON: ${id}`)
+            } catch (accessError) {
+              console.log(`[documentService.delete] Background: Document JSON file does not exist: ${docPath}`)
+            }
+            
+            // Also delete the associated file (PDF, image, etc.) if it exists
+            if (document.title) {
+              const associatedFilePath = getFilePath(id, document.title)
+              try {
+                await fs.access(associatedFilePath)
+                await fs.unlink(associatedFilePath)
+                console.log(`[documentService.delete] Background: Successfully deleted associated file: ${associatedFilePath}`)
+              } catch (fileError) {
+                console.log(`[documentService.delete] Background: Associated file does not exist: ${associatedFilePath}`)
+              }
+            }
+          } catch (bgError) {
+            console.error(`[documentService.delete] Background: Error deleting files for ${id}:`, bgError)
+            // Don't throw - background cleanup failure shouldn't affect deletion
+          }
+        })
+        
+        return true
+      } catch (error: any) {
+        // If any step fails, release lock and re-throw
+        if (releaseLock) {
+          releaseLock()
+          releaseLock = null
+        }
+        throw error
       }
-      
-      return true
-    } catch (error) {
-      console.error('[documentService.delete] Failed to delete document:', id, error)
+    } catch (error: any) {
+      console.error(`[documentService.delete] Failed to delete document: ${id}`, error)
+      // Ensure lock is released even on error
+      if (releaseLock) {
+        releaseLock()
+      }
       return false
     }
   },
 
-  async uploadFile(sourceFilePath: string, fileName: string, folder: 'library' | 'project'): Promise<Document> {
+  async uploadFile(sourceFilePath: string, fileName: string, folder: 'library' | 'project', projectId?: string): Promise<Document> {
     await ensureDocumentsDir()
     await ensureFilesDir()
     
+    // Note: We don't cleanup vector index here to avoid performance impact
+    // Cleanup is done on app startup, which should be sufficient
+    // File naming is based on documentService.getAll(), not vector index
+    
     // Check for duplicate file names and add number suffix if needed
+    // CRITICAL: Only check duplicates within the same scope:
+    // - Library files: check against all library files (shared across projects)
+    // - Project files: check only against files in the same project (project-specific)
     const allDocs = await this.getAll()
     const baseName = fileName.substring(0, fileName.lastIndexOf('.')) || fileName
     const ext = fileName.substring(fileName.lastIndexOf('.')) || ''
@@ -228,8 +336,24 @@ export const documentService = {
     let finalFileName = fileName
     let counter = 1
     
-    // Check if file with same name already exists
-    while (allDocs.some(doc => doc.title === finalFileName)) {
+    // Filter documents to check based on folder and projectId
+    let docsToCheck: Document[]
+    if (folder === 'library') {
+      // Library files: check against all library files
+      docsToCheck = allDocs.filter(doc => doc.folder === 'library')
+    } else {
+      // Project files: check only against files in the same project
+      if (projectId) {
+        docsToCheck = allDocs.filter(doc => doc.folder === 'project' && doc.projectId === projectId)
+      } else {
+        // If no projectId provided, check against all project files (fallback, should not happen)
+        console.warn(`[DocumentService] Uploading to project folder without projectId, checking against all project files`)
+        docsToCheck = allDocs.filter(doc => doc.folder === 'project')
+      }
+    }
+    
+    // Check if file with same name already exists in the same scope
+    while (docsToCheck.some(doc => doc.title === finalFileName)) {
       finalFileName = `${baseName} (${counter})${ext}`
       counter++
     }
@@ -389,6 +513,8 @@ export const documentService = {
       : finalFileName
     
     // Create document entry
+    // CRITICAL: If uploading to project folder, set projectId immediately
+    // This ensures indexing uses the correct project index
     const document: Document = {
       id,
       title: documentTitle,
@@ -396,6 +522,15 @@ export const documentService = {
       createdAt: now,
       updatedAt: now,
       folder,
+      ...(folder === 'project' && projectId ? { projectId } : {}), // Set projectId if provided for project files
+    }
+    
+    // Log projectId assignment for debugging
+    if (folder === 'project') {
+      console.log(`[DocumentService] Uploading file to project folder with projectId: ${projectId || 'NOT SET (will be set later)'}`)
+      if (!projectId) {
+        console.warn(`[DocumentService] WARNING: Uploading to project folder without projectId. Document will need projectId set before indexing.`)
+      }
     }
     
     // Save document metadata
@@ -422,6 +557,29 @@ export const documentService = {
         console.error(`[PDF Text Extraction] Failed for document ${id}:`, error)
         // Don't throw - extraction failure shouldn't break upload
       })
+    }
+    
+    // Auto-index library files asynchronously (don't block upload)
+    if (folder === 'library') {
+      // Check if file type is supported for indexing (PDF or DOCX)
+      const fileExt = finalFileName.toLowerCase().split('.').pop() || ''
+      if (fileExt === 'pdf' || fileExt === 'docx') {
+        console.log(`[Auto-Indexing] Starting indexing for library file: ${finalFileName} (${id})`)
+        
+        // Get API keys from store for auto-indexing
+        const { geminiApiKey, openaiApiKey } = getApiKeys()
+        
+        // Trigger indexing asynchronously (non-blocking) with API keys
+        indexLibraryFile(id, geminiApiKey, openaiApiKey).then((status) => {
+          console.log(`[Auto-Indexing] Completed indexing for ${id}: ${status.status}, ${status.chunksCount || 0} chunks`)
+        }).catch((error) => {
+          console.error(`[Auto-Indexing] Failed to index ${id}:`, error)
+          // Don't throw - indexing failure shouldn't break upload
+          // The indexing service will handle API key errors gracefully
+        })
+      } else {
+        console.log(`[Auto-Indexing] Skipping indexing for ${finalFileName}: unsupported file type (${fileExt})`)
+      }
     }
     
     return document
@@ -466,10 +624,74 @@ export const documentService = {
         }
       }
       
-      console.log(`[cleanupOrphanedFiles] Cleanup complete. Removed ${removed} files.`)
       return { removed, errors }
     } catch (error) {
       console.error('[cleanupOrphanedFiles] Error during cleanup:', error)
+      return { removed: 0, errors: [String(error)] }
+    }
+  },
+
+  /**
+   * Clean up logically deleted documents
+   * This removes disk files for documents marked as deleted (deleted=true)
+   * Should be called on app startup and periodically
+   */
+  async cleanupDeletedDocuments(): Promise<{ removed: number; errors: string[] }> {
+    try {
+      await ensureDocumentsDir()
+      
+      const files = await fs.readdir(DOCUMENTS_DIR)
+      let removed = 0
+      const errors: string[] = []
+      
+      for (const file of files) {
+        if (file.endsWith('.json')) {
+          try {
+            const filePath = path.join(DOCUMENTS_DIR, file)
+            const content = await fs.readFile(filePath, 'utf-8')
+            const doc = JSON.parse(content)
+            
+            // Check if document is marked as deleted
+            if (doc.deleted === true) {
+              console.log(`[cleanupDeletedDocuments] Cleaning up deleted document: ${doc.id} (${doc.title || 'untitled'})`)
+              
+              // Delete the document JSON file
+              try {
+                await fs.unlink(filePath)
+                removed++
+                console.log(`[cleanupDeletedDocuments] Removed document JSON: ${filePath}`)
+              } catch (unlinkError: any) {
+                errors.push(`Failed to remove document JSON ${file}: ${unlinkError.message}`)
+              }
+              
+              // Also delete the associated file (PDF, image, etc.) if it exists
+              if (doc.title) {
+                const associatedFilePath = getFilePath(doc.id, doc.title)
+                try {
+                  await fs.access(associatedFilePath)
+                  await fs.unlink(associatedFilePath)
+                  console.log(`[cleanupDeletedDocuments] Removed associated file: ${associatedFilePath}`)
+                } catch (fileError: any) {
+                  // File doesn't exist - this is okay, just log
+                  if (fileError.code !== 'ENOENT') {
+                    errors.push(`Failed to remove associated file for ${doc.id}: ${fileError.message}`)
+                  }
+                }
+              }
+            }
+          } catch (fileError: any) {
+            // File is corrupted or can't be parsed - skip it (handled by cleanupOrphanedFiles)
+            console.warn(`[cleanupDeletedDocuments] Skipping unparseable file: ${file}`)
+          }
+        }
+      }
+      
+      if (removed > 0) {
+        console.log(`[cleanupDeletedDocuments] Cleanup complete. Removed ${removed} deleted document(s).`)
+      }
+      return { removed, errors }
+    } catch (error: any) {
+      console.error('[cleanupDeletedDocuments] Error during cleanup:', error)
       return { removed: 0, errors: [String(error)] }
     }
   },

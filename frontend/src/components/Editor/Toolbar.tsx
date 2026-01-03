@@ -108,6 +108,9 @@ export default function Toolbar({
   // Use ref value for rendering to prevent flash when editor temporarily becomes null
   // Only use stable editor if current editor is null/destroyed, otherwise use current editor
   const stableEditor = (editor && !editor.isDestroyed) ? editor : editorRef.current
+  
+  // Check if current document is a PDF (PDFs don't have TipTap editor)
+  const isPDF = documentTitle?.toLowerCase().endsWith('.pdf')
   const [fontSize, setFontSize] = useState(14)
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const storedSelectionRef = useRef<{ range: Range; cell: HTMLElement } | null>(null)
@@ -545,9 +548,17 @@ export default function Toolbar({
   }, [showLinkDialog])
 
   // Use stableEditor to prevent flash when editor temporarily becomes null
-  // Only hide toolbar if we never had an editor (initial state)
-  if (!stableEditor) {
+  // CRITICAL: Always show toolbar, even for PDF files (which don't have TipTap editor)
+  // Toolbar has useful features like search and export that work for all document types
+  // Only hide toolbar if we're in initial state (no document loaded yet and not a PDF)
+  if (!stableEditor && !isPDF && !documentTitle) {
+    // Only hide if no editor, not a PDF, and no document title (initial state)
     return <div style={{ display: 'none' }} />
+  }
+  
+  // Helper function to safely check if editor can be used (not null, not PDF, not destroyed)
+  const canUseEditor = (): boolean => {
+    return !!(stableEditor && !isPDF && !stableEditor.isDestroyed)
   }
 
   const toolbarBgColor = theme === 'dark' ? '#141414' : '#ffffff'
@@ -859,7 +870,9 @@ export default function Toolbar({
       return
     }
     // Apply font size to selected text using TextStyle extension
-    stableEditor.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
+    if (canUseEditor()) {
+      stableEditor!.chain().focus().setMark('textStyle', { fontSize: newSize.toString() }).run()
+    }
   }
 
   const handleInsertLink = () => {
@@ -875,12 +888,13 @@ export default function Toolbar({
       return
     }
     
+    if (!canUseEditor()) return
     const url = linkUrl.trim()
-    const { from, to } = stableEditor.state.selection
+    const { from, to } = stableEditor!.state.selection
     
     // If text is selected, apply link to selected text
     if (from !== to) {
-      stableEditor.chain().focus().setLink({ href: url }).run()
+      stableEditor!.chain().focus().setLink({ href: url }).run()
     } else {
       // No text selected - insert URL as clickable link
       // Use insertContent with HTML to create a link directly
@@ -929,19 +943,23 @@ export default function Toolbar({
           </tr>
         </tbody>
       </table>`
-      // @ts-ignore - TableExtension command
-      stableEditor.chain().focus().insertTableBlock(tableHtml).run()
+      // @ts-ignore - TableExtension command (custom extension method)
+      if (canUseEditor()) {
+        (stableEditor!.chain().focus() as any).insertTableBlock(tableHtml).run()
+      }
     } else {
       // Insert chart using ChartExtension
-      const chartData = {
-        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May'],
-        datasets: [{
-          label: 'Data',
-          values: [10, 20, 15, 25, 30]
-        }]
+      if (canUseEditor()) {
+        const chartData = {
+          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May'],
+          datasets: [{
+            label: 'Data',
+            values: [10, 20, 15, 25, 30]
+          }]
+        }
+        // @ts-ignore - ChartExtension command
+        stableEditor!.chain().focus().setChart(graphType, chartData, '').run()
       }
-      // @ts-ignore - ChartExtension command
-      stableEditor.chain().focus().setChart(graphType, chartData, '').run()
     }
     
     setShowGraphMenu(false)
@@ -954,9 +972,9 @@ export default function Toolbar({
       const reader = new FileReader()
       reader.onload = (e) => {
         const dataUrl = e.target?.result as string
-        if (dataUrl) {
+        if (dataUrl && canUseEditor()) {
           // Insert image and then add a paragraph after it so cursor can be placed
-          stableEditor.chain().focus().setImage({ src: dataUrl }).insertContent('<p></p>').run()
+          stableEditor!.chain().focus().setImage({ src: dataUrl }).insertContent('<p></p>').run()
         }
       }
       reader.readAsDataURL(file)
@@ -977,9 +995,9 @@ export default function Toolbar({
   }
 
   const handleMathSubmit = () => {
-    if (mathFormula.trim()) {
+    if (mathFormula.trim() && canUseEditor()) {
       // @ts-ignore - Math extension command
-      stableEditor.chain().focus().setMath(mathFormula.trim(), false).run()
+      stableEditor!.chain().focus().setMath(mathFormula.trim(), false).run()
     }
     setShowMathMenu(false)
   }
@@ -1107,17 +1125,19 @@ export default function Toolbar({
         <SearchIcon style={{ fontSize: '18px', transform: 'translateY(1px)' }} />
       </button>
 
-      {/* Undo/Redo */}
+      {/* Undo/Redo - Disabled for PDF files */}
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          stableEditor.chain().focus().undo().run()
+          if (stableEditor && !isPDF) {
+            stableEditor.chain().focus().undo().run()
+          }
         }}
-        disabled={!stableEditor?.can().undo()}
-        style={{ ...buttonStyle, opacity: stableEditor?.can().undo() ? 1 : 0.3 }}
+        disabled={!stableEditor || isPDF || !stableEditor.can().undo()}
+        style={{ ...buttonStyle, opacity: (stableEditor && !isPDF && stableEditor.can().undo()) ? 1 : 0.3 }}
         title="Undo"
         onMouseEnter={(e) => {
-          if (stableEditor?.can().undo()) {
+          if (stableEditor && !isPDF && stableEditor.can().undo()) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
@@ -1128,13 +1148,15 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          stableEditor.chain().focus().redo().run()
+          if (stableEditor && !isPDF) {
+            stableEditor.chain().focus().redo().run()
+          }
         }}
-        disabled={!stableEditor?.can().redo()}
-        style={{ ...buttonStyle, opacity: stableEditor?.can().redo() ? 1 : 0.3 }}
+        disabled={!stableEditor || isPDF || !stableEditor.can().redo()}
+        style={{ ...buttonStyle, opacity: (stableEditor && !isPDF && stableEditor.can().redo()) ? 1 : 0.3 }}
         title="Redo"
         onMouseEnter={(e) => {
-          if (stableEditor?.can().redo()) {
+          if (stableEditor && !isPDF && stableEditor.can().redo()) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
@@ -1222,18 +1244,19 @@ export default function Toolbar({
                   key={style.value}
                   onMouseDown={(e) => {
                     e.preventDefault()
+                    if (!canUseEditor()) return
                     if (style.value === 'title') {
                       // @ts-ignore - Title extension command
-                      stableEditor.chain().focus().setTitle().run()
+                      stableEditor!.chain().focus().setTitle().run()
                     } else if (style.value === 'subtitle') {
                       // @ts-ignore - Subtitle extension command
-                      stableEditor.chain().focus().setSubtitle().run()
+                      stableEditor!.chain().focus().setSubtitle().run()
                     } else if (style.value.startsWith('h')) {
                       const level = parseInt(style.value.slice(1)) as 1 | 2 | 3
-                      stableEditor.chain().focus().toggleHeading({ level }).run()
+                      stableEditor!.chain().focus().toggleHeading({ level }).run()
                     } else {
                       // Normal text
-                      stableEditor.chain().focus().setParagraph().run()
+                      stableEditor!.chain().focus().setParagraph().run()
                     }
                     setShowStyleMenu(false)
                   }}
@@ -1329,8 +1352,10 @@ export default function Toolbar({
                   key={font}
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    stableEditor.chain().focus().setMark('textStyle', { fontFamily: font }).run()
-                    setShowFontMenu(false)
+                    if (canUseEditor()) {
+                      stableEditor!.chain().focus().setMark('textStyle', { fontFamily: font }).run()
+                      setShowFontMenu(false)
+                    }
                   }}
                   style={{
                     padding: '8px 16px',
@@ -1489,25 +1514,28 @@ export default function Toolbar({
 
       <div style={dividerStyle} />
 
-      {/* Bold, Italic, Underline */}
+      {/* Bold, Italic, Underline - Disabled for PDF files */}
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          if (isTableNodeSelected() || isSelectionInTableCell()) {
-            applyTableCellFormatting('bold')
-          } else {
-            stableEditor.chain().focus().toggleBold().run()
+          if (canUseEditor()) {
+            if (isTableNodeSelected() || isSelectionInTableCell()) {
+              applyTableCellFormatting('bold')
+            } else {
+              stableEditor!.chain().focus().toggleBold().run()
+            }
           }
         }}
-        style={stableEditor?.isActive('bold') || (isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('bold') ? activeButtonStyle : buttonStyle}
+        disabled={!canUseEditor()}
+        style={(canUseEditor() && (stableEditor!.isActive('bold') || (isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('bold'))) ? activeButtonStyle : buttonStyle}
         title="Bold"
         onMouseEnter={(e) => {
-          if (!stableEditor?.isActive('bold')) {
+          if (canUseEditor() && !stableEditor!.isActive('bold')) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
         onMouseLeave={(e) => {
-          if (!stableEditor?.isActive('bold')) {
+          if (canUseEditor() && !stableEditor!.isActive('bold')) {
             e.currentTarget.style.backgroundColor = 'transparent'
           }
         }}
@@ -1517,21 +1545,24 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          if (isTableNodeSelected() || isSelectionInTableCell()) {
-            applyTableCellFormatting('italic')
-          } else {
-            stableEditor.chain().focus().toggleItalic().run()
+          if (canUseEditor()) {
+            if (isTableNodeSelected() || isSelectionInTableCell()) {
+              applyTableCellFormatting('italic')
+            } else {
+              stableEditor!.chain().focus().toggleItalic().run()
+            }
           }
         }}
-        style={stableEditor?.isActive('italic') || ((isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('italic')) ? activeButtonStyle : buttonStyle}
+        disabled={!canUseEditor()}
+        style={(canUseEditor() && (stableEditor!.isActive('italic') || ((isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('italic')))) ? activeButtonStyle : buttonStyle}
         title="Italic"
         onMouseEnter={(e) => {
-          if (!stableEditor?.isActive('italic')) {
+          if (canUseEditor() && !stableEditor!.isActive('italic')) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
         onMouseLeave={(e) => {
-          if (!stableEditor?.isActive('italic')) {
+          if (canUseEditor() && !stableEditor!.isActive('italic')) {
             e.currentTarget.style.backgroundColor = 'transparent'
           }
         }}
@@ -1541,10 +1572,12 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          if (isTableNodeSelected() || isSelectionInTableCell()) {
-            applyTableCellFormatting('underline')
-          } else {
-            stableEditor.chain().focus().toggleUnderline().run()
+          if (canUseEditor()) {
+            if (isTableNodeSelected() || isSelectionInTableCell()) {
+              applyTableCellFormatting('underline')
+            } else {
+              stableEditor!.chain().focus().toggleUnderline().run()
+            }
           }
         }}
         style={stableEditor?.isActive('underline') || ((isTableNodeSelected() || isSelectionInTableCell()) && document.queryCommandState('underline')) ? activeButtonStyle : buttonStyle}
@@ -1618,12 +1651,13 @@ export default function Toolbar({
                   key={color}
                   onMouseDown={(e) => {
                     e.preventDefault()
+                    if (!canUseEditor()) return
                     if (isDefaultColor) {
                       // For black/white, unset color to use theme's default text color
-                      stableEditor.chain().focus().unsetColor().run()
+                      stableEditor!.chain().focus().unsetColor().run()
                     } else {
                       // For other colors, set them normally
-                      stableEditor.chain().focus().setColor(color).run()
+                      stableEditor!.chain().focus().setColor(color).run()
                     }
                     setShowColorMenu(false)
                   }}
@@ -1717,7 +1751,8 @@ export default function Toolbar({
                       key={color}
                       onMouseDown={(e) => {
                         e.preventDefault()
-                        stableEditor.chain().focus().toggleHighlight({ color }).run()
+                        if (!canUseEditor()) return
+                        stableEditor!.chain().focus().toggleHighlight({ color }).run()
                         setShowHighlightMenu(false)
                       }}
                       style={{
@@ -1759,9 +1794,11 @@ export default function Toolbar({
                 <button
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    stableEditor.chain().focus().unsetHighlight().run()
+                    if (!canUseEditor()) return
+                    stableEditor!.chain().focus().unsetHighlight().run()
                     setShowHighlightMenu(false)
                   }}
+                  disabled={!canUseEditor()}
                   style={{
                     width: '100%',
                     padding: '6px 12px',
@@ -2055,7 +2092,8 @@ export default function Toolbar({
                 <button
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  stableEditor.chain().focus().setTextAlign('left').run()
+                  if (!canUseEditor()) return
+                  stableEditor!.chain().focus().setTextAlign('left').run()
                   setShowAlignMenu(false)
                 }}
                 style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2067,7 +2105,8 @@ export default function Toolbar({
               <button
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  stableEditor.chain().focus().setTextAlign('center').run()
+                  if (!canUseEditor()) return
+                  stableEditor!.chain().focus().setTextAlign('center').run()
                   setShowAlignMenu(false)
                 }}
                 style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2079,7 +2118,8 @@ export default function Toolbar({
               <button
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  stableEditor.chain().focus().setTextAlign('right').run()
+                  if (!canUseEditor()) return
+                  stableEditor!.chain().focus().setTextAlign('right').run()
                   setShowAlignMenu(false)
                 }}
                 style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2091,7 +2131,8 @@ export default function Toolbar({
               <button
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  stableEditor.chain().focus().setTextAlign('justify').run()
+                  if (!canUseEditor()) return
+                  stableEditor!.chain().focus().setTextAlign('justify').run()
                   setShowAlignMenu(false)
                 }}
                 style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2108,7 +2149,8 @@ export default function Toolbar({
                 <button
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    stableEditor.chain().focus().liftListItem('listItem').run()
+                    if (!canUseEditor()) return
+                    stableEditor!.chain().focus().liftListItem('listItem').run()
                     setShowAlignMenu(false)
                   }}
                   style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2120,7 +2162,8 @@ export default function Toolbar({
                 <button
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    stableEditor.chain().focus().sinkListItem('listItem').run()
+                    if (!canUseEditor()) return
+                    stableEditor!.chain().focus().sinkListItem('listItem').run()
                     setShowAlignMenu(false)
                   }}
                   style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2173,7 +2216,8 @@ export default function Toolbar({
                 key={spacing}
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  stableEditor.chain().focus().setLineHeight(spacing.toString()).run()
+                  if (!canUseEditor()) return
+                  stableEditor!.chain().focus().setLineHeight(spacing.toString()).run()
                   setShowSpacingMenu(false)
                 }}
                 style={{
@@ -2193,21 +2237,24 @@ export default function Toolbar({
         })()}
       </div>
 
-      {/* Bulleted List */}
+      {/* Bulleted List - Disabled for PDF files */}
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          stableEditor.chain().focus().toggleBulletList().run()
+          if (canUseEditor()) {
+            stableEditor!.chain().focus().toggleBulletList().run()
+          }
         }}
-        style={stableEditor?.isActive('bulletList') ? activeButtonStyle : buttonStyle}
+        disabled={!canUseEditor()}
+        style={(canUseEditor() && stableEditor!.isActive('bulletList')) ? activeButtonStyle : buttonStyle}
         title="Bulleted list"
         onMouseEnter={(e) => {
-          if (!stableEditor?.isActive('bulletList')) {
+          if (canUseEditor() && !stableEditor!.isActive('bulletList')) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
         onMouseLeave={(e) => {
-          if (!stableEditor?.isActive('bulletList')) {
+          if (canUseEditor() && !stableEditor!.isActive('bulletList')) {
             e.currentTarget.style.backgroundColor = 'transparent'
           }
         }}
@@ -2215,21 +2262,24 @@ export default function Toolbar({
         <FormatListBulletedIcon style={{ fontSize: '20px' }} />
       </button>
 
-      {/* Numbered List */}
+      {/* Numbered List - Disabled for PDF files */}
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          stableEditor.chain().focus().toggleOrderedList().run()
+          if (canUseEditor()) {
+            stableEditor!.chain().focus().toggleOrderedList().run()
+          }
         }}
-        style={stableEditor?.isActive('orderedList') ? activeButtonStyle : buttonStyle}
+        disabled={!canUseEditor()}
+        style={(canUseEditor() && stableEditor!.isActive('orderedList')) ? activeButtonStyle : buttonStyle}
         title="Numbered list"
         onMouseEnter={(e) => {
-          if (!stableEditor?.isActive('orderedList')) {
+          if (canUseEditor() && !stableEditor!.isActive('orderedList')) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
         onMouseLeave={(e) => {
-          if (!stableEditor?.isActive('orderedList')) {
+          if (canUseEditor() && !stableEditor!.isActive('orderedList')) {
             e.currentTarget.style.backgroundColor = 'transparent'
           }
         }}
@@ -2237,12 +2287,15 @@ export default function Toolbar({
         <FormatListNumberedIcon style={{ fontSize: '20px' }} />
       </button>
 
-      {/* Increase Indent */}
+      {/* Increase Indent - Disabled for PDF files */}
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          stableEditor.chain().focus().sinkListItem('listItem').run()
+          if (canUseEditor()) {
+            stableEditor!.chain().focus().sinkListItem('listItem').run()
+          }
         }}
+        disabled={!canUseEditor()}
         style={buttonStyle}
         title="Increase indent"
         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
@@ -2251,12 +2304,15 @@ export default function Toolbar({
         <FormatIndentIncreaseIcon style={{ fontSize: '20px' }} />
       </button>
 
-      {/* Decrease Indent */}
+      {/* Decrease Indent - Disabled for PDF files */}
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          stableEditor.chain().focus().liftListItem('listItem').run()
+          if (canUseEditor()) {
+            stableEditor!.chain().focus().liftListItem('listItem').run()
+          }
         }}
+        disabled={!canUseEditor()}
         style={buttonStyle}
         title="Decrease indent"
         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}

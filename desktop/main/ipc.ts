@@ -5,9 +5,12 @@ import { chatHistoryService } from './services/chatHistoryService.js'
 import { geminiService } from './services/geminiService.js'
 import { openaiService } from './services/openaiService.js'
 import { projectService } from './services/projectService.js'
+import { indexingService } from './services/indexingService.js'
+import { semanticSearchService } from './services/semanticSearchService.js'
 import { exportService } from './services/export.js'
 import { extractPDFTextAsync } from './services/pdfTextExtractor.js'
 import { parseDocx, splitDocxIntoChapters } from './services/docxParser.js'
+import { saveApiKeys, getApiKeys } from './services/apiKeyStore.js'
 import path from 'path'
 import { app } from 'electron'
 
@@ -33,9 +36,7 @@ export function setupIPC() {
 
   ipcMain.handle('document:create', async (_, title: string, folder?: 'library' | 'project') => {
     try {
-      console.log('[IPC document:create] Received title:', title, 'folder:', folder)
       const result = await documentService.create(title, folder)
-      console.log('[IPC document:create] Returning document:', JSON.stringify(result, null, 2))
       return result
     } catch (error) {
       console.error('IPC document:create error:', error)
@@ -43,11 +44,9 @@ export function setupIPC() {
     }
   })
 
-  ipcMain.handle('document:uploadFile', async (_, filePath: string, fileName: string, folder: 'library' | 'project') => {
+  ipcMain.handle('document:uploadFile', async (_, filePath: string, fileName: string, folder: 'library' | 'project', projectId?: string) => {
     try {
-      console.log('[IPC document:uploadFile] Received filePath:', filePath, 'fileName:', fileName, 'folder:', folder)
-      const result = await documentService.uploadFile(filePath, fileName, folder)
-      console.log('[IPC document:uploadFile] Returning document:', JSON.stringify(result, null, 2))
+      const result = await documentService.uploadFile(filePath, fileName, folder, projectId)
       return result
     } catch (error) {
       console.error('IPC document:uploadFile error:', error)
@@ -151,7 +150,7 @@ export function setupIPC() {
 
   // AI operations
   // Chat always uses Gemini (not Ollama)
-  ipcMain.handle('ai:chat', async (_, apiKey: string, message: string, documentContent?: string, documentId?: string) => {
+  ipcMain.handle('ai:chat', async (_, apiKey: string, message: string, documentContent?: string, documentId?: string, openaiApiKey?: string) => {
     try {
       // Get projectId from document if documentId is provided
       let projectId: string | undefined
@@ -159,7 +158,7 @@ export function setupIPC() {
         const document = await documentService.getById(documentId)
         projectId = document?.projectId
       }
-      return await geminiService.chat(apiKey, message, documentContent, projectId)
+      return await geminiService.chat(apiKey, message, documentContent, projectId, undefined, undefined, openaiApiKey)
     } catch (error) {
       console.error('IPC ai:chat error:', error)
       throw error
@@ -172,7 +171,6 @@ export function setupIPC() {
     const webContents = event.sender
     const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     
-    console.log(`[Stream] Starting stream ${streamId} (model: ${modelName || 'gemini-2.5-flash'}, web search: ${useWebSearch ? 'enabled' : 'disabled'}, attachments: ${attachments?.length || 0})`)
     
     try {
       // Get projectId from document if documentId is provided
@@ -197,17 +195,15 @@ export function setupIPC() {
       // Start streaming in background
       ;(async () => {
         try {
-          console.log(`[Stream] Calling ${useOpenai ? 'openaiService' : 'geminiService'}.streamChat with ${chatHistory?.length || 0} history messages, ${attachments?.length || 0} attachments...`)
           let chunkCount = 0
           const stream = useOpenai
-            ? openaiService.streamChat(openaiApiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, style)
-            : geminiService.streamChat(googleApiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments)
+            ? openaiService.streamChat(openaiApiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, style, googleApiKey)
+            : geminiService.streamChat(googleApiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, openaiApiKey)
           
           for await (const chunk of stream) {
             chunkCount++
             webContents.send('ai:streamChunk', streamId, chunk)
           }
-          console.log(`[Stream] Stream complete, total chunks: ${chunkCount}`)
           webContents.send('ai:streamEnd', streamId)
         } catch (error) {
           console.error('[Stream] Stream error:', error)
@@ -250,10 +246,8 @@ export function setupIPC() {
       
       // Use Gemini if available (default), otherwise fall back to OpenAI GPT-5 Nano
       if (googleApiKey) {
-        console.log('[IPC] Using Gemini 2.5 Flash Lite for autocomplete')
         return await geminiService.autocomplete(googleApiKey, text, cursorPosition, documentContent, projectId, 'gemini-2.5-flash-lite')
       } else if (openaiApiKey) {
-        console.log('[IPC] Using OpenAI GPT-5 Nano for autocomplete')
         return await openaiService.autocomplete(openaiApiKey, text, cursorPosition, documentContent, projectId, 'gpt-5-nano')
       } else {
         throw new Error('No API key configured. Please set either Google API key or OpenAI API key in Settings > API Keys.')
@@ -284,12 +278,6 @@ export function setupIPC() {
   // Rephrase text uses GPT-5 Nano if only OpenAI key is available, otherwise Gemini 2.5 Flash Lite
   ipcMain.handle('ai:rephraseText', async (_, googleApiKey: string, openaiApiKey: string, text: string, instruction: string) => {
     try {
-      console.log('[IPC] Rephrase text request:', { 
-        textLength: text.length, 
-        textPreview: text.length > 50 ? text.substring(0, 50) + '...' : text,
-        fullText: text,
-        instruction 
-      })
       
       // Explicitly instruct to only return the rephrased text with no follow-up questions or suggestions
       const prompt = `Rephrase this text according to the instruction. 
@@ -527,7 +515,6 @@ Rephrased text:`
       }
       // Ensure usePageBreaks is explicitly boolean (default to true if undefined)
       const shouldUsePageBreaks = usePageBreaks !== undefined ? usePageBreaks : true
-      console.log('[IPC] export:exportMultiple - usePageBreaks:', usePageBreaks, 'shouldUsePageBreaks:', shouldUsePageBreaks)
       const fileBuffer = await exportService.exportMultipleDocuments(documentIds, format, shouldUsePageBreaks)
       return Array.from(fileBuffer) // Convert Buffer to array for IPC
     } catch (error) {
@@ -711,6 +698,108 @@ Rephrased text:`
     }
   })
 
-  console.log('IPC handlers registered')
+  // Library indexing operations
+  ipcMain.handle('library:indexFile', async (_, documentId: string, geminiApiKey?: string, openaiApiKey?: string) => {
+    try {
+      const status = await indexingService.indexLibraryFile(documentId, geminiApiKey, openaiApiKey)
+      return status
+    } catch (error: any) {
+      console.error('IPC library:indexFile error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('library:getIndexingStatus', async (_, documentId: string) => {
+    try {
+      const status = await indexingService.getIndexingStatus(documentId)
+      return status
+    } catch (error: any) {
+      console.error('IPC library:getIndexingStatus error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('library:reindexFile', async (_, documentId: string, geminiApiKey?: string, openaiApiKey?: string) => {
+    try {
+      const status = await indexingService.reindexFile(documentId, geminiApiKey, openaiApiKey)
+      return status
+    } catch (error: any) {
+      console.error('IPC library:reindexFile error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('library:indexAll', async (_, geminiApiKey?: string, openaiApiKey?: string) => {
+    try {
+      const results = await indexingService.indexAllLibraryFiles(geminiApiKey, openaiApiKey)
+      return results
+    } catch (error: any) {
+      console.error('IPC library:indexAll error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('library:removeFromIndex', async (_, documentId: string) => {
+    try {
+      await indexingService.removeFromIndex(documentId)
+      return { success: true }
+    } catch (error: any) {
+      console.error('IPC library:removeFromIndex error:', error)
+      throw error
+    }
+  })
+
+  // Library search operations (for testing/debugging)
+  ipcMain.handle('library:search', async (_, query: string, geminiApiKey?: string, openaiApiKey?: string, fileIds?: string[], k?: number, projectId?: string) => {
+    try {
+      const { searchLibrary } = await import('./services/semanticSearchService.js')
+      // Use 'library' as default for library search, or projectId for project-specific search
+      const searchProjectId = projectId || 'library'
+      const results = await searchLibrary(query, geminiApiKey, openaiApiKey, fileIds, k || 3, searchProjectId)
+      return results
+    } catch (error: any) {
+      console.error('IPC library:search error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('library:getFiles', async () => {
+    try {
+      const files = await semanticSearchService.getLibraryFiles()
+      return files
+    } catch (error: any) {
+      console.error('IPC library:getFiles error:', error)
+      throw error
+    }
+  })
+
+  // API Key storage handlers
+  ipcMain.handle('settings:saveApiKeys', async (_, geminiApiKey?: string, openaiApiKey?: string) => {
+    try {
+      const changed = saveApiKeys(geminiApiKey, openaiApiKey)
+      // Only log if keys actually changed to avoid spam from duplicate calls
+      if (changed) {
+        const keys = getApiKeys()
+      }
+      return { success: true }
+    } catch (error) {
+      console.error('IPC settings:saveApiKeys error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('settings:getApiKeys', async () => {
+    try {
+      const keys = getApiKeys()
+      return {
+        geminiApiKey: keys.geminiApiKey || '',
+        openaiApiKey: keys.openaiApiKey || '',
+      }
+    } catch (error) {
+      console.error('IPC settings:getApiKeys error:', error)
+      throw error
+    }
+  })
+
 }
 

@@ -638,7 +638,12 @@ function FileExplorer({
             }
 
             // Upload file normally (including DOCX files)
-            const document = await documentApi.uploadFile(finalFilePath, file.name, folderId)
+            // CRITICAL: If uploading to project folder, pass current projectId
+            // This ensures the document is immediately associated with the project
+            // and will be indexed to the correct project index
+            const currentProjectId = documents.find(d => d.id === currentDocumentId)?.projectId
+            const projectIdForUpload = folderId === 'project' ? currentProjectId : undefined
+            const document = await documentApi.uploadFile(finalFilePath, file.name, folderId, projectIdForUpload)
             if (document && onFileUploaded) {
               const isBatchUpload = totalFiles > 1
               onFileUploaded(document, isBatchUpload)
