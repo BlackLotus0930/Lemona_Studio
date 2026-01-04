@@ -1834,7 +1834,9 @@ function FileExplorer({
             Rename
           </button>
           )}
-          {(contextMenuPos.item.document || contextMenuPos.item.type === 'file') && onDocumentDelete && (
+          {(contextMenuPos.item.document || contextMenuPos.item.type === 'file') && onDocumentDelete && 
+           // Don't show delete option for README files
+           !(contextMenuPos.item.document && (contextMenuPos.item.document.title === 'README.md' || contextMenuPos.item.document.title.toLowerCase() === 'readme.md')) && (
             <button
               onClick={(e) => {
                 if (contextMenuPos.item.document && onDocumentDelete) {

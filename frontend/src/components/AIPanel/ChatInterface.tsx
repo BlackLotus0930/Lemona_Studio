@@ -1321,7 +1321,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           <div style={{
             textAlign: 'center',
             color: secondaryTextColor,
-            marginTop: '40px',
+            marginTop: '80px',
             padding: '16px'
           }}>
             <p style={{ color: textColor }}>Start a conversation</p>
@@ -2685,7 +2685,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               borderRadius: '6px',
                               cursor: isLoading ? 'not-allowed' : 'pointer',
                               fontSize: '13px',
-                              fontWeight: selectedModel === 'gemini-2.5-flash' ? '400' : '300',
+                              fontWeight: '300',
                               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                               textAlign: 'left',
                               transition: 'all 0.15s',
@@ -2724,7 +2724,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               borderRadius: '6px',
                               cursor: isLoading ? 'not-allowed' : 'pointer',
                               fontSize: '13px',
-                              fontWeight: selectedModel === 'gemini-2.5-pro' ? '400' : '300',
+                              fontWeight: '300',
                               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                               textAlign: 'left',
                               transition: 'all 0.15s',
@@ -2775,7 +2775,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               borderRadius: '6px',
                               cursor: isLoading ? 'not-allowed' : 'pointer',
                               fontSize: '13px',
-                              fontWeight: selectedModel === 'gpt-5-nano' ? '400' : '300',
+                              fontWeight: '300',
                               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                               textAlign: 'left',
                               transition: 'all 0.15s',
@@ -2814,7 +2814,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               borderRadius: '6px',
                               cursor: isLoading ? 'not-allowed' : 'pointer',
                               fontSize: '13px',
-                              fontWeight: selectedModel === 'gpt-5-mini' ? '400' : '300',
+                              fontWeight: '300',
                               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                               textAlign: 'left',
                               transition: 'all 0.15s',
@@ -2853,7 +2853,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               borderRadius: '6px',
                               cursor: isLoading ? 'not-allowed' : 'pointer',
                               fontSize: '13px',
-                              fontWeight: selectedModel === 'gpt-5.2' ? '400' : '300',
+                              fontWeight: '300',
                               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                               textAlign: 'left',
                               transition: 'all 0.15s',

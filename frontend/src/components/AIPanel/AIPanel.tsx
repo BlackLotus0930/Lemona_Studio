@@ -462,8 +462,22 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     }
     
     if (chats.length === 1) {
-      // If it's the last chat, create a new one
-      handleNewChat()
+      // If it's the last chat, create a new one and replace the old one
+      if (!document?.id) return
+      
+      const newChatId = `chat_${Date.now()}`
+      const newChat: Chat = {
+        id: newChatId,
+        name: `Chat 1`,
+        messages: []
+      }
+      // Replace the old chat with the new one
+      setChats([newChat])
+      setActiveChatId(newChatId)
+      previousActiveChatIdRef.current = newChatId
+      
+      // Update persisted open tabs list
+      saveOpenChatTabs(document, [newChatId])
       // Don't delete from backend - keep it in history so it can be reopened
     } else {
       // Remove the chat from tabs (but keep it in backend history)
@@ -893,7 +907,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             title="Close AI Panel"
           >
-            <CloseIcon style={{ fontSize: '19px', fontWeight: 200 }} />
+            <CloseIcon style={{ fontSize: '18px', fontWeight: 200 }} />
           </button>
           
           <div ref={menuRef} style={{ position: 'relative', display: 'none' }}>

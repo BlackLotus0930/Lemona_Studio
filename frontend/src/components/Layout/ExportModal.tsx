@@ -122,14 +122,15 @@ export default function ExportModal({
     }
 
     if (isOpen) {
+      // Use capture phase to catch events before they're stopped by other components (e.g., AI panel)
       // Use a small delay to avoid closing immediately when opening
       const timeoutId = setTimeout(() => {
-        document.addEventListener('mousedown', handleClickOutside)
+        document.addEventListener('mousedown', handleClickOutside, true)
       }, 100)
       
       return () => {
         clearTimeout(timeoutId)
-        document.removeEventListener('mousedown', handleClickOutside)
+        document.removeEventListener('mousedown', handleClickOutside, true)
       }
     }
   }, [isOpen, triggerRef, onClose])
