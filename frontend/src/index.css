@@ -111,6 +111,7 @@ body {
 body:not(.dark-theme) {
   background-color: #ffffff;
   color: #202124;
+  font-weight: 450; /* Make text bolder in light mode */
 }
 
 body.dark-theme {
@@ -129,6 +130,42 @@ body.dark-theme {
 /* Light theme override */
 body:not(.dark-theme) #root {
   background-color: #ffffff;
+}
+
+/* Headings should be even bolder in light mode */
+body:not(.dark-theme) h1,
+body:not(.dark-theme) h2,
+body:not(.dark-theme) h3,
+body:not(.dark-theme) h4,
+body:not(.dark-theme) h5,
+body:not(.dark-theme) h6 {
+  font-weight: 650;
+}
+
+/* Editor content in light mode */
+body:not(.dark-theme) .ProseMirror {
+  font-weight: 450;
+}
+
+body:not(.dark-theme) .ProseMirror p {
+  font-weight: 450;
+}
+
+body:not(.dark-theme) .ProseMirror h1,
+body:not(.dark-theme) .ProseMirror h2,
+body:not(.dark-theme) .ProseMirror h3,
+body:not(.dark-theme) .ProseMirror h4,
+body:not(.dark-theme) .ProseMirror h5,
+body:not(.dark-theme) .ProseMirror h6 {
+  font-weight: 650;
+}
+
+body:not(.dark-theme) .ProseMirror p[data-type="title"] {
+  font-weight: 650;
+}
+
+body:not(.dark-theme) .ProseMirror p[data-type="subtitle"] {
+  font-weight: 550;
 }
 
 #root.dark-theme,

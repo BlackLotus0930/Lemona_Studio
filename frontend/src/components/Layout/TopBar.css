@@ -66,6 +66,7 @@
 
 .topbar-light .menu-item {
   color: #5f6368;
+  font-weight: 450; /* Make menu items bolder in light mode */
 }
 
 .topbar-light .menu-item:hover {
