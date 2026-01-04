@@ -165,111 +165,151 @@ export const documentService = {
         await fs.writeFile(filePath, JSON.stringify(document, null, 2));
         return document;
     },
+    /**
+     * Delete a single document
+     * For batch deletion, use deleteMany() for better lock efficiency
+     */
     async delete(id) {
-        const projectLockManager = getProjectLockManager();
-        let releaseLock = null;
-        try {
-            // Step 1: Get document, check if exists (idempotency)
+        const results = await this.deleteMany([id]);
+        return results[0] ?? false;
+    },
+    /**
+     * Delete multiple documents efficiently
+     * Acquires write lock once per project, processes all deletions, then releases
+     *
+     * @param ids - Array of document IDs to delete
+     * @returns Array of boolean results (true = success, false = failed)
+     */
+    async deleteMany(ids) {
+        if (ids.length === 0) {
+            return [];
+        }
+        // Group documents by projectId for efficient lock management
+        const documentsByProject = new Map();
+        // First pass: get all documents and group by project
+        for (const id of ids) {
             const document = await this.getById(id);
             if (!document) {
-                // Document doesn't exist - consider it already deleted (idempotent)
-                console.log(`[documentService.delete] Document ${id} does not exist, considering already deleted`);
-                return true;
+                console.log(`[documentService.deleteMany] Document ${id} does not exist, considering already deleted`);
+                continue;
             }
-            // Check if already deleted (idempotency)
             if (document.deleted === true) {
-                console.log(`[documentService.delete] Document ${id} is already marked as deleted`);
-                return true;
+                console.log(`[documentService.deleteMany] Document ${id} is already marked as deleted`);
+                continue;
             }
-            // Step 2: Acquire write lock for the project
-            // Use 'library' for library folder, projectId for project files
             const projectId = document.folder === 'library' ? 'library' : document.projectId;
-            // Only acquire lock if document is indexed (library or project file)
-            if (document.folder === 'library' || document.projectId) {
-                releaseLock = await projectLockManager.acquireWriteLock(projectId);
-                console.log(`[documentService.delete] Acquired write lock for project: ${projectId || 'global'}`);
+            if (!documentsByProject.has(projectId)) {
+                documentsByProject.set(projectId, []);
             }
-            try {
-                // Step 3: Remove from vector index (if indexed)
-                if (document.folder === 'library' || document.projectId) {
-                    try {
-                        const vectorStore = getVectorStore(projectId);
-                        await vectorStore.loadIndex();
-                        // Use skipLock=true since we already hold the write lock
-                        await vectorStore.removeChunksByFile(id, false, true); // autoSave=false, skipLock=true
-                        console.log(`[documentService.delete] Removed chunks from index for file: ${id} (project: ${projectId || 'global'})`);
-                        // Step 4: Immediately save index and metadata (atomic)
-                        await vectorStore.saveIndex();
-                        console.log(`[documentService.delete] Successfully saved index after removing chunks for file: ${id}`);
-                    }
-                    catch (indexError) {
-                        // If index removal fails, don't proceed with deletion (ensure consistency)
-                        console.error(`[documentService.delete] Failed to remove from index:`, indexError.message);
-                        throw new Error(`Failed to remove from index: ${indexError.message}`);
-                    }
-                }
-                // Step 5: Mark document as deleted (logical deletion)
-                document.deleted = true;
-                document.updatedAt = new Date().toISOString();
-                // Step 6: Save document with deleted flag
-                const filePath = getDocumentPath(id);
-                await fs.writeFile(filePath, JSON.stringify(document, null, 2));
-                console.log(`[documentService.delete] Successfully marked document as deleted: ${id}`);
-                // Step 7: Release write lock
-                if (releaseLock) {
-                    releaseLock();
-                    releaseLock = null;
-                }
-                // Step 8: Background async deletion of disk files (non-blocking)
-                // Delete the document JSON file and associated file asynchronously
-                setImmediate(async () => {
-                    try {
-                        const docPath = getDocumentPath(id);
-                        try {
-                            await fs.access(docPath);
-                            await fs.unlink(docPath);
-                            console.log(`[documentService.delete] Background: Successfully deleted document JSON: ${id}`);
-                        }
-                        catch (accessError) {
-                            console.log(`[documentService.delete] Background: Document JSON file does not exist: ${docPath}`);
-                        }
-                        // Also delete the associated file (PDF, image, etc.) if it exists
-                        if (document.title) {
-                            const associatedFilePath = getFilePath(id, document.title);
-                            try {
-                                await fs.access(associatedFilePath);
-                                await fs.unlink(associatedFilePath);
-                                console.log(`[documentService.delete] Background: Successfully deleted associated file: ${associatedFilePath}`);
-                            }
-                            catch (fileError) {
-                                console.log(`[documentService.delete] Background: Associated file does not exist: ${associatedFilePath}`);
-                            }
-                        }
-                    }
-                    catch (bgError) {
-                        console.error(`[documentService.delete] Background: Error deleting files for ${id}:`, bgError);
-                        // Don't throw - background cleanup failure shouldn't affect deletion
-                    }
-                });
-                return true;
-            }
-            catch (error) {
-                // If any step fails, release lock and re-throw
-                if (releaseLock) {
-                    releaseLock();
-                    releaseLock = null;
-                }
-                throw error;
-            }
+            documentsByProject.get(projectId).push({ id, document });
         }
-        catch (error) {
-            console.error(`[documentService.delete] Failed to delete document: ${id}`, error);
-            // Ensure lock is released even on error
-            if (releaseLock) {
+        const results = new Map();
+        const projectLockManager = getProjectLockManager();
+        // Process each project group with a single lock acquisition
+        for (const [projectId, docs] of documentsByProject.entries()) {
+            // Only acquire lock if documents are indexed (library or project files)
+            if (projectId === undefined && docs.every(d => !d.document.folder && !d.document.projectId)) {
+                // All documents are unindexed, process without lock
+                for (const { id, document } of docs) {
+                    try {
+                        await this.deleteUnsafe(id, document);
+                        results.set(id, true);
+                    }
+                    catch (error) {
+                        console.error(`[documentService.deleteMany] Failed to delete document: ${id}`, error);
+                        results.set(id, false);
+                    }
+                }
+                continue;
+            }
+            // Acquire write lock once for this project
+            const releaseLock = await projectLockManager.acquireWriteLock(projectId);
+            console.log(`[documentService.deleteMany] Acquired write lock for project: ${projectId || 'global'} (${docs.length} documents)`);
+            try {
+                // Load index once for all deletions in this project
+                let vectorStore = null;
+                if (docs.some(d => d.document.folder === 'library' || d.document.projectId)) {
+                    vectorStore = getVectorStore(projectId);
+                    await vectorStore.loadIndexUnsafe();
+                }
+                // Process all deletions in this project
+                for (const { id, document } of docs) {
+                    try {
+                        // Remove from vector index if indexed
+                        if (vectorStore && (document.folder === 'library' || document.projectId)) {
+                            await vectorStore.removeChunksByFileUnsafe(id, false); // autoSave=false, save once at end
+                        }
+                        // Mark document as deleted
+                        await this.deleteUnsafe(id, document);
+                        results.set(id, true);
+                    }
+                    catch (error) {
+                        console.error(`[documentService.deleteMany] Failed to delete document: ${id}`, error);
+                        results.set(id, false);
+                    }
+                }
+                // Save index once after all deletions in this project
+                if (vectorStore && docs.some(d => d.document.folder === 'library' || d.document.projectId)) {
+                    try {
+                        await vectorStore.saveIndexUnsafe();
+                        console.log(`[documentService.deleteMany] Saved index after deleting ${docs.length} files from project: ${projectId || 'global'}`);
+                    }
+                    catch (saveError) {
+                        console.error(`[documentService.deleteMany] Failed to save index:`, saveError);
+                        // Don't fail the entire operation, but log the error
+                    }
+                }
+            }
+            finally {
                 releaseLock();
             }
-            return false;
         }
+        // Return results in the same order as input
+        return ids.map(id => results.get(id) ?? false);
+    },
+    /**
+     * Internal unsafe delete method - assumes caller holds appropriate lock
+     * @param id - Document ID
+     * @param document - Document object (must be provided to avoid re-fetching)
+     */
+    async deleteUnsafe(id, document) {
+        // Mark document as deleted (logical deletion)
+        document.deleted = true;
+        document.updatedAt = new Date().toISOString();
+        // Save document with deleted flag
+        const filePath = getDocumentPath(id);
+        await fs.writeFile(filePath, JSON.stringify(document, null, 2));
+        console.log(`[documentService.deleteUnsafe] Successfully marked document as deleted: ${id}`);
+        // Background async deletion of disk files (non-blocking)
+        setImmediate(async () => {
+            try {
+                const docPath = getDocumentPath(id);
+                try {
+                    await fs.access(docPath);
+                    await fs.unlink(docPath);
+                    console.log(`[documentService.deleteUnsafe] Background: Successfully deleted document JSON: ${id}`);
+                }
+                catch (accessError) {
+                    console.log(`[documentService.deleteUnsafe] Background: Document JSON file does not exist: ${docPath}`);
+                }
+                // Also delete the associated file (PDF, image, etc.) if it exists
+                if (document.title) {
+                    const associatedFilePath = getFilePath(id, document.title);
+                    try {
+                        await fs.access(associatedFilePath);
+                        await fs.unlink(associatedFilePath);
+                        console.log(`[documentService.deleteUnsafe] Background: Successfully deleted associated file: ${associatedFilePath}`);
+                    }
+                    catch (fileError) {
+                        console.log(`[documentService.deleteUnsafe] Background: Associated file does not exist: ${associatedFilePath}`);
+                    }
+                }
+            }
+            catch (bgError) {
+                console.error(`[documentService.deleteUnsafe] Background: Error deleting files for ${id}:`, bgError);
+                // Don't throw - background cleanup failure shouldn't affect deletion
+            }
+        });
     },
     async uploadFile(sourceFilePath, fileName, folder, projectId) {
         await ensureDocumentsDir();
@@ -564,7 +604,6 @@ export const documentService = {
                     }
                 }
             }
-            console.log(`[cleanupOrphanedFiles] Cleanup complete. Removed ${removed} files.`);
             return { removed, errors };
         }
         catch (error) {

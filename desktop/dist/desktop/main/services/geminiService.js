@@ -248,7 +248,6 @@ async function buildContext(documentContent, projectId, chatHistory, cursorPosit
             // otherwise use 'library' for general library search
             // This ensures we search in the same index where documents were indexed
             const searchProjectId = projectId || 'library';
-            console.log(`[Gemini] Searching library with projectId: ${searchProjectId}`);
             const searchResult = await searchLibraryWithMentions(userMessage, apiKey, // geminiApiKey
             openaiApiKey, 3, // top-k
             searchProjectId);

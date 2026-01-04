@@ -1,6 +1,6 @@
 // Semantic Search Service - Parse @mentions and perform semantic search
 import { generateEmbedding } from './embeddingService.js'
-import { getVectorStore, SearchResult } from './vectorStore.js'
+import { getVectorStore, SearchResult, getProjectLockManager } from './vectorStore.js'
 import { documentService } from './documentService.js'
 
 /**
@@ -169,13 +169,36 @@ export async function searchLibrary(
     // Get vector store for the correct project
     // Use 'library' for library search, projectId for project search
     const searchProjectId = projectId === 'library' ? 'library' : projectId
-    const vectorStore = getVectorStore(searchProjectId)
-    await vectorStore.loadIndex()
+    const projectLockManager = getProjectLockManager()
+    
+    // Try read lock first (most common case)
+    let releaseLock = await projectLockManager.acquireReadLock(searchProjectId)
+    
+    try {
+      const vectorStore = getVectorStore(searchProjectId)
+      
+      // Try to load with read lock first
+      try {
+        await vectorStore.loadIndexUnsafe()
+      } catch (loadError: any) {
+        // If loadIndexUnsafe fails (e.g., needs rebuilding), upgrade to write lock explicitly
+        releaseLock()
+        releaseLock = await projectLockManager.acquireWriteLock(searchProjectId)
+        try {
+          await vectorStore.loadIndexUnsafe()
+        } finally {
+          // Release write lock and re-acquire read lock for search
+          releaseLock()
+          releaseLock = await projectLockManager.acquireReadLock(searchProjectId)
+        }
+      }
 
-    // Search
-    const results = await vectorStore.search(embedding, k, fileIds)
-
-    return results
+      // Search - we hold read lock
+      const results = await vectorStore.searchUnsafe(embedding, k, fileIds)
+      return results
+    } finally {
+      releaseLock()
+    }
   } catch (error: any) {
     // Handle missing API keys gracefully
     if (error.message?.includes('No embedding API key') || 

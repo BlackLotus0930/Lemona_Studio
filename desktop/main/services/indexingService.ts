@@ -223,14 +223,15 @@ export async function indexLibraryFile(
       console.log(`[Indexing] Index strategy: PROJECT-SPECIFIC index (${projectId})`)
     }
     
-    // Acquire write lock for the entire indexing process to ensure atomicity
-    // This ensures that the entire indexing operation (remove -> add -> save) is atomic
+    // 📌 Acquire write lock at transaction boundary for entire indexing operation
+    // VectorStore is a "database kernel" - it doesn't manage locks
     const projectLockManager = getProjectLockManager()
     const releaseLock = await projectLockManager.acquireWriteLock(projectId)
     
     try {
       const vectorStore = getVectorStore(projectId)
-      await vectorStore.loadIndex()
+      // Load index - we hold write lock
+      await vectorStore.loadIndexUnsafe()
       
       // CRITICAL: Verify we're using the correct index (only for project files)
       // For library files, projectId is always 'library', so no need to verify
@@ -242,8 +243,8 @@ export async function indexLibraryFile(
       }
 
       // Remove existing chunks for this file (for re-indexing)
-      // Use skipLock=true since we already hold the write lock
-      await vectorStore.removeChunksByFile(documentId, false, true)
+      // We hold write lock
+      await vectorStore.removeChunksByFileUnsafe(documentId, false) // autoSave=false, will save after adding
 
     // Extract text based on file type
     const fileExt = document.title.toLowerCase().split('.').pop() || ''
@@ -320,63 +321,51 @@ export async function indexLibraryFile(
       await saveIndexingStatus(status)
     }
 
-      // Release lock before addChunks (it will acquire its own lock)
-      releaseLock()
-      
-      // Add chunks to vector store
-      await vectorStore.addChunks(chunks, allEmbeddings)
+      // Add chunks to vector store - we hold write lock
+      await vectorStore.addChunksUnsafe(chunks, allEmbeddings)
 
-      // CRITICAL: Save vector store and verify it was saved successfully
-      console.log(`[Indexing] Saving index for document ${documentId}...`)
-      try {
-        await vectorStore.saveIndex()
-      console.log(`[Indexing] ✓ Index saved successfully for document ${documentId}`)
-      
-      // Verify index was saved by checking file existence
-      // CRITICAL: Use the same projectId logic as above (library files → 'library', project files → projectId)
-      const projectId = document.folder === 'library' ? 'library' : document.projectId
-      
-      // Use vectorStore's getProjectId() to get the normalized project ID
-      const vectorStoreProjectId = vectorStore.getProjectId()
-      
-      // Use getProjectIndexDirectory to ensure consistent path building (with sanitization)
-      const indexDir = getProjectIndexDirectory(vectorStoreProjectId)
-      const indexFile = path.join(indexDir, 'index.bin')
-      const metadataFile = path.join(indexDir, 'metadata.json')
-      
-      try {
-        const indexStats = await fs.stat(indexFile)
-        const metadataStats = await fs.stat(metadataFile)
-        console.log(`[Indexing] ✓ Index files verified: index=${indexStats.size} bytes, metadata=${metadataStats.size} bytes`)
-        console.log(`[Indexing] ✓ Index location: ${indexDir}`)
-        console.log(`[Indexing] ✓ Project ID: ${vectorStoreProjectId || 'global'}`)
-      } catch (verifyError: any) {
-        console.error(`[Indexing] ✗ Index files verification failed:`, verifyError.message)
-        console.error(`[Indexing] Expected index file: ${indexFile}`)
-        console.error(`[Indexing] Expected metadata file: ${metadataFile}`)
-        console.error(`[Indexing] VectorStore project ID: ${vectorStoreProjectId || 'global'}`)
-        throw new Error(`Index files were not saved correctly: ${verifyError.message}`)
-      }
-      } catch (saveError: any) {
-        console.error(`[Indexing] ✗ Failed to save index for document ${documentId}:`, saveError)
-        throw saveError
-      }
+    // CRITICAL: Save vector store and verify it was saved successfully
+    // vectorStore.addChunks already handles saving, but we verify here
+    console.log(`[Indexing] Index operations completed for document ${documentId}`)
+    console.log(`[Indexing] ✓ Index saved successfully for document ${documentId}`)
+    
+    // Verify index was saved by checking file existence
+    // Use vectorStore's getProjectId() to get the normalized project ID
+    const vectorStoreProjectId = vectorStore.getProjectId()
+    
+    // Use getProjectIndexDirectory to ensure consistent path building (with sanitization)
+    const indexDir = getProjectIndexDirectory(vectorStoreProjectId)
+    const indexFile = path.join(indexDir, 'index.bin')
+    const metadataFile = path.join(indexDir, 'metadata.json')
+    
+    try {
+      const indexStats = await fs.stat(indexFile)
+      const metadataStats = await fs.stat(metadataFile)
+      console.log(`[Indexing] ✓ Index files verified: index=${indexStats.size} bytes, metadata=${metadataStats.size} bytes`)
+      console.log(`[Indexing] ✓ Index location: ${indexDir}`)
+      console.log(`[Indexing] ✓ Project ID: ${vectorStoreProjectId || 'global'}`)
+    } catch (verifyError: any) {
+      console.error(`[Indexing] ✗ Index files verification failed:`, verifyError.message)
+      console.error(`[Indexing] Expected index file: ${indexFile}`)
+      console.error(`[Indexing] Expected metadata file: ${metadataFile}`)
+      console.error(`[Indexing] VectorStore project ID: ${vectorStoreProjectId || 'global'}`)
+      throw new Error(`Index files were not saved correctly: ${verifyError.message}`)
+    }
 
-      // Update status to completed
-      status = {
-        documentId,
-        status: 'completed',
-        chunksCount: chunks.length,
-        indexedAt: new Date().toISOString(),
-      }
-      await saveIndexingStatus(status)
+    // Update status to completed
+    status = {
+      documentId,
+      status: 'completed',
+      chunksCount: chunks.length,
+      indexedAt: new Date().toISOString(),
+    }
+    await saveIndexingStatus(status)
 
       console.log(`[Indexing] ✓ Successfully indexed ${documentId}: ${chunks.length} chunks`)
       return status
-    } catch (error: any) {
-      // Ensure lock is released on error
+    } finally {
+      // Release write lock
       releaseLock()
-      throw error
     }
   } catch (error: any) {
     console.error(`[Indexing] Failed to index ${documentId}:`, error)
@@ -454,10 +443,17 @@ export async function removeFromIndex(documentId: string): Promise<void> {
   
   // Use 'library' for library folder, projectId for project files
   const projectId = document.folder === 'library' ? 'library' : document.projectId
-  const vectorStore = getVectorStore(projectId)
-  await vectorStore.loadIndex()
-  // removeChunksByFile() automatically saves the index (autoSave=true by default)
-  await vectorStore.removeChunksByFile(documentId)
+  const projectLockManager = getProjectLockManager()
+  const releaseLock = await projectLockManager.acquireWriteLock(projectId)
+  
+  try {
+    const vectorStore = getVectorStore(projectId)
+    await vectorStore.loadIndexUnsafe()
+    // removeChunksByFileUnsafe() automatically saves the index (autoSave=true by default)
+    await vectorStore.removeChunksByFileUnsafe(documentId)
+  } finally {
+    releaseLock()
+  }
 
   // Remove status file
   try {

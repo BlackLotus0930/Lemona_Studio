@@ -116,6 +116,7 @@ export interface ChunkMetadata {
 interface LockState {
   readers: number // Number of active read locks
   writer: boolean // Whether a write lock is active
+  writerStack?: string // Stack trace of current writer (for detecting re-entrancy)
   readQueue: Array<() => void> // Queue of waiting read lock requests
   writeQueue: Array<() => void> // Queue of waiting write lock requests
 }
@@ -150,6 +151,7 @@ export class ProjectLockManager {
       this.locks.set(normalizedId, {
         readers: 0,
         writer: false,
+        writerStack: undefined,
         readQueue: [],
         writeQueue: [],
       })
@@ -198,6 +200,10 @@ export class ProjectLockManager {
   /**
    * Acquire a write lock for a project
    * Only one write lock can be held at a time, and it's exclusive with read locks
+   * 
+   * 🧱 STEP 1: CRASH IMMEDIATELY ON RE-ENTRANCY
+   * If a write lock is already held, throw immediately instead of deadlocking
+   * 
    * @param projectId - Project ID, or 'library' for library, or undefined for global
    * @returns A function to release the lock
    */
@@ -205,19 +211,39 @@ export class ProjectLockManager {
     const normalizedId = this.normalizeProjectId(projectId)
     const lockState = this.getLockState(normalizedId)
 
-    // Wait until no readers and no writer
-    if (lockState.readers > 0 || lockState.writer) {
+    // 🧱 STEP 1: Detect re-entrancy and crash immediately
+    if (lockState.writer) {
+      const currentStack = lockState.writerStack || 'unknown'
+      const newStack = new Error().stack || 'unknown'
+      const error = new Error(
+        `🚨 RE-ENTRANT WRITE LOCK DETECTED!\n` +
+        `Project: ${normalizedId || 'global'}\n` +
+        `Current lock holder stack:\n${currentStack}\n` +
+        `Attempted re-acquisition stack:\n${newStack}\n` +
+        `\nThis is a programming error. Locks should only be acquired at transaction boundaries:\n` +
+        `- documentService / projectService (transaction boundaries)\n` +
+        `- vectorStore.withWriteLock(...)\n` +
+        `- indexManager.runExclusive(...)`
+      )
+      console.error(error)
+      throw error
+    }
+
+    // Wait until no readers
+    if (lockState.readers > 0) {
       await new Promise<void>((resolve) => {
         lockState.writeQueue.push(resolve)
       })
     }
 
-    // Acquire write lock
+    // Acquire write lock and record stack trace
     lockState.writer = true
+    lockState.writerStack = new Error().stack
 
     // Return release function
     return () => {
       lockState.writer = false
+      lockState.writerStack = undefined
       
       // Process write queue first (write priority), then read queue
       if (lockState.writeQueue.length > 0) {
@@ -253,11 +279,67 @@ export class ProjectLockManager {
 const projectLockManager = new ProjectLockManager()
 
 /**
- * Export lock manager for use in other services (e.g., documentService)
- * This allows coordinated locking across services
+ * 🧱 STEP 2: UNSAFE API - Only for transaction boundaries
+ * 
+ * ⚠️ WARNING: This is an UNSAFE API. Only use in:
+ * - documentService (transaction boundaries)
+ * - projectService (transaction boundaries)
+ * 
+ * ❌ DO NOT use in:
+ * - vectorStore methods
+ * - indexingService
+ * - Any helper/util/primitive functions
+ * 
+ * For safe usage, use:
+ * - vectorStore.withWriteLock(...)
+ * - vectorStore.withReadLock(...)
  */
 export function getProjectLockManager(): ProjectLockManager {
   return projectLockManager
+}
+
+/**
+ * 🧱 STEP 2: SAFE API - Lock ownership wrapper
+ * 
+ * Safe wrapper for write operations that ensures proper lock management.
+ * Use this instead of directly calling acquireWriteLock.
+ * 
+ * @param projectId - Project ID, or 'library' for library, or undefined for global
+ * @param fn - Function to execute with write lock
+ * @returns Result of the function
+ */
+export async function withWriteLock<T>(
+  projectId: string | undefined,
+  fn: () => Promise<T>
+): Promise<T> {
+  const releaseLock = await projectLockManager.acquireWriteLock(projectId)
+  try {
+    return await fn()
+  } finally {
+    releaseLock()
+  }
+}
+
+/**
+ * 🧱 STEP 2: SAFE API - Lock ownership wrapper
+ * 
+ * Safe wrapper for read operations that ensures proper lock management.
+ * Use this instead of directly calling acquireReadLock.
+ * 
+ * @param projectId - Project ID, or 'library' for library, or undefined for global
+ * @param fn - Function to execute with read lock
+ * @returns Result of the function
+ */
+export async function withReadLock<T>(
+  projectId: string | undefined,
+  fn: () => Promise<T>
+): Promise<T> {
+  const releaseLock = await projectLockManager.acquireReadLock(projectId)
+  try {
+    return await fn()
+  } finally {
+    releaseLock()
+  }
 }
 
 /**
@@ -338,6 +420,10 @@ class VectorStore {
   getProjectId(): string | undefined {
     return this.currentProjectId
   }
+
+  // Note: VectorStore is a "database kernel", not a transaction manager
+  // Lock management is handled by transaction boundaries (documentService/projectService)
+  // All public methods assume caller already holds appropriate lock
 
   /**
    * Ensure project-specific index directory exists
@@ -533,14 +619,12 @@ class VectorStore {
 
   /**
    * Load index from disk
-   * Includes corruption detection and recovery
-   * Note: May need to upgrade from read lock to write lock if rebuilding is needed
+   * 📌 UNSAFE: Assumes caller already holds write lock
+   * 
+   * Lock upgrade must be handled explicitly by caller.
+   * This method does NOT perform any lock operations.
    */
-  async loadIndex(): Promise<void> {
-    // Start with read lock (most common case: just loading existing index)
-    let releaseLock = await projectLockManager.acquireReadLock(this.currentProjectId)
-    let isWriteLock = false
-    
+  async loadIndexUnsafe(): Promise<void> {
     try {
       // Ensure project directory exists first
       await this.ensureProjectIndexDir()
@@ -551,16 +635,12 @@ class VectorStore {
         await fs.access(this.indexFile)
         await fs.access(this.metadataFile)
       } catch {
-        // Files don't exist, create new index - need write lock
+        // Files don't exist, create new index
         needsRebuild = true
       }
       
-      // If we need to rebuild, upgrade to write lock
+      // If we need to rebuild, initialize new index
       if (needsRebuild) {
-        releaseLock() // Release read lock
-        releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-        isWriteLock = true
-        
         await this.initialize()
         return
       }
@@ -574,23 +654,11 @@ class VectorStore {
         // Validate metadata integrity
         if (!this.validateMetadata(savedData)) {
           console.warn('[VectorStore] Metadata validation failed, rebuilding index')
-          // Upgrade to write lock for rebuilding
-          if (!isWriteLock) {
-            releaseLock() // Release read lock
-            releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-            isWriteLock = true
-          }
           await this.rebuildIndexFromMetadata()
           return
         }
       } catch (parseError: any) {
         console.error('[VectorStore] Failed to parse metadata file (corrupted):', parseError.message)
-        // Upgrade to write lock for rebuilding
-        if (!isWriteLock) {
-          releaseLock() // Release read lock
-          releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-          isWriteLock = true
-        }
         // Backup corrupted metadata
         try {
           const backupPath = this.metadataFile + '.corrupted.' + Date.now()
@@ -616,12 +684,6 @@ class VectorStore {
         // If index file is suspiciously small (< 100 bytes) and we have metadata, skip loading
         if (indexFileStats.size < 100 && this.metadata.size > 0) {
           console.warn(`[VectorStore] Index file too small (${indexFileStats.size} bytes) but metadata has ${this.metadata.size} entries. Rebuilding from metadata...`)
-          // Upgrade to write lock for rebuilding
-          if (!isWriteLock) {
-            releaseLock() // Release read lock
-            releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-            isWriteLock = true
-          }
           await this.rebuildIndexFromMetadata()
           return
         }
@@ -755,12 +817,6 @@ class VectorStore {
               console.warn(`[VectorStore] Saved config:`, JSON.stringify(hnswConfig, null, 2))
             }
             
-            // Upgrade to write lock for rebuilding
-            if (!isWriteLock) {
-              releaseLock() // Release read lock
-              releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-              isWriteLock = true
-            }
             // Backup corrupted index
             try {
               const backupPath = this.indexFile + '.corrupted.' + Date.now()
@@ -789,13 +845,6 @@ class VectorStore {
       } catch (loadError: any) {
         console.warn('[VectorStore] Could not load index binary (corrupted), will rebuild from metadata:', loadError.message)
         
-        // Upgrade to write lock for rebuilding
-        if (!isWriteLock) {
-          releaseLock() // Release read lock
-          releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-          isWriteLock = true
-        }
-        
         // Backup corrupted index
         try {
           const backupPath = this.indexFile + '.corrupted.' + Date.now()
@@ -821,33 +870,24 @@ class VectorStore {
       this.isInitialized = true
     } catch (error: any) {
       console.error('[VectorStore] Failed to load index:', error)
-      // Upgrade to write lock for fallback initialization
-      if (!isWriteLock) {
-        releaseLock() // Release read lock
-        releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-        isWriteLock = true
-      }
       // Fallback to new index
       await this.initialize()
-    } finally {
-      // Release lock (read or write)
-      releaseLock()
     }
   }
 
+  // Note: loadIndex() removed - use loadIndexUnsafe() with explicit lock management
+  // Lock upgrade must be handled explicitly by transaction boundaries
+
   /**
    * Save index to disk
-   * Uses a lock to prevent concurrent saves that could corrupt the index
+   * 📌 UNSAFE: Assumes caller already holds write lock
    */
-  async saveIndex(): Promise<void> {
+  async saveIndexUnsafe(): Promise<void> {
     if (!this.isInitialized || !this.index) {
       console.warn('[VectorStore] Cannot save: index not initialized')
       return
     }
 
-    // Acquire write lock for saving index
-    const releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-    
     // Wait for any ongoing save to complete
     if (this.saveLock) {
       console.log('[VectorStore] Waiting for ongoing save to complete...')
@@ -955,10 +995,8 @@ class VectorStore {
         console.error('[VectorStore] Failed to save index:', error)
         throw error
       } finally {
-        // Clear the lock
+        // Clear the save lock
         this.saveLock = null
-        // Release write lock
-        releaseLock()
       }
     })()
 
@@ -967,23 +1005,22 @@ class VectorStore {
 
   /**
    * Add chunks to the index
+   * 📌 UNSAFE: Assumes caller already holds write lock
+   * VectorStore is a "database kernel", not a transaction manager
+   * Lock management must be handled by transaction boundaries (documentService/projectService)
    */
-  async addChunks(chunks: Chunk[], embeddings: number[][]): Promise<void> {
-    // Check if index needs to be loaded first (before acquiring lock)
+  async addChunksUnsafe(chunks: Chunk[], embeddings: number[][]): Promise<void> {
+    // Check if index needs to be loaded first
     if (!this.isInitialized || !this.index) {
       console.log(`[VectorStore] Index not initialized, loading...`)
-      // Load index without holding lock (loadIndex will acquire its own lock)
-      await this.loadIndex()
+      // Load index - caller must hold write lock
+      await this.loadIndexUnsafe()
       if (!this.index) {
         throw new Error('Index not initialized after loadIndex()')
       }
     }
 
-    // Acquire write lock for adding chunks
-    const releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-    try {
-
-    // CRITICAL: Verify index has valid capacity
+      // CRITICAL: Verify index has valid capacity
     const maxElements = this.index.getMaxElements()
     if (maxElements === 0) {
       console.error(`[VectorStore] Index has zero capacity! Reinitializing...`)
@@ -1053,11 +1090,6 @@ class VectorStore {
       this.metadata.set(label, metadata)
       this.idToLabel.set(chunk.id, label)
       this.labelToId.set(label, chunk.id)
-    }
-
-    } finally {
-      // Release write lock
-      releaseLock()
     }
   }
 
@@ -1140,71 +1172,49 @@ class VectorStore {
 
   /**
    * Remove all chunks for a file
+   * 📌 UNSAFE: Assumes caller already holds write lock
+   * 
    * @param fileId - The file ID to remove chunks for
    * @param autoSave - Whether to automatically save the index after removal (default: true)
-   * @param skipLock - Whether to skip acquiring lock (caller must hold write lock)
    */
-  async removeChunksByFile(fileId: string, autoSave: boolean = true, skipLock: boolean = false): Promise<void> {
-    // Acquire write lock for removing chunks (unless caller already holds it)
-    let releaseLock: (() => void) | null = null
-    if (!skipLock) {
-      releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-    }
+  async removeChunksByFileUnsafe(fileId: string, autoSave: boolean = true): Promise<void> {
+    const removedCount = await this.removeChunksByFileInternal(fileId)
     
-    try {
-      const removedCount = await this.removeChunksByFileInternal(fileId)
-      
-      if (removedCount === 0) {
-        return
-      }
+    if (removedCount === 0) {
+      return
+    }
 
-      // CRITICAL: Save index immediately after removal to persist changes
-      // This ensures that deletions are persisted even if the app crashes or restarts
-      // Note: We release the lock before calling saveIndex() to avoid deadlock,
-      // since saveIndex() will acquire its own write lock
-      if (autoSave) {
-        // Release lock before calling saveIndex (it will acquire its own lock)
-        if (releaseLock) {
-          releaseLock()
-          releaseLock = null
-        }
-        try {
-          await this.saveIndex()
-        } catch (saveError: any) {
-          console.error(`[VectorStore] Failed to save index after removing chunks for file ${fileId}:`, saveError)
-          // Re-throw to ensure caller knows save failed
-          throw new Error(`Failed to save index after removing chunks: ${saveError.message}`)
-        }
-        return // Early return since we already released the lock
-      }
-    } finally {
-      // Release write lock (only if we acquired it and didn't already release it for saveIndex)
-      if (releaseLock) {
-        releaseLock()
+    // CRITICAL: Save index immediately after removal to persist changes
+    // This ensures that deletions are persisted even if the app crashes or restarts
+    if (autoSave) {
+      try {
+        await this.saveIndexUnsafe()
+      } catch (saveError: any) {
+        console.error(`[VectorStore] Failed to save index after removing chunks for file ${fileId}:`, saveError)
+        // Re-throw to ensure caller knows save failed
+        throw new Error(`Failed to save index after removing chunks: ${saveError.message}`)
       }
     }
   }
 
   /**
    * Search for similar chunks
+   * 📌 UNSAFE: Assumes caller already holds read lock
+   * 
+   * Note: If index needs to be loaded and requires write lock (e.g., for rebuilding),
+   * caller must handle lock upgrade explicitly. This method will throw if index
+   * is not initialized and caller only holds read lock.
    */
-  async search(
+  async searchUnsafe(
     queryEmbedding: number[],
     k: number = 3,
     fileIds?: string[]
   ): Promise<SearchResult[]> {
-    // Check if index needs to be loaded first (before acquiring lock)
+    // Check if index needs to be loaded first
     if (!this.isInitialized || !this.index) {
-      // Load index without holding lock (loadIndex will acquire its own lock)
-      await this.loadIndex()
-      if (!this.index) {
-        throw new Error('Index not initialized')
-      }
+      throw new Error('Index not initialized. Caller must load index with appropriate lock first.')
     }
 
-    // Acquire read lock for searching (allows concurrent searches)
-    const releaseLock = await projectLockManager.acquireReadLock(this.currentProjectId)
-    try {
       if (queryEmbedding.length !== this.dimension) {
         throw new Error(
           `Query embedding dimension mismatch: expected ${this.dimension}, got ${queryEmbedding.length}`
@@ -1248,14 +1258,10 @@ class VectorStore {
         })
       }
 
-      // Sort by score (descending)
-      results.sort((a, b) => b.score - a.score)
+    // Sort by score (descending)
+    results.sort((a, b) => b.score - a.score)
 
-      return results
-    } finally {
-      // Release read lock
-      releaseLock()
-    }
+    return results
   }
 
   /**
@@ -1296,8 +1302,10 @@ class VectorStore {
    * Returns true if valid, false if needs rebuild
    */
   async validateIntegrity(): Promise<{ valid: boolean; indexCount: number; metadataCount: number; needsRebuild: boolean }> {
+    // Try read lock first (most common case)
+    let releaseLock = await projectLockManager.acquireReadLock(this.currentProjectId)
     try {
-      await this.loadIndex()
+      await this.loadIndexUnsafe()
       const indexCount = this.index ? this.index.getCurrentCount() : 0
       const metadataCount = this.metadata.size
       const valid = indexCount === metadataCount
@@ -1309,8 +1317,22 @@ class VectorStore {
 
       return { valid, indexCount, metadataCount, needsRebuild }
     } catch (error: any) {
-      console.error(`[VectorStore] Integrity check error for project ${this.currentProjectId || 'global'}:`, error)
-      return { valid: false, indexCount: 0, metadataCount: this.metadata.size, needsRebuild: true }
+      // If read lock fails (e.g., needs rebuilding), try with write lock explicitly
+      releaseLock()
+      releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
+      try {
+        await this.loadIndexUnsafe()
+        const indexCount = this.index ? this.index.getCurrentCount() : 0
+        const metadataCount = this.metadata.size
+        const valid = indexCount === metadataCount
+        const needsRebuild = metadataCount > 0 && indexCount === 0
+        return { valid, indexCount, metadataCount, needsRebuild }
+      } catch (writeError: any) {
+        console.error(`[VectorStore] Integrity check error for project ${this.currentProjectId || 'global'}:`, writeError)
+        return { valid: false, indexCount: 0, metadataCount: this.metadata.size, needsRebuild: true }
+      }
+    } finally {
+      releaseLock()
     }
   }
 }
@@ -1474,25 +1496,31 @@ export async function cleanupVectorIndex(projectId?: string): Promise<{
         if (orphanedFileIds.length > 0) {
           console.log(`[Cleanup] Found ${orphanedFileIds.length} orphaned file(s) in project ${projId}`)
           
-          const vectorStore = getVectorStore(projId === 'library' ? 'library' : projId)
-          await vectorStore.loadIndex()
-          
-          for (const fileId of orphanedFileIds) {
-            try {
-              await vectorStore.removeChunksByFile(fileId, false) // Don't auto-save, save once at the end
-              result.orphanedChunksRemoved++
-              console.log(`[Cleanup] Removed orphaned chunks for file: ${fileId} (project: ${projId})`)
-            } catch (removeError: any) {
-              result.errors.push(`Failed to remove chunks for file ${fileId} in project ${projId}: ${removeError.message}`)
-            }
-          }
-          
-          // Save index once after all removals
+          // Acquire write lock for cleanup
+          const releaseLock = await projectLockManager.acquireWriteLock(projId === 'library' ? 'library' : projId)
           try {
-            await vectorStore.saveIndex()
-            console.log(`[Cleanup] Saved index after cleanup for project ${projId}`)
-          } catch (saveError: any) {
-            result.errors.push(`Failed to save index after cleanup for project ${projId}: ${saveError.message}`)
+            const vectorStore = getVectorStore(projId === 'library' ? 'library' : projId)
+            await vectorStore.loadIndexUnsafe()
+            
+            for (const fileId of orphanedFileIds) {
+              try {
+                await vectorStore.removeChunksByFileUnsafe(fileId, false) // Don't auto-save, save once at the end
+                result.orphanedChunksRemoved++
+                console.log(`[Cleanup] Removed orphaned chunks for file: ${fileId} (project: ${projId})`)
+              } catch (removeError: any) {
+                result.errors.push(`Failed to remove chunks for file ${fileId} in project ${projId}: ${removeError.message}`)
+              }
+            }
+            
+            // Save index once after all removals
+            try {
+              await vectorStore.saveIndexUnsafe()
+              console.log(`[Cleanup] Saved index after cleanup for project ${projId}`)
+            } catch (saveError: any) {
+              result.errors.push(`Failed to save index after cleanup for project ${projId}: ${saveError.message}`)
+            }
+          } finally {
+            releaseLock()
           }
         }
       } catch (error: any) {

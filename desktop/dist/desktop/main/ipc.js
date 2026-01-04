@@ -35,9 +35,7 @@ export function setupIPC() {
     });
     ipcMain.handle('document:create', async (_, title, folder) => {
         try {
-            console.log('[IPC document:create] Received title:', title, 'folder:', folder);
             const result = await documentService.create(title, folder);
-            console.log('[IPC document:create] Returning document:', JSON.stringify(result, null, 2));
             return result;
         }
         catch (error) {
@@ -47,9 +45,7 @@ export function setupIPC() {
     });
     ipcMain.handle('document:uploadFile', async (_, filePath, fileName, folder, projectId) => {
         try {
-            console.log('[IPC document:uploadFile] Received filePath:', filePath, 'fileName:', fileName, 'folder:', folder, 'projectId:', projectId);
             const result = await documentService.uploadFile(filePath, fileName, folder, projectId);
-            console.log('[IPC document:uploadFile] Returning document:', JSON.stringify(result, null, 2));
             return result;
         }
         catch (error) {
@@ -173,7 +169,6 @@ export function setupIPC() {
     ipcMain.handle('ai:streamChat', async (event, googleApiKey, openaiApiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, attachments, style) => {
         const webContents = event.sender;
         const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        console.log(`[Stream] Starting stream ${streamId} (model: ${modelName || 'gemini-2.5-flash'}, web search: ${useWebSearch ? 'enabled' : 'disabled'}, attachments: ${attachments?.length || 0})`);
         try {
             // Get projectId from document if documentId is provided
             let projectId;
@@ -194,7 +189,6 @@ export function setupIPC() {
             ;
             (async () => {
                 try {
-                    console.log(`[Stream] Calling ${useOpenai ? 'openaiService' : 'geminiService'}.streamChat with ${chatHistory?.length || 0} history messages, ${attachments?.length || 0} attachments...`);
                     let chunkCount = 0;
                     const stream = useOpenai
                         ? openaiService.streamChat(openaiApiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, style, googleApiKey)
@@ -203,7 +197,6 @@ export function setupIPC() {
                         chunkCount++;
                         webContents.send('ai:streamChunk', streamId, chunk);
                     }
-                    console.log(`[Stream] Stream complete, total chunks: ${chunkCount}`);
                     webContents.send('ai:streamEnd', streamId);
                 }
                 catch (error) {
@@ -245,11 +238,9 @@ export function setupIPC() {
             }
             // Use Gemini if available (default), otherwise fall back to OpenAI GPT-5 Nano
             if (googleApiKey) {
-                console.log('[IPC] Using Gemini 2.5 Flash Lite for autocomplete');
                 return await geminiService.autocomplete(googleApiKey, text, cursorPosition, documentContent, projectId, 'gemini-2.5-flash-lite');
             }
             else if (openaiApiKey) {
-                console.log('[IPC] Using OpenAI GPT-5 Nano for autocomplete');
                 return await openaiService.autocomplete(openaiApiKey, text, cursorPosition, documentContent, projectId, 'gpt-5-nano');
             }
             else {
@@ -277,12 +268,6 @@ export function setupIPC() {
     // Rephrase text uses GPT-5 Nano if only OpenAI key is available, otherwise Gemini 2.5 Flash Lite
     ipcMain.handle('ai:rephraseText', async (_, googleApiKey, openaiApiKey, text, instruction) => {
         try {
-            console.log('[IPC] Rephrase text request:', {
-                textLength: text.length,
-                textPreview: text.length > 50 ? text.substring(0, 50) + '...' : text,
-                fullText: text,
-                instruction
-            });
             // Explicitly instruct to only return the rephrased text with no follow-up questions or suggestions
             const prompt = `Rephrase this text according to the instruction. 
 
@@ -511,7 +496,6 @@ Rephrased text:`;
             }
             // Ensure usePageBreaks is explicitly boolean (default to true if undefined)
             const shouldUsePageBreaks = usePageBreaks !== undefined ? usePageBreaks : true;
-            console.log('[IPC] export:exportMultiple - usePageBreaks:', usePageBreaks, 'shouldUsePageBreaks:', shouldUsePageBreaks);
             const fileBuffer = await exportService.exportMultipleDocuments(documentIds, format, shouldUsePageBreaks);
             return Array.from(fileBuffer); // Convert Buffer to array for IPC
         }
@@ -681,7 +665,6 @@ Rephrased text:`;
     // Library indexing operations
     ipcMain.handle('library:indexFile', async (_, documentId, geminiApiKey, openaiApiKey) => {
         try {
-            console.log(`[IPC library:indexFile] Indexing document ${documentId}`);
             const status = await indexingService.indexLibraryFile(documentId, geminiApiKey, openaiApiKey);
             return status;
         }
@@ -702,7 +685,6 @@ Rephrased text:`;
     });
     ipcMain.handle('library:reindexFile', async (_, documentId, geminiApiKey, openaiApiKey) => {
         try {
-            console.log(`[IPC library:reindexFile] Re-indexing document ${documentId}`);
             const status = await indexingService.reindexFile(documentId, geminiApiKey, openaiApiKey);
             return status;
         }
@@ -713,7 +695,6 @@ Rephrased text:`;
     });
     ipcMain.handle('library:indexAll', async (_, geminiApiKey, openaiApiKey) => {
         try {
-            console.log('[IPC library:indexAll] Indexing all library files');
             const results = await indexingService.indexAllLibraryFiles(geminiApiKey, openaiApiKey);
             return results;
         }
@@ -724,7 +705,6 @@ Rephrased text:`;
     });
     ipcMain.handle('library:removeFromIndex', async (_, documentId) => {
         try {
-            console.log(`[IPC library:removeFromIndex] Removing document ${documentId} from index`);
             await indexingService.removeFromIndex(documentId);
             return { success: true };
         }
@@ -758,14 +738,12 @@ Rephrased text:`;
         }
     });
     // API Key storage handlers
-    console.log('[IPC] Registering settings:saveApiKeys handler...');
     ipcMain.handle('settings:saveApiKeys', async (_, geminiApiKey, openaiApiKey) => {
         try {
             const changed = saveApiKeys(geminiApiKey, openaiApiKey);
             // Only log if keys actually changed to avoid spam from duplicate calls
             if (changed) {
                 const keys = getApiKeys();
-                console.log('[IPC settings:saveApiKeys] API keys saved (hasGemini:', !!keys.geminiApiKey, ', hasOpenAI:', !!keys.openaiApiKey, ')');
             }
             return { success: true };
         }
@@ -774,7 +752,6 @@ Rephrased text:`;
             throw error;
         }
     });
-    console.log('[IPC] Registering settings:getApiKeys handler...');
     ipcMain.handle('settings:getApiKeys', async () => {
         try {
             const keys = getApiKeys();
@@ -788,5 +765,4 @@ Rephrased text:`;
             throw error;
         }
     });
-    console.log('[IPC] ✅ All IPC handlers registered (including settings handlers)');
 }

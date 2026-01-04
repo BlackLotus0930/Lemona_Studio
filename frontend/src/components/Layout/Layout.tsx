@@ -331,6 +331,8 @@ export default function Layout(): JSX.Element {
     }
   }) // Track search query for highlighting
   const [showWordCountModal, setShowWordCountModal] = useState(false) // Track word count modal visibility
+  const [isExporting, setIsExporting] = useState(false) // Track export loading state
+  const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | null>(null) // Track export format
   const lastContentRef = useRef<string>('') // Track last set content to avoid unnecessary updates
   const currentDocIdRef = useRef<string | null>(null) // Track current document ID
   const currentDocTitleRef = useRef<string | null>(null) // Track current document title for placeholder
@@ -836,6 +838,20 @@ export default function Layout(): JSX.Element {
         return
       }
       
+      // Check if Ctrl+Shift+E (or Cmd+Shift+E on Mac) - toggle FileExplorer
+      // Handle this even when input/textarea is focused (to allow toggling from anywhere)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
+        e.preventDefault()
+        e.stopPropagation()
+        if (fileExplorerPanelRef.current) {
+          // Toggle between visible (14%) and hidden (0%)
+          const currentSize = fileExplorerPanelRef.current.getSize()
+          const newSize = currentSize > 0 ? 0 : 14
+          fileExplorerPanelRef.current.resize(newSize)
+        }
+        return
+      }
+      
       // Don't prevent default for other shortcuts if typing in an input field or textarea
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return
@@ -880,19 +896,6 @@ export default function Layout(): JSX.Element {
           }
           return newValue
         })
-        return
-      }
-      
-      // Check if Ctrl+Shift+E (or Cmd+Shift+E on Mac) - toggle FileExplorer
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
-        e.preventDefault()
-        e.stopPropagation()
-        if (fileExplorerPanelRef.current) {
-          // Toggle between visible (14%) and hidden (0%)
-          const currentSize = fileExplorerPanelRef.current.getSize()
-          const newSize = currentSize > 0 ? 0 : 14
-          fileExplorerPanelRef.current.resize(newSize)
-        }
         return
       }
       
@@ -4420,6 +4423,10 @@ export default function Layout(): JSX.Element {
       return
     }
     
+    // Set loading state
+    setIsExporting(true)
+    setExportFormat(format)
+    
     try {
       const exportFilename = filename || projectName || 'document'
       
@@ -4448,6 +4455,10 @@ export default function Layout(): JSX.Element {
     } catch (error) {
       console.error('Export failed:', error)
       alert('Failed to export document. Please make sure the backend is running and the document has content.')
+    } finally {
+      // Clear loading state
+      setIsExporting(false)
+      setExportFormat(null)
     }
   }
 
@@ -4924,6 +4935,80 @@ export default function Layout(): JSX.Element {
         isOpen={showWordCountModal}
         onClose={() => setShowWordCountModal(false)}
       />
+      
+      {/* Export Loading Indicator */}
+      {isExporting && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+            border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+            borderRadius: '12px',
+            padding: '14px 24px',
+            boxShadow: theme === 'dark'
+              ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
+              : '0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1)',
+            zIndex: 10001,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '14px',
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            minWidth: '280px',
+            animation: 'slideUpFadeIn 0.3s ease-out'
+          }}
+        >
+          <div
+            style={{
+              width: '20px',
+              height: '20px',
+              border: `3px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+              borderTopColor: exportFormat === 'pdf' 
+                ? (theme === 'dark' ? '#d9779f' : '#e8a5b8')
+                : (theme === 'dark' ? '#7bb3d9' : '#8fc4e8'),
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite',
+            }}
+          />
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                fontSize: '14px',
+                fontWeight: '500',
+                color: theme === 'dark' ? '#ffffff' : '#202124',
+                marginBottom: '2px',
+              }}
+            >
+              Exporting {exportFormat?.toUpperCase()}...
+            </div>
+            <div
+              style={{
+                fontSize: '12px',
+                color: theme === 'dark' ? '#999' : '#666',
+              }}
+            >
+              Please wait while we prepare your file
+            </div>
+          </div>
+          <style>{`
+            @keyframes spin {
+              to { transform: rotate(360deg); }
+            }
+            @keyframes slideUpFadeIn {
+              from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(10px);
+              }
+              to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+              }
+            }
+          `}</style>
+        </div>
+      )}
     </div>
   )
 }
