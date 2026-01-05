@@ -6,6 +6,22 @@ import { setupIPC } from './ipc.js';
 import { migrateDocuments } from './services/migration.js';
 import { documentService } from './services/documentService.js';
 import { getVectorStore, cleanupVectorIndex } from './services/vectorStore.js';
+// Suppress canvas warnings from pdfjs-dist before any modules are loaded
+// pdfjs-dist uses canvas for rendering, but we only need text extraction
+// This warning appears during module loading, so we need to suppress it early
+const originalWarn = console.warn;
+console.warn = (...args) => {
+    const message = args.join(' ');
+    // Filter out canvas-related warnings from pdfjs-dist
+    if (message.includes('Cannot polyfill') &&
+        (message.includes('DOMMatrix') || message.includes('Path2D')) &&
+        message.includes('canvas.node')) {
+        // Suppress this specific warning - we don't need canvas for text extraction
+        return;
+    }
+    // Call original warn for other messages
+    originalWarn.apply(console, args);
+};
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // Get project root directory (Lemona/)
