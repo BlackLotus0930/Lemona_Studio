@@ -52,21 +52,30 @@ function setupCSP() {
 }
 function createWindow() {
     // Get logo path - try both source and compiled locations
-    const logoPathSource = path.join(projectRoot, 'frontend', 'public', 'lemonalogo.png');
-    const logoPathDist = path.join(__dirname, '../../frontend/public/lemonalogo.png');
-    // Use whichever exists
+    // Prefer .ico for Windows (better quality), fallback to .png
+    const logoPathSourceIco = path.join(projectRoot, 'frontend', 'public', 'lemonalogo.ico');
+    const logoPathDistIco = path.join(__dirname, '../../frontend/public/lemonalogo.ico');
+    const logoPathSourcePng = path.join(projectRoot, 'frontend', 'public', 'lemonalogo.png');
+    const logoPathDistPng = path.join(__dirname, '../../frontend/public/lemonalogo.png');
+    // Use whichever exists, prefer .ico
     let iconPath = undefined;
-    if (existsSync(logoPathSource)) {
-        iconPath = logoPathSource;
+    if (existsSync(logoPathSourceIco)) {
+        iconPath = logoPathSourceIco;
     }
-    else if (existsSync(logoPathDist)) {
-        iconPath = logoPathDist;
+    else if (existsSync(logoPathDistIco)) {
+        iconPath = logoPathDistIco;
+    }
+    else if (existsSync(logoPathSourcePng)) {
+        iconPath = logoPathSourcePng;
+    }
+    else if (existsSync(logoPathDistPng)) {
+        iconPath = logoPathDistPng;
     }
     if (iconPath) {
         console.log(`✅ Using icon: ${iconPath}`);
     }
     else {
-        console.warn(`⚠️  Icon not found. Tried: ${logoPathSource} and ${logoPathDist}`);
+        console.warn(`⚠️  Icon not found. Tried: ${logoPathSourceIco}, ${logoPathDistIco}, ${logoPathSourcePng}, and ${logoPathDistPng}`);
     }
     mainWindow = new BrowserWindow({
         width: 1400,

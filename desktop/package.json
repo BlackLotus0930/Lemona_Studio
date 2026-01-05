@@ -65,6 +65,7 @@
       "dist/**/*",
       "node_modules/**/*",
       "!node_modules/**/*.{md,ts,tsx}",
+      "!node_modules/happy-dom/**/*",
       "!**/*.{ts,tsx,map}",
       "!**/test/**/*",
       "!**/tests/**/*",
@@ -85,7 +86,7 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "../frontend/public/lemonalogo.png",
+      "icon": "../frontend/public/lemonalogo.ico",
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "mac": {
