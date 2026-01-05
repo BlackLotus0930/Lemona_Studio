@@ -10,7 +10,12 @@
     "build:preload": "tsc -p tsconfig.preload.json",
     "dev": "npm run build && electron dist/desktop/main/index.js",
     "dev:watch": "tsc --watch & electron dist/desktop/main/index.js",
-    "start": "electron dist/desktop/main/index.js"
+    "start": "electron dist/desktop/main/index.js",
+    "dist": "npm run build:all && electron-builder",
+    "dist:win": "npm run build:all && electron-builder --win",
+    "dist:mac": "npm run build:all && electron-builder --mac",
+    "dist:linux": "npm run build:all && electron-builder --linux",
+    "build:all": "cd ../frontend && npm run build && cd ../desktop && npm run build"
   },
   "keywords": [],
   "author": "",
@@ -27,7 +32,6 @@
     "axios": "^1.13.2",
     "canvas": "^3.2.0",
     "docx": "^9.5.1",
-    "electron": "^28.0.0",
     "hnswlib-node": "^3.0.0",
     "mammoth": "^1.11.0",
     "openai": "^6.15.0",
@@ -37,7 +41,70 @@
   },
   "devDependencies": {
     "@types/node": "^20.10.5",
+    "electron": "^28.0.0",
+    "electron-builder": "^26.0.12",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
+  },
+  "build": {
+    "appId": "com.lemona.desktop",
+    "productName": "Lemona",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "!node_modules/**/*.{md,ts,tsx}",
+      "!**/*.{ts,tsx,map}",
+      "!**/test/**/*",
+      "!**/tests/**/*"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "../frontend/dist",
+        "to": "frontend/dist",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "../frontend/public/lemonalogo.png",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "../frontend/public/lemonalogo.png",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "../frontend/public/lemonalogo.png",
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Lemona"
+    }
   }
 }

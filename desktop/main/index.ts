@@ -109,7 +109,9 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   } else {
     // 生产环境：加载打包后的文件
-    mainWindow.loadFile(path.join(__dirname, '../../frontend/dist/index.html'));
+    // extraResources 中的文件会被放在 resources 目录下
+    const frontendDistPath = path.join(process.resourcesPath, 'frontend', 'dist', 'index.html');
+    mainWindow.loadFile(frontendDistPath);
   }
 
   // Enable zoom commands (Ctrl/Cmd + Plus, Minus, 0)
