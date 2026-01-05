@@ -11,6 +11,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# Electron build outputs
+desktop/release/
+desktop/.npmrc
+
 # Logs
 logs/
 *.log
