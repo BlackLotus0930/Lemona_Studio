@@ -34,24 +34,20 @@
     "@tiptap/starter-kit": "^3.14.0",
     "axios": "^1.13.2",
     "docx": "^9.5.1",
+    "happy-dom": "^20.0.2",
     "hnswlib-node": "^3.0.0",
     "mammoth": "^1.11.0",
     "openai": "^6.15.0",
-    "pdfjs-dist": "^3.11.174",
+    "pdfjs-dist": "^5.4.530",
     "pdfkit": "^0.17.2",
     "puppeteer": "^24.34.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",
-    "electron": "^28.0.0",
+    "electron": "^39.2.7",
     "electron-builder": "^26.0.12",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
-  },
-  "overrides": {
-    "pdfjs-dist": {
-      "canvas": false
-    }
   },
   "build": {
     "appId": "com.lemona.desktop",
@@ -65,10 +61,11 @@
       "dist/**/*",
       "node_modules/**/*",
       "!node_modules/**/*.{md,ts,tsx}",
-      "!node_modules/happy-dom/**/*",
       "!**/*.{ts,tsx,map}",
       "!**/test/**/*",
       "!**/tests/**/*",
+      "!node_modules/happy-dom/**/test/**/*",
+      "!node_modules/happy-dom/**/tests/**/*",
       "!../backend/**/*"
     ],
     "asar": true,

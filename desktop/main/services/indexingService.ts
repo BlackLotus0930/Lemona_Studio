@@ -322,7 +322,8 @@ export async function indexLibraryFile(
     }
 
       // Add chunks to vector store - we hold write lock
-      await vectorStore.addChunksUnsafe(chunks, allEmbeddings)
+      // Pass document.projectId even for library files (for project scoping in library index)
+      await vectorStore.addChunksUnsafe(chunks, allEmbeddings, document.projectId)
 
     // CRITICAL: Save vector store and verify it was saved successfully
     // vectorStore.addChunks already handles saving, but we verify here

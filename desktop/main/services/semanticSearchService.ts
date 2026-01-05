@@ -143,7 +143,8 @@ export async function searchLibrary(
   openaiApiKey?: string,
   fileIds?: string[],
   k: number = 3,
-  projectId?: string // Project ID for project-specific search, or 'library' for library search
+  projectId?: string, // Project ID for project-specific search, or 'library' for library search
+  filterProjectId?: string // Optional: Project ID to filter results by (for library index scoping)
 ): Promise<SearchResult[]> {
   if (!query || query.trim().length === 0) {
     return []
@@ -194,7 +195,9 @@ export async function searchLibrary(
       }
 
       // Search - we hold read lock
-      const results = await vectorStore.searchUnsafe(embedding, k, fileIds)
+      // For library index, filter by filterProjectId if provided (to scope @library to current project)
+      // For project-specific indexes, filterProjectId is undefined (index is already scoped)
+      const results = await vectorStore.searchUnsafe(embedding, k, fileIds, filterProjectId)
       return results
     } finally {
       releaseLock()
@@ -246,6 +249,7 @@ export async function searchLibraryWithMentions(
   // Resolve file mentions to document IDs
   let fileIds: string[] | undefined
   let searchProjectId: string | undefined = projectId // Default to provided projectId
+  let filterProjectId: string | undefined = projectId // ProjectId to filter results by (for library index scoping)
   
   if (mentions.fileMentions.length > 0) {
     fileIds = await resolveFileMentions(mentions.fileMentions)
@@ -272,15 +276,24 @@ export async function searchLibraryWithMentions(
     if (hasLibraryFile) {
       // At least one library file mentioned → use 'library' index
       searchProjectId = 'library'
+      // Keep original projectId for filtering (to scope library results to current project)
+      filterProjectId = projectId
     } else if (mentionedDocs.length > 0) {
       // All mentioned files are project files → use first document's projectId
       const firstDoc = mentionedDocs[0]
       searchProjectId = firstDoc.projectId
+      // No filtering needed for project-specific indexes
+      filterProjectId = undefined
     }
     // If no documents found, keep default projectId
   } else if (mentions.hasLibraryMention) {
-    // @library mention → always use 'library' index (ignore projectId)
+    // @library mention → always use 'library' index (ignore projectId for index selection)
     searchProjectId = 'library'
+    // But filter by original projectId to scope results to current project
+    filterProjectId = projectId
+  } else {
+    // No mentions - use project-specific index, no filtering needed
+    filterProjectId = undefined
   }
 
   // Use cleaned message (without @mentions) for search
@@ -293,7 +306,8 @@ export async function searchLibraryWithMentions(
     openaiApiKey,
     fileIds,
     k,
-    searchProjectId
+    searchProjectId,
+    filterProjectId // Pass filter projectId separately
   )
 
   // Format results for AI context

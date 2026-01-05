@@ -113,6 +113,13 @@ function createWindow() {
   // 开发环境：加载 Vite dev server
   if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
+    // Suppress DevTools protocol warnings (harmless warnings from Chromium 142)
+    mainWindow.webContents.on('console-message', (event, level, message) => {
+      if (message.includes('Autofill.setAddresses') || message.includes('wasn\'t found')) {
+        // Suppress harmless DevTools protocol warnings
+        event.preventDefault();
+      }
+    });
     mainWindow.webContents.openDevTools();
   } else {
     // 生产环境：加载打包后的文件

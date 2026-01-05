@@ -108,6 +108,7 @@ export interface ChunkMetadata {
   startChar: number
   endChar: number
   tokenCount: number
+  projectId?: string // Optional: Project ID this chunk belongs to (for library files scoped to projects)
 }
 
 /**
@@ -1009,7 +1010,7 @@ class VectorStore {
    * VectorStore is a "database kernel", not a transaction manager
    * Lock management must be handled by transaction boundaries (documentService/projectService)
    */
-  async addChunksUnsafe(chunks: Chunk[], embeddings: number[][]): Promise<void> {
+  async addChunksUnsafe(chunks: Chunk[], embeddings: number[][], projectId?: string): Promise<void> {
     // Check if index needs to be loaded first
     if (!this.isInitialized || !this.index) {
       console.log(`[VectorStore] Index not initialized, loading...`)
@@ -1085,6 +1086,7 @@ class VectorStore {
         startChar: chunk.startChar || 0,
         endChar: chunk.endChar || chunk.text.length,
         tokenCount: chunk.tokenCount || 0,
+        projectId: projectId, // Store projectId for library file scoping
       }
 
       this.metadata.set(label, metadata)
@@ -1208,7 +1210,8 @@ class VectorStore {
   async searchUnsafe(
     queryEmbedding: number[],
     k: number = 3,
-    fileIds?: string[]
+    fileIds?: string[],
+    projectId?: string // Optional: Filter results by projectId (for library index scoping)
   ): Promise<SearchResult[]> {
     // Check if index needs to be loaded first
     if (!this.isInitialized || !this.index) {
@@ -1243,6 +1246,11 @@ class VectorStore {
 
         // Filter by fileIds if specified
         if (fileIds && fileIds.length > 0 && !fileIds.includes(metadata.fileId)) {
+          continue
+        }
+
+        // Filter by projectId if specified (for library index scoping)
+        if (projectId !== undefined && metadata.projectId !== projectId) {
           continue
         }
 

@@ -8,7 +8,7 @@ import { searchLibraryWithMentions } from './semanticSearchService.js'
 // Store API key instances per API key to allow multiple users
 const genAICache: Map<string, GoogleGenerativeAI> = new Map()
 
-function getModel(apiKey: string, modelName: string = 'gemini-2.5-flash'): GenerativeModel {
+function getModel(apiKey: string, modelName: string = 'gemini-3-flash-preview'): GenerativeModel {
   if (!apiKey) {
     throw new Error('Google API key is not configured. Please set it in Settings > API Keys.')
   }
@@ -319,7 +319,7 @@ async function summarizeChatHistory(history: AIChatMessage[], targetTokens: numb
   // If API key is available, use AI to generate summary
   if (apiKey) {
     try {
-      const aiModel = getModel(apiKey, 'gemini-2.5-flash')
+      const aiModel = getModel(apiKey, 'gemini-3-flash-preview')
       const summaryPrompt = `You are a helpful assistant that summarizes conversation history concisely while preserving important context.
 
 Please provide a concise summary of the following conversation history. Focus on:
@@ -366,7 +366,7 @@ function extractTextFromTipTap(node: any): string {
 
 export const geminiService = {
   async chat(apiKey: string, message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string, openaiApiKey?: string): Promise<AIChatMessage> {
-    const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
+    const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview')
     const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey)
     const conversationHistory = [...(history || [])]
     conversationHistory.push({
@@ -411,7 +411,7 @@ export const geminiService = {
     attachments?: ChatAttachment[],
     openaiApiKey?: string
   ): AsyncGenerator<string> {
-    const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
+    const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview')
     const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey)
     const conversationHistory = [...(history || [])]
     conversationHistory.push({
@@ -513,7 +513,7 @@ export const geminiService = {
   },
 
   async batchQuestions(apiKey: string, questions: string[], documentContent?: string, projectId?: string, modelName?: string): Promise<AIQuestion[]> {
-    const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
+    const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview')
     const { systemInstruction } = await buildContext(documentContent, projectId, undefined, undefined, apiKey)
     const questionsText = questions.map((q, i) => `${i + 1}. ${q}`).join('\n')
     const prompt = `${systemInstruction}\n\nUser has the following questions. Please answer each one:\n\n${questionsText}\n\nPlease provide answers in a numbered list format.`
@@ -541,7 +541,7 @@ export const geminiService = {
     projectId?: string,
     modelName?: string
   ): Promise<AutocompleteSuggestion> {
-    const aiModel = getModel(apiKey, modelName || 'gemini-2.5-flash')
+    const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview')
     const { systemInstruction } = await buildContext(documentContent, projectId, undefined, undefined, apiKey)
     const beforeCursor = text.slice(0, cursorPosition)
     const afterCursor = text.slice(cursorPosition)

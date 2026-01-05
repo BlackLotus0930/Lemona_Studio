@@ -167,17 +167,17 @@ export function setupIPC() {
 
   // Stream chat - uses webContents.send to stream chunks
   // Chat always uses Gemini (not Ollama)
-  ipcMain.handle('ai:streamChat', async (event, googleApiKey: string, openaiApiKey: string, message: string, documentContent?: string, documentId?: string, chatHistory?: any[], useWebSearch?: boolean, modelName?: string, attachments?: any[], style?: string) => {
+  ipcMain.handle('ai:streamChat', async (event, googleApiKey: string, openaiApiKey: string, message: string, documentContent?: string, documentId?: string, chatHistory?: any[], useWebSearch?: boolean, modelName?: string, attachments?: any[], style?: string, projectId?: string) => {
     const webContents = event.sender
     const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     
     
     try {
-      // Get projectId from document if documentId is provided
-      let projectId: string | undefined
-      if (documentId) {
+      // Use provided projectId, or get from document if documentId is provided and projectId not set
+      let finalProjectId: string | undefined = projectId
+      if (!finalProjectId && documentId) {
         const document = await documentService.getById(documentId)
-        projectId = document?.projectId
+        finalProjectId = document?.projectId
       }
       
       // Determine which service to use based on model name
@@ -197,8 +197,8 @@ export function setupIPC() {
         try {
           let chunkCount = 0
           const stream = useOpenai
-            ? openaiService.streamChat(openaiApiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, style, googleApiKey)
-            : geminiService.streamChat(googleApiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, openaiApiKey)
+            ? openaiService.streamChat(openaiApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, modelName, attachments, style, googleApiKey)
+            : geminiService.streamChat(googleApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, modelName, attachments, openaiApiKey)
           
           for await (const chunk of stream) {
             chunkCount++

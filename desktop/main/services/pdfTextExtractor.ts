@@ -3,21 +3,23 @@
 // Uses pdfjs-dist legacy build for Electron main process compatibility
 import fs from 'fs/promises'
 import path from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 import { createRequire } from 'module'
 import { PDFTextContent, PDFPageText } from '../../../shared/types.js'
 
 // Import pdfjs-dist legacy build - works in Node.js/Electron main process
 const require = createRequire(import.meta.url)
-const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js')
+const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.mjs')
 
 // Get __dirname equivalent for ES modules
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 // Set worker source for pdfjs-dist (required for Node.js)
-const pdfjsWorker = require.resolve('pdfjs-dist/legacy/build/pdf.worker.js')
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
+// pdfjs-dist 5.x requires file:// URL format on Windows
+const pdfjsWorkerPath = require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs')
+const pdfjsWorkerUrl = pathToFileURL(pdfjsWorkerPath).href
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
 // Suppress canvas warnings - we only need text extraction, not rendering
 // This prevents warnings about missing canvas.node module

@@ -4,13 +4,16 @@ import { AIChatMessage, AutocompleteSuggestion, ChatAttachment } from '../../../
 import { projectService } from './projectService.js'
 import { documentService } from './documentService.js'
 import { createRequire } from 'module'
+import { pathToFileURL } from 'url'
 import { searchLibraryWithMentions } from './semanticSearchService.js'
 
 // Import pdfjs-dist for PDF text extraction
 const require = createRequire(import.meta.url)
-const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js')
-const pdfjsWorker = require.resolve('pdfjs-dist/legacy/build/pdf.worker.js')
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
+const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.mjs')
+// pdfjs-dist 5.x requires file:// URL format on Windows
+const pdfjsWorkerPath = require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs')
+const pdfjsWorkerUrl = pathToFileURL(pdfjsWorkerPath).href
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
 // Helper function to extract text from PDF base64 data
 async function extractPDFTextFromBase64(base64Data: string): Promise<string> {
