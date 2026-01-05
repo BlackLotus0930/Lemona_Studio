@@ -501,8 +501,9 @@ export const documentService = {
             ? finalFileName.replace(/\.docx$/i, '')
             : finalFileName;
         // Create document entry
-        // CRITICAL: If uploading to project folder, set projectId immediately
-        // This ensures indexing uses the correct project index
+        // CRITICAL: Set projectId for both project AND library files
+        // Library files are scoped per project, not shared across all projects
+        // This ensures indexing uses the correct project index and metadata
         const document = {
             id,
             title: documentTitle,
@@ -510,7 +511,7 @@ export const documentService = {
             createdAt: now,
             updatedAt: now,
             folder,
-            ...(folder === 'project' && projectId ? { projectId } : {}), // Set projectId if provided for project files
+            ...(projectId ? { projectId } : {}), // Set projectId for both library and project files if provided
         };
         // Log projectId assignment for debugging
         if (folder === 'project') {
