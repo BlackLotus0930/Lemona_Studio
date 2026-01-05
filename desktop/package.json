@@ -67,7 +67,8 @@
       "!node_modules/**/*.{md,ts,tsx}",
       "!**/*.{ts,tsx,map}",
       "!**/test/**/*",
-      "!**/tests/**/*"
+      "!**/tests/**/*",
+      "!../backend/**/*"
     ],
     "asar": true,
     "extraResources": [
