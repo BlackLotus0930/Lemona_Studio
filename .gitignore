@@ -13,7 +13,6 @@ build/
 
 # Electron build outputs
 desktop/release/
-desktop/.npmrc
 
 # Logs
 logs/
