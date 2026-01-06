@@ -3,6 +3,7 @@ import { useTheme } from '../../contexts/ThemeContext'
 import './TopBar.css'
 import Tab from './Tab'
 import { Document } from '@shared/types'
+import logoImage from '../../assets/lemonalogo.png'
 
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electron !== undefined
@@ -118,7 +119,7 @@ function TopBar({
         {/* Logo */}
         <div className="topbar-logo">
           <img 
-            src="/lemonalogo.png" 
+            src={logoImage} 
             alt="Lemona" 
             className="logo-image"
           />

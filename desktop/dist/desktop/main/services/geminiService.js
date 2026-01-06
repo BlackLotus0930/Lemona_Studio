@@ -244,15 +244,19 @@ async function buildContext(documentContent, projectId, chatHistory, cursorPosit
     // 4️⃣ Add library search results if @mentions detected
     if (userMessage && (apiKey || openaiApiKey)) {
         try {
-            // CRITICAL: Use projectId if provided (for project-specific search),
-            // otherwise use 'library' for general library search
-            // This ensures we search in the same index where documents were indexed
-            const searchProjectId = projectId || 'library';
-            const searchResult = await searchLibraryWithMentions(userMessage, apiKey, // geminiApiKey
-            openaiApiKey, 3, // top-k
-            searchProjectId);
-            if (searchResult.results.length > 0 && searchResult.formattedResults) {
-                systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`;
+            // CRITICAL: projectId is required for library search
+            // Library index is project-isolated: {projectId}/library
+            if (!projectId) {
+                console.warn('[Gemini] Cannot search library: projectId is not provided');
+            }
+            else {
+                const searchResult = await searchLibraryWithMentions(userMessage, projectId, // Required: Current project ID
+                apiKey, // geminiApiKey
+                openaiApiKey, 3 // top-k
+                );
+                if (searchResult.results.length > 0 && searchResult.formattedResults) {
+                    systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`;
+                }
             }
         }
         catch (error) {

@@ -381,20 +381,22 @@ Your role is not to finish the work, but to help the user stay in the work.`
   // 4️⃣ Add library search results if @mentions detected
   if (userMessage && (geminiApiKey || apiKey)) {
     try {
-      // CRITICAL: Use projectId if provided (for project-specific search),
-      // otherwise use 'library' for general library search
-      // This ensures we search in the same index where documents were indexed
-      const searchProjectId = projectId || 'library'
-      const searchResult = await searchLibraryWithMentions(
-        userMessage,
-        geminiApiKey, // Prefer Gemini
-        apiKey, // Fallback to OpenAI
-        3, // top-k
-        searchProjectId
-      )
+      // CRITICAL: projectId is required for library search
+      // Library index is project-isolated: {projectId}/library
+      if (!projectId) {
+        console.warn('[OpenAI] Cannot search library: projectId is not provided')
+      } else {
+        const searchResult = await searchLibraryWithMentions(
+          userMessage,
+          projectId, // Required: Current project ID
+          geminiApiKey, // Prefer Gemini
+          apiKey, // Fallback to OpenAI
+          3 // top-k
+        )
 
-      if (searchResult.results.length > 0 && searchResult.formattedResults) {
-        systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`
+        if (searchResult.results.length > 0 && searchResult.formattedResults) {
+          systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`
+        }
       }
     } catch (error: any) {
       // Don't fail the entire request if library search fails
@@ -479,16 +481,128 @@ export const openaiService = {
         {
           role: 'system',
           content: systemInstruction
-        },
-        ...(history || []).map(msg => ({
-          role: msg.role === 'user' ? 'user' : 'assistant',
-          content: msg.content
-        } as OpenAI.Chat.Completions.ChatCompletionMessageParam)),
-        {
-          role: 'user',
-          content: message
         }
       ]
+
+      // Add chat history with attachments
+      for (const msg of history || []) {
+        if (msg.attachments && msg.attachments.length > 0) {
+          // Build content array for messages with attachments
+          const content: Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }> = []
+          
+          // Add text content first (OpenAI prefers text before images)
+          if (msg.content) {
+            content.push({
+              type: 'text',
+              text: msg.content
+            })
+          } else if (msg.attachments.some(a => a.type === 'image')) {
+            // If no text but has images, add a prompt
+            content.push({
+              type: 'text',
+              text: 'Please analyze the attached image(s).'
+            })
+          }
+          
+          // Process attachments - extract PDF text asynchronously
+          for (const attachment of msg.attachments) {
+            if (attachment.type === 'image') {
+              // Ensure base64 data is properly formatted
+              const base64Data = attachment.data.startsWith('data:') 
+                ? attachment.data.split(',')[1] || attachment.data
+                : attachment.data
+              
+              content.push({
+                type: 'image_url',
+                image_url: {
+                  url: `data:${attachment.mimeType || 'image/png'};base64,${base64Data}`
+                }
+              })
+            } else if (attachment.type === 'pdf') {
+              // Extract text from PDF
+              const pdfText = await extractPDFTextFromBase64(attachment.data)
+              content.push({
+                type: 'text',
+                text: `[PDF: ${attachment.name}]\n\n${pdfText}`
+              })
+            }
+          }
+          
+          // Ensure content is always an array when we have attachments
+          if (content.length > 0) {
+            messages.push({
+              role: msg.role === 'user' ? 'user' : 'assistant',
+              content: content
+            } as OpenAI.Chat.Completions.ChatCompletionMessageParam)
+          } else {
+            // Fallback to string content if no attachments
+            messages.push({
+              role: msg.role === 'user' ? 'user' : 'assistant',
+              content: msg.content
+            } as OpenAI.Chat.Completions.ChatCompletionMessageParam)
+          }
+        } else {
+          messages.push({
+            role: msg.role === 'user' ? 'user' : 'assistant',
+            content: msg.content
+          } as OpenAI.Chat.Completions.ChatCompletionMessageParam)
+        }
+      }
+
+      // Build current message with attachments
+      const currentMessageContent: Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }> = []
+      
+      // Add text message first (OpenAI prefers text before images)
+      // If no text but we have images, add a prompt to analyze the image
+      const textMessage = message || (attachments && attachments.some(a => a.type === 'image') 
+        ? 'Please analyze the attached image(s) and provide a detailed description.' 
+        : '')
+      
+      if (textMessage) {
+        currentMessageContent.push({
+          type: 'text',
+          text: textMessage
+        })
+      }
+      
+      // Add attachments - extract PDF text
+      if (attachments && attachments.length > 0) {
+        for (const attachment of attachments) {
+          if (attachment.type === 'image') {
+            // Ensure base64 data is properly formatted
+            const base64Data = attachment.data.startsWith('data:') 
+              ? attachment.data.split(',')[1] || attachment.data
+              : attachment.data
+            
+            currentMessageContent.push({
+              type: 'image_url',
+              image_url: {
+                url: `data:${attachment.mimeType || 'image/png'};base64,${base64Data}`
+              }
+            })
+          } else if (attachment.type === 'pdf') {
+            // Extract text from PDF
+            const pdfText = await extractPDFTextFromBase64(attachment.data)
+            currentMessageContent.push({
+              type: 'text',
+              text: `[PDF: ${attachment.name}]\n\n${pdfText}`
+            })
+          }
+        }
+      }
+
+      // If we have attachments, use content array, otherwise use string
+      if (currentMessageContent.length > 0) {
+        messages.push({
+          role: 'user',
+          content: currentMessageContent
+        } as OpenAI.Chat.Completions.ChatCompletionMessageParam)
+      } else {
+        messages.push({
+          role: 'user',
+          content: message
+        } as OpenAI.Chat.Completions.ChatCompletionMessageParam)
+      }
 
       // gpt-5 models only support default temperature (1), not custom values
       const completionParams: any = {
@@ -542,14 +656,42 @@ export const openaiService = {
           inputText += `System: ${systemInstruction}\n\n`
         }
         
-        // Add chat history
+        // Add chat history with attachments
         for (const msg of history || []) {
           const role = msg.role === 'user' ? 'User' : 'Assistant'
-          inputText += `${role}: ${msg.content}\n\n`
+          let msgText = msg.content || ''
+          
+          // Process attachments in history
+          if (msg.attachments && msg.attachments.length > 0) {
+            for (const attachment of msg.attachments) {
+              if (attachment.type === 'pdf') {
+                // Extract text from PDF
+                const pdfText = await extractPDFTextFromBase64(attachment.data)
+                msgText += `\n\n[PDF Attachment: ${attachment.name}]\n${pdfText}`
+              } else if (attachment.type === 'image') {
+                msgText += `\n\n[Image Attachment: ${attachment.name}]`
+              }
+            }
+          }
+          
+          inputText += `${role}: ${msgText}\n\n`
         }
         
-        // Add current message
-        inputText += `User: ${message}`
+        // Add current message with attachments
+        let currentMessageText = message || ''
+        if (attachments && attachments.length > 0) {
+          for (const attachment of attachments) {
+            if (attachment.type === 'pdf') {
+              // Extract text from PDF
+              const pdfText = await extractPDFTextFromBase64(attachment.data)
+              currentMessageText += `\n\n[PDF Attachment: ${attachment.name}]\n${pdfText}`
+            } else if (attachment.type === 'image') {
+              currentMessageText += `\n\n[Image Attachment: ${attachment.name}]`
+            }
+          }
+        }
+        
+        inputText += `User: ${currentMessageText}`
         
         // Use OpenAI's Responses API with native web_search tool
         try {

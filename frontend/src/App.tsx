@@ -1,11 +1,11 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import DocumentList from './pages/DocumentList'
 import Layout from './components/Layout/Layout'
 import { EditorProvider } from './contexts/EditorContext'
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <EditorProvider>
         <Routes>
           <Route path="/" element={<Navigate to="/documents" replace />} />
@@ -13,7 +13,7 @@ function App() {
           <Route path="/document/:id" element={<Layout />} />
         </Routes>
       </EditorProvider>
-    </BrowserRouter>
+    </HashRouter>
   )
 }
 

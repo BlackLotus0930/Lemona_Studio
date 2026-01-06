@@ -2,11 +2,14 @@ import { app, BrowserWindow, session } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readdirSync } from 'fs';
+import fs from 'fs/promises';
 import { setupIPC } from './ipc.js';
 import { migrateDocuments } from './services/migration.js';
 import { documentService } from './services/documentService.js';
 import { getVectorStore, cleanupVectorIndex } from './services/vectorStore.js';
 import { projectService } from './services/projectService.js';
+import { indexingService } from './services/indexingService.js';
+import { getApiKeys } from './services/apiKeyStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -179,6 +182,9 @@ app.whenReady().then(async () => {
   // Clean up vector index: remove corrupted files and orphaned chunks
   const vectorCleanupResult = await cleanupVectorIndex();
   
+  // Check for old library index migration
+  await checkAndHandleLibraryIndexMigration();
+  
   // Validate index integrity for all projects
   await validateAllIndexes();
   
@@ -191,6 +197,56 @@ app.whenReady().then(async () => {
     }
   });
 });
+
+/**
+ * Check for old library index and handle migration
+ * If old index exists, notify frontend to prompt user for migration choice
+ */
+async function checkAndHandleLibraryIndexMigration(): Promise<void> {
+  try {
+    const BASE_VECTOR_INDEX_DIR = path.join(app.getPath('userData'), 'vectorIndex');
+    const oldLibraryIndexDir = path.join(BASE_VECTOR_INDEX_DIR, 'library');
+    const oldMetadataFile = path.join(oldLibraryIndexDir, 'metadata.json');
+    const oldIndexFile = path.join(oldLibraryIndexDir, 'index.bin');
+    const deprecatedMarker = path.join(oldLibraryIndexDir, '.deprecated');
+
+    // Check if old index exists and is not already deprecated
+    let oldIndexExists = false;
+    let isDeprecated = false;
+    
+    try {
+      await fs.access(oldMetadataFile);
+      await fs.access(oldIndexFile);
+      oldIndexExists = true;
+      
+      // Check if already deprecated
+      try {
+        await fs.access(deprecatedMarker);
+        isDeprecated = true;
+      } catch {
+        isDeprecated = false;
+      }
+    } catch {
+      oldIndexExists = false;
+    }
+
+    if (oldIndexExists && !isDeprecated) {
+      // Old index exists and is not deprecated - need to migrate
+      // Store migration state for frontend to check
+      const migrationStateFile = path.join(BASE_VECTOR_INDEX_DIR, '.migration-pending.json');
+      await fs.writeFile(migrationStateFile, JSON.stringify({
+        oldIndexExists: true,
+        checkedAt: new Date().toISOString(),
+      }), 'utf-8');
+      
+      console.log('[Migration] Old library index detected. Frontend will prompt user for migration.');
+    } else if (isDeprecated) {
+      console.log('[Migration] Old library index is already deprecated.');
+    }
+  } catch (error: any) {
+    console.error('❌ Failed to check library index migration:', error);
+  }
+}
 
 /**
  * Validate index integrity for all projects
@@ -220,7 +276,8 @@ async function validateAllIndexes(): Promise<void> {
     for (const projectDir of projectDirs) {
       try {
         const projectId = projectDir === 'library' ? 'library' : projectDir;
-        const vectorStore = getVectorStore(projectId);
+        // Only validate library indexes (project indexes not supported yet)
+        const vectorStore = getVectorStore(projectId, 'library');
         const result = await vectorStore.validateIntegrity();
         
         validationResults.push({

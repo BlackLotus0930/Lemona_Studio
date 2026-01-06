@@ -1,5 +1,6 @@
 import { Editor } from '@tiptap/react'
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useEditorContext } from '../../contexts/EditorContext'
 import ExportModal from '../Layout/ExportModal'
@@ -93,6 +94,7 @@ export default function Toolbar({
   projectName = 'LEMONA',
   documentTitle
 }: ToolbarProps) {
+  const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
   const { currentEditor } = useEditorContext()
   // Use currentEditor from context, fallback to editorProp for backward compatibility
@@ -1099,7 +1101,7 @@ export default function Toolbar({
         title="Home"
         onMouseDown={(e) => {
           e.preventDefault()
-          window.location.href = '/documents'
+          navigate('/documents')
         }}
         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}

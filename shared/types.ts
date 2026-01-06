@@ -25,6 +25,10 @@ export interface Document {
   pdfText?: PDFTextContent; // Optional: Extracted text from PDF files, organized by page/paragraph
   // Logical deletion
   deleted?: boolean; // Optional: Whether this document has been logically deleted
+  // Metadata for indexing and change detection
+  metadata?: {
+    contentHash?: string; // SHA-256 hash of file content (for change detection)
+  };
 }
 
 export interface PDFTextContent {
@@ -86,6 +90,7 @@ export interface IndexingStatus {
   chunksCount?: number;
   indexedAt?: string;
   error?: string;
+  contentHash?: string; // File content hash when indexed (for change detection)
 }
 
 export interface LibrarySearchResult {

@@ -59,13 +59,13 @@ function loadAIPanelState(): AIPanelState {
       const parsed = JSON.parse(stored)
       return {
         isOpen: parsed.isOpen ?? true,
-        width: parsed.width ?? 20
+        width: parsed.width ?? 35
       }
     }
   } catch (error) {
     console.error('Failed to load AI panel state:', error)
   }
-  return { isOpen: true, width: 20 }
+  return { isOpen: true, width: 35 }
 }
 
 function saveAIPanelState(state: AIPanelState) {
@@ -261,6 +261,8 @@ export default function Layout(): JSX.Element {
   const documentsRef = useRef<Document[]>([]) // Ref to store latest documents for use in callbacks
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
   const [projectName, setProjectName] = useState<string>('LEMONA')
+  const [isRenamingProject, setIsRenamingProject] = useState(false)
+  const [projectRenameValue, setProjectRenameValue] = useState('')
   
   // Sync documentsRef with documents state
   useEffect(() => {
@@ -717,13 +719,8 @@ export default function Layout(): JSX.Element {
   useEffect(() => {
     const currentProjectId = document?.projectId
     
-    // Only clear and reload if projectId actually changed
-    if (previousProjectIdRef.current !== currentProjectId) {
-      // Clear documents immediately when project changes to prevent showing stale data
-      setDocuments([])
-      setIsLoadingDocuments(true)
-      
-      // Load project name immediately for instant shell UI
+    // Function to load project name from API (always fresh)
+    const loadProjectName = () => {
       if (currentProjectId) {
         projectApi.getById(currentProjectId)
           .then(project => {
@@ -739,6 +736,16 @@ export default function Layout(): JSX.Element {
       } else {
         setProjectName('LEMONA')
       }
+    }
+    
+    // Only clear and reload if projectId actually changed
+    if (previousProjectIdRef.current !== currentProjectId) {
+      // Clear documents immediately when project changes to prevent showing stale data
+      setDocuments([])
+      setIsLoadingDocuments(true)
+      
+      // Load project name immediately for instant shell UI
+      loadProjectName()
       
       // Clear tabs that don't belong to the current project
       setOpenTabs(prevTabs => {
@@ -762,8 +769,24 @@ export default function Layout(): JSX.Element {
       previousProjectIdRef.current = currentProjectId
       // Pass the projectId explicitly to ensure we load the correct project's documents
       loadDocuments(currentProjectId)
+    } else {
+      // Even if projectId didn't change, reload project name to catch any updates
+      loadProjectName()
     }
-  }, [document?.projectId]) // Reload when project changes (removed activeTabId to prevent cross-project loading)
+    
+    // Listen for project rename events to refresh project name
+    const handleProjectRenameEvent = (event: CustomEvent) => {
+      if (event.detail?.projectId === currentProjectId) {
+        loadProjectName()
+      }
+    }
+    
+    window.addEventListener('projectRenamed', handleProjectRenameEvent as EventListener)
+    
+    return () => {
+      window.removeEventListener('projectRenamed', handleProjectRenameEvent as EventListener)
+    }
+  }, [document?.projectId, activeTabId]) // Reload when project changes
 
   // Also try to load documents when we have an id but no document yet (e.g., document failed to load)
   // This ensures the file explorer shows documents even if the current document doesn't load
@@ -1458,6 +1481,39 @@ export default function Layout(): JSX.Element {
     } catch (error) {
       console.error('Failed to rename document:', error)
       alert('Failed to rename document. Please try again.')
+    }
+  }
+
+  const handleProjectRename = async (newTitle: string) => {
+    const projectId = document?.projectId
+    
+    if (!projectId || !newTitle.trim()) {
+      setIsRenamingProject(false)
+      setProjectRenameValue(projectName)
+      return
+    }
+    
+    try {
+      // Update project via API
+      await projectApi.update(projectId, { title: newTitle.trim() })
+      
+      // Reload project from API to ensure we have the latest data
+      const updatedProject = await projectApi.getById(projectId)
+      if (updatedProject) {
+        setProjectName(updatedProject.title)
+      } else {
+        setProjectName(newTitle.trim())
+      }
+      
+      setIsRenamingProject(false)
+      
+      // Notify DocumentList to refresh projects list
+      window.dispatchEvent(new CustomEvent('projectRenamed', { detail: { projectId } }))
+    } catch (error) {
+      console.error('Failed to rename project:', error)
+      alert('Failed to rename project. Please try again.')
+      setIsRenamingProject(false)
+      setProjectRenameValue(projectName)
     }
   }
 
@@ -4642,7 +4698,65 @@ export default function Layout(): JSX.Element {
               alignItems: 'center',
               justifyContent: 'space-between'
             }}>
-              <span>{isSearchMode ? 'SEARCH' : projectName.toUpperCase()}</span>
+              {isSearchMode ? (
+                <span>SEARCH</span>
+              ) : isRenamingProject ? (
+                <input
+                  value={projectRenameValue}
+                  onChange={(e) => setProjectRenameValue(e.target.value)}
+                  onBlur={() => {
+                    if (projectRenameValue.trim()) {
+                      handleProjectRename(projectRenameValue)
+                    } else {
+                      setIsRenamingProject(false)
+                      setProjectRenameValue(projectName)
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (projectRenameValue.trim()) {
+                        handleProjectRename(projectRenameValue)
+                      }
+                    } else if (e.key === 'Escape') {
+                      setIsRenamingProject(false)
+                      setProjectRenameValue(projectName)
+                    }
+                  }}
+                  autoFocus
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: theme === 'dark' ? '#D6D6DD' : '#202124',
+                    backgroundColor: theme === 'dark' ? '#181818' : '#f1f3f4',
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: '4px',
+                    padding: '2px 6px',
+                    outline: 'none',
+                    textTransform: 'uppercase',
+                    fontFamily: 'inherit',
+                    width: '150px',
+                    letterSpacing: '0.5px'
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span 
+                  onClick={() => {
+                    const projectId = document?.projectId
+                    if (projectId) {
+                      setIsRenamingProject(true)
+                      setProjectRenameValue(projectName)
+                    }
+                  }}
+                  style={{ 
+                    cursor: document?.projectId ? 'pointer' : 'default',
+                    userSelect: 'none'
+                  }}
+                  title={document?.projectId ? "Click to rename project" : undefined}
+                >
+                  {projectName.toUpperCase()}
+                </span>
+              )}
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <button
                   onClick={handleCreateDocument}

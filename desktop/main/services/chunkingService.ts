@@ -4,8 +4,8 @@ import { estimateTokens } from './embeddingService.js'
 import crypto from 'crypto'
 
 // Default chunking parameters
-export const DEFAULT_CHUNK_SIZE = 500 // tokens per chunk
-export const DEFAULT_CHUNK_OVERLAP = 75 // tokens overlap between chunks
+export const DEFAULT_CHUNK_SIZE = 400 // tokens per chunk
+export const DEFAULT_CHUNK_OVERLAP = 50 // tokens overlap between chunks (40-60 range, using 50 as default)
 
 /**
  * Chunk metadata

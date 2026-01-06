@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Project, Document } from '@shared/types'
 import { documentApi, projectApi } from '../services/api'
 import { useTheme } from '../contexts/ThemeContext'
@@ -9,19 +9,20 @@ import SearchIcon from '@mui/icons-material/Search'
 import AddIcon from '@mui/icons-material/Add'
 // @ts-ignore
 import MoreVertIcon from '@mui/icons-material/MoreVert'
+import logoImage from '../assets/lemonalogo.png'
+import thinkingMemeImage from '../assets/thinkingmeme.png'
 
 export default function DocumentList() {
   const { theme } = useTheme()
   const [projects, setProjects] = useState<Project[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(true)
-  const [isCreatingProject, setIsCreatingProject] = useState(false)
-  const [newProjectName, setNewProjectName] = useState('')
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteConfirmProjectId, setDeleteConfirmProjectId] = useState<string | null>(null)
   const navigate = useNavigate()
+  const location = useLocation()
   
   const bgColor = theme === 'dark' ? '#070707' : '#ffffff'
   const brighterBg = theme === 'dark' ? '#181818' : '#f1f3f4'
@@ -36,8 +37,22 @@ export default function DocumentList() {
   const dropdownHoverBg = theme === 'dark' ? '#3e3e42' : '#f8f9fa'
 
   useEffect(() => {
+    // Always load fresh data from API when component mounts or location changes
+    // This ensures we have the latest project names when user navigates back to home page
     loadProjects()
-  }, [])
+    
+    // Listen for project rename events to refresh projects list
+    const handleProjectRenameEvent = () => {
+      // Reload projects to ensure we have the latest data
+      loadProjects()
+    }
+    
+    window.addEventListener('projectRenamed', handleProjectRenameEvent as EventListener)
+    
+    return () => {
+      window.removeEventListener('projectRenamed', handleProjectRenameEvent as EventListener)
+    }
+  }, [location.pathname]) // Reload when navigating to /documents
 
   const loadProjects = async () => {
     try {
@@ -86,13 +101,22 @@ export default function DocumentList() {
   }
 
   const handleCreateProject = async () => {
-    if (!newProjectName.trim()) {
-      return
-    }
-    
     try {
-      // Create project
-      const project = await projectApi.create(newProjectName.trim())
+      // Generate default name "Untitled (X)" based on existing projects
+      const untitledPattern = /^Untitled \((\d+)\)$/
+      const existingUntitledNumbers = projects
+        .map(p => {
+          const match = p.title.match(untitledPattern)
+          return match ? parseInt(match[1], 10) : 0
+        })
+        .filter(num => num > 0)
+      
+      const nextNumber = existingUntitledNumbers.length > 0 
+        ? Math.max(...existingUntitledNumbers) + 1 
+        : 1
+      
+      const defaultName = `Untitled (${nextNumber})`
+      const project = await projectApi.create(defaultName.trim())
       
       // Create README.md document as the first document
       const readmeDoc = await documentApi.create('README.md')
@@ -102,10 +126,8 @@ export default function DocumentList() {
       
       // Update projects list
       setProjects(prev => [project, ...prev])
-      setIsCreatingProject(false)
-      setNewProjectName('')
       
-      // Navigate to README.md
+      // Navigate to the README document (same as handleOpenProject)
       navigate(`/document/${readmeDoc.id}`)
     } catch (error) {
       console.error('Failed to create project:', error)
@@ -191,10 +213,24 @@ export default function DocumentList() {
     if (!newTitle.trim()) return
     
     try {
+      // Update project via API
       await projectApi.update(projectId, { title: newTitle.trim() })
-      setProjects(prev => prev.map(p => p.id === projectId ? { ...p, title: newTitle.trim() } : p))
+      
+      // Reload project from API to ensure we have the latest data
+      const updatedProject = await projectApi.getById(projectId)
+      if (updatedProject) {
+        // Update local state with fresh data from API
+        setProjects(prev => prev.map(p => p.id === projectId ? updatedProject : p))
+      } else {
+        // Fallback: update with new title if API call fails
+        setProjects(prev => prev.map(p => p.id === projectId ? { ...p, title: newTitle.trim() } : p))
+      }
+      
       setRenamingId(null)
       setRenameValue('')
+      
+      // Notify Layout to refresh project name if it's currently viewing this project
+      window.dispatchEvent(new CustomEvent('projectRenamed', { detail: { projectId } }))
     } catch (error) {
       console.error('Failed to rename project:', error)
       alert('Failed to rename project. Please try again.')
@@ -276,7 +312,7 @@ export default function DocumentList() {
             }}
           >
             <img 
-              src="/lemonalogo.png" 
+              src={logoImage} 
               alt="Lemona Logo" 
               style={{
                 width: '18px',
@@ -463,11 +499,11 @@ export default function DocumentList() {
         <div style={{
           maxWidth: '1200px',
           margin: '0 auto',
-          padding: '32px 24px',
+          padding: '28px 24px',
         }}>
         {/* Header */}
         <div style={{
-          marginBottom: '32px',
+          marginBottom: '28px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -487,8 +523,8 @@ export default function DocumentList() {
               }
             `}</style>
             <h1 style={{ 
-              fontSize: '32px', 
-              fontWeight: 700, 
+              fontSize: '26px', 
+              fontWeight: 600, 
               color: textColor,
               margin: 0,
               marginBottom: '4px',
@@ -496,14 +532,6 @@ export default function DocumentList() {
             } as React.CSSProperties}>
               Projects
             </h1>
-            <p style={{
-              fontSize: '14px',
-              color: secondaryTextColor,
-              margin: 0,
-              fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-            }}>
-              {filteredProjects.length} {filteredProjects.length === 1 ? 'project' : 'projects'}
-            </p>
           </div>
         </div>
 
@@ -541,7 +569,7 @@ export default function DocumentList() {
             }
           `}</style>
         <button
-          onClick={() => setIsCreatingProject(true)}
+          onClick={handleCreateProject}
           style={{
               position: 'relative',
               width: '64px',
@@ -601,306 +629,6 @@ export default function DocumentList() {
         </button>
         </div>
 
-        {/* Project creation modal */}
-        {isCreatingProject && (
-        <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: theme === 'dark'
-              ? 'radial-gradient(circle at center, rgba(244, 114, 182, 0.15) 0%, rgba(0, 0, 0, 0.85) 100%)'
-              : 'radial-gradient(circle at center, rgba(244, 114, 182, 0.1) 0%, rgba(0, 0, 0, 0.5) 100%)',
-            backdropFilter: 'blur(0.1px)',
-            WebkitBackdropFilter: 'blur(0.1px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-            zIndex: 10000,
-            animation: 'modalBackdropFadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-          }}
-          onClick={() => setIsCreatingProject(false)}
-          >
-          <style>{`
-            @keyframes modalBackdropFadeIn {
-              from { 
-                opacity: 0;
-              }
-              to { 
-                opacity: 1;
-              }
-            }
-            
-            @keyframes modalEnter {
-              from { 
-                opacity: 0;
-              }
-              to { 
-                opacity: 1;
-              }
-            }
-            
-            @keyframes shimmer {
-              0% {
-                background-position: -200% center;
-              }
-              100% {
-                background-position: 200% center;
-              }
-            }
-            
-            @keyframes float {
-              0%, 100% {
-                transform: translateY(0px);
-              }
-              50% {
-                transform: translateY(-10px);
-              }
-            }
-            
-            @keyframes sparkle {
-              0%, 100% {
-                opacity: 0;
-                transform: scale(0) rotate(0deg);
-              }
-              50% {
-                opacity: 1;
-                transform: scale(1) rotate(180deg);
-              }
-            }
-            
-            @keyframes glow-pulse {
-              0%, 100% {
-                box-shadow: 0 0 20px rgba(244, 114, 182, 0.4),
-                            0 0 40px rgba(244, 114, 182, 0.2),
-                            0 20px 60px rgba(0, 0, 0, 0.5),
-                            0 0 0 1px rgba(255, 255, 255, 0.05) inset;
-              }
-              50% {
-                box-shadow: 0 0 30px rgba(244, 114, 182, 0.6),
-                            0 0 60px rgba(244, 114, 182, 0.3),
-                            0 20px 80px rgba(0, 0, 0, 0.6),
-                            0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-              }
-            }
-          `}</style>
-          
-          {/* Floating sparkles */}
-            <div style={{
-            position: 'absolute',
-            top: '30%',
-            left: '30%',
-            width: '8px',
-            height: '8px',
-            background: 'radial-gradient(circle, #fce7f3 0%, transparent 70%)',
-            borderRadius: '50%',
-            animation: 'sparkle 6s ease-in-out infinite',
-            animationDelay: '0s',
-            pointerEvents: 'none',
-          }} />
-          <div style={{
-            position: 'absolute',
-            top: '40%',
-            right: '25%',
-            width: '6px',
-            height: '6px',
-            background: 'radial-gradient(circle, #fbcfe8 0%, transparent 70%)',
-            borderRadius: '50%',
-            animation: 'sparkle 7.5s ease-in-out infinite',
-            animationDelay: '0.5s',
-            pointerEvents: 'none',
-          }} />
-          <div style={{
-            position: 'absolute',
-            bottom: '35%',
-            left: '35%',
-            width: '10px',
-            height: '10px',
-            background: 'radial-gradient(circle, #f9a8d4 0%, transparent 70%)',
-            borderRadius: '50%',
-            animation: 'sparkle 9s ease-in-out infinite',
-            animationDelay: '1s',
-            pointerEvents: 'none',
-          }} />
-          <div style={{
-            position: 'absolute',
-            top: '50%',
-            left: '20%',
-            width: '7px',
-            height: '7px',
-            background: 'radial-gradient(circle, #f472b6 0%, transparent 70%)',
-            borderRadius: '50%',
-            animation: 'sparkle 8.4s ease-in-out infinite',
-            animationDelay: '1.5s',
-            pointerEvents: 'none',
-          }} />
-          <div style={{
-            position: 'absolute',
-            bottom: '45%',
-            right: '30%',
-            width: '9px',
-            height: '9px',
-            background: 'radial-gradient(circle, #ec4899 0%, transparent 70%)',
-            borderRadius: '50%',
-            animation: 'sparkle 6.6s ease-in-out infinite',
-            animationDelay: '0.8s',
-            pointerEvents: 'none',
-          }} />
-          
-            <div style={{
-              position: 'relative',
-              backgroundColor: theme === 'dark' ? '#070707' : '#ffffff',
-              borderRadius: '20px',
-              padding: '40px',
-              width: '480px',
-              maxWidth: '90%',
-              border: `2px solid transparent`,
-              backgroundImage: theme === 'dark'
-                ? `linear-gradient(${bgColor}, ${bgColor}), linear-gradient(90deg, #fce7f3, #fbcfe8, #f9a8d4, #f472b6, #ec4899, #f472b6, #f9a8d4, #fbcfe8, #fce7f3)`
-                : `linear-gradient(${bgColor}, ${bgColor}), linear-gradient(90deg, #fce7f3, #fbcfe8, #f9a8d4, #f472b6, #ec4899, #f472b6, #f9a8d4, #fbcfe8, #fce7f3)`,
-              backgroundOrigin: 'border-box',
-              backgroundClip: 'padding-box, border-box',
-              backgroundSize: 'auto, 200% 100%',
-              animation: theme === 'dark'
-                ? 'modalEnter 0.4s ease-out, shimmer 8s linear infinite, glow-pulse 8s ease-in-out infinite'
-                : 'modalEnter 0.4s ease-out, shimmer 8s linear infinite',
-              boxShadow: theme === 'dark' 
-                ? '0 0 20px rgba(244, 114, 182, 0.4), 0 0 40px rgba(244, 114, 182, 0.2), 0 20px 60px rgba(0, 0, 0, 0.5)' 
-                : '0 0 20px rgba(244, 114, 182, 0.3), 0 0 40px rgba(244, 114, 182, 0.15), 0 20px 60px rgba(0, 0, 0, 0.15)',
-              transformStyle: 'preserve-3d',
-              perspective: '1000px',
-            } as React.CSSProperties}
-            onClick={(e) => e.stopPropagation()}
-            >
-              <h2 style={{ 
-                fontSize: '28px', 
-                fontWeight: 600, 
-                color: textColor,
-                marginBottom: '28px',
-                fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                textAlign: 'center',
-                letterSpacing: '-0.5px',
-                position: 'relative',
-              } as React.CSSProperties}>
-                New Project
-              </h2>
-              <input
-                type="text"
-                placeholder="Project name"
-                value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleCreateProject()
-                  } else if (e.key === 'Escape') {
-                    setIsCreatingProject(false)
-                    setNewProjectName('')
-                  }
-                }}
-                autoFocus
-                style={{
-                  width: '100%',
-                  padding: '16px 20px',
-                  fontSize: '16px',
-                  border: `2px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
-                  borderRadius: '12px',
-                  backgroundColor: brighterBg,
-                  color: textColor,
-                  outline: 'none',
-                  marginBottom: '28px',
-                  fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                  boxShadow: theme === 'dark' 
-                    ? '0 2px 8px rgba(0,0,0,0.3)' 
-                    : '0 2px 8px rgba(0,0,0,0.08)',
-                }}
-                onFocus={() => {
-                  // Keep the same styling when focused - no pink effects
-                }}
-                onBlur={() => {
-                  // Keep the same styling when blurred
-                }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '16px' }}>
-                <button
-                  onClick={() => {
-                    setIsCreatingProject(false)
-                    setNewProjectName('')
-                  }}
-                  style={{
-                    padding: '12px 28px',
-                    border: `2px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.15)'}`,
-                    borderRadius: '12px',
-                    backgroundColor: 'transparent',
-                    color: textColor,
-                    cursor: 'pointer',
-                    fontSize: '15px',
-                    fontWeight: 500,
-                    fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                    transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
-                    position: 'relative',
-                    overflow: 'hidden',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'
-                    e.currentTarget.style.boxShadow = theme === 'dark' 
-                      ? '0 4px 12px rgba(0, 0, 0, 0.3)'
-                      : '0 4px 12px rgba(0, 0, 0, 0.1)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent'
-                    e.currentTarget.style.boxShadow = 'none'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateProject}
-                  disabled={!newProjectName.trim()}
-                  style={{
-                    padding: '12px 32px',
-                    border: 'none',
-                    borderRadius: '12px',
-                    background: newProjectName.trim() 
-                      ? 'linear-gradient(135deg, #f472b6 0%, #ec4899 50%, #fb7185 100%)'
-                      : borderColor,
-                    color: 'white',
-                    cursor: newProjectName.trim() ? 'pointer' : 'not-allowed',
-                    fontSize: '15px',
-                    fontWeight: 500,
-                    fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                    transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
-                    boxShadow: newProjectName.trim() 
-                      ? theme === 'dark'
-                        ? '0 2px 8px rgba(244, 114, 182, 0.3), 0 0 8px rgba(244, 114, 182, 0.2)'
-                        : '0 2px 8px rgba(244, 114, 182, 0.25), 0 0 8px rgba(244, 114, 182, 0.15)'
-                      : 'none',
-                    opacity: newProjectName.trim() ? 1 : 0.5,
-                    position: 'relative',
-                    overflow: 'hidden',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (newProjectName.trim()) {
-                      e.currentTarget.style.boxShadow = theme === 'dark'
-                        ? '0 4px 12px rgba(244, 114, 182, 0.4), 0 0 12px rgba(244, 114, 182, 0.25)'
-                        : '0 4px 12px rgba(244, 114, 182, 0.35), 0 0 12px rgba(244, 114, 182, 0.2)'
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (newProjectName.trim()) {
-                      e.currentTarget.style.boxShadow = theme === 'dark'
-                        ? '0 2px 8px rgba(244, 114, 182, 0.3), 0 0 8px rgba(244, 114, 182, 0.2)'
-                        : '0 2px 8px rgba(244, 114, 182, 0.25), 0 0 8px rgba(244, 114, 182, 0.15)'
-                    }
-                  }}
-                >
-                  Create
-                </button>
-              </div>
-            </div>
-            </div>
-          )}
 
         {isLoading ? (
           <div style={{ 
@@ -922,32 +650,41 @@ export default function DocumentList() {
             `}</style>
           </div>
         ) : filteredProjects.length === 0 ? (
-          <div style={{
-            textAlign: 'center',
-            padding: '60px 20px',
-            color: secondaryTextColor
-          }}>
-            <h2 style={{ 
-              fontSize: '24px', 
-              fontWeight: 600, 
-              marginBottom: '12px', 
-              color: textColor,
-              fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+          !searchQuery && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '90px 20px 60px 20px',
+              minHeight: '400px'
             }}>
-              {searchQuery ? 'No projects found' : 'No projects yet'}
-            </h2>
-            {!searchQuery && (
+              <img 
+                src={thinkingMemeImage} 
+                alt="Thinking meme"
+                style={{
+                  width: '200px',
+                  height: 'auto',
+                  marginBottom: '24px',
+                  filter: theme === 'dark' 
+                    ? 'invert(1) grayscale(1) brightness(0.4)' 
+                    : 'grayscale(1) brightness(0.6)',
+                  transition: 'filter 0.3s ease'
+                }}
+              />
               <p style={{ 
-                fontSize: '15px', 
-                color: secondaryTextColor, 
-                marginBottom: '32px',
+                fontSize: '16px', 
+                color: '#666666',
+                fontWeight: 400,
                 fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                 lineHeight: '1.6',
+                textAlign: 'center',
+                margin: 0
               }}>
-                Click the beautiful pink button below to create your first project
+                "Hmm... that pink button must be important..."
               </p>
-            )}
-          </div>
+            </div>
+          )
         ) : (
           <div style={{
             display: 'grid',

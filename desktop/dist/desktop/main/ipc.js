@@ -693,9 +693,9 @@ Rephrased text:`;
             throw error;
         }
     });
-    ipcMain.handle('library:indexAll', async (_, geminiApiKey, openaiApiKey) => {
+    ipcMain.handle('library:indexAll', async (_, geminiApiKey, openaiApiKey, onlyUnindexed) => {
         try {
-            const results = await indexingService.indexAllLibraryFiles(geminiApiKey, openaiApiKey);
+            const results = await indexingService.indexAllLibraryFiles(geminiApiKey, openaiApiKey, onlyUnindexed);
             return results;
         }
         catch (error) {
@@ -714,12 +714,14 @@ Rephrased text:`;
         }
     });
     // Library search operations (for testing/debugging)
-    ipcMain.handle('library:search', async (_, query, geminiApiKey, openaiApiKey, fileIds, k, projectId) => {
+    ipcMain.handle('library:search', async (_, query, projectId, geminiApiKey, openaiApiKey, fileIds, k) => {
         try {
             const { searchLibrary } = await import('./services/semanticSearchService.js');
-            // Use 'library' as default for library search, or projectId for project-specific search
-            const searchProjectId = projectId || 'library';
-            const results = await searchLibrary(query, geminiApiKey, openaiApiKey, fileIds, k || 3, searchProjectId);
+            // Search in project's library index
+            if (!projectId) {
+                throw new Error('Project ID is required for library search');
+            }
+            const results = await searchLibrary(query, projectId, 'library', geminiApiKey, openaiApiKey, fileIds, k || 3);
             return results;
         }
         catch (error) {
@@ -737,13 +739,120 @@ Rephrased text:`;
             throw error;
         }
     });
+    // Library index migration handlers
+    ipcMain.handle('library:checkMigration', async () => {
+        try {
+            const { app } = await import('electron');
+            const fs = await import('fs/promises');
+            const path = await import('path');
+            const BASE_VECTOR_INDEX_DIR = path.join(app.getPath('userData'), 'vectorIndex');
+            const oldLibraryIndexDir = path.join(BASE_VECTOR_INDEX_DIR, 'library');
+            const oldMetadataFile = path.join(oldLibraryIndexDir, 'metadata.json');
+            const oldIndexFile = path.join(oldLibraryIndexDir, 'index.bin');
+            const deprecatedMarker = path.join(oldLibraryIndexDir, '.deprecated');
+            const migrationStateFile = path.join(BASE_VECTOR_INDEX_DIR, '.migration-pending.json');
+            // Check if old index exists
+            let oldIndexExists = false;
+            let isDeprecated = false;
+            let migrationPending = false;
+            try {
+                await fs.access(oldMetadataFile);
+                await fs.access(oldIndexFile);
+                oldIndexExists = true;
+                // Check if deprecated
+                try {
+                    await fs.access(deprecatedMarker);
+                    isDeprecated = true;
+                }
+                catch {
+                    isDeprecated = false;
+                }
+                // Check if migration is pending
+                try {
+                    await fs.access(migrationStateFile);
+                    migrationPending = true;
+                }
+                catch {
+                    migrationPending = false;
+                }
+            }
+            catch {
+                oldIndexExists = false;
+            }
+            return {
+                oldIndexExists,
+                isDeprecated,
+                migrationPending,
+            };
+        }
+        catch (error) {
+            console.error('IPC library:checkMigration error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('library:migrate', async (_, geminiApiKey, openaiApiKey) => {
+        try {
+            const { indexingService } = await import('./services/indexingService.js');
+            const result = await indexingService.migrateLibraryIndex(geminiApiKey, openaiApiKey);
+            return result;
+        }
+        catch (error) {
+            console.error('IPC library:migrate error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('library:skipMigration', async () => {
+        try {
+            const { app } = await import('electron');
+            const fs = await import('fs/promises');
+            const path = await import('path');
+            const BASE_VECTOR_INDEX_DIR = path.join(app.getPath('userData'), 'vectorIndex');
+            const oldLibraryIndexDir = path.join(BASE_VECTOR_INDEX_DIR, 'library');
+            const deprecatedMarker = path.join(oldLibraryIndexDir, '.deprecated');
+            const migrationStateFile = path.join(BASE_VECTOR_INDEX_DIR, '.migration-pending.json');
+            // Mark old index as deprecated
+            await fs.writeFile(deprecatedMarker, JSON.stringify({
+                deprecatedAt: new Date().toISOString(),
+                reason: 'User skipped migration',
+                note: 'Old index is deprecated. Please re-index files manually if needed.',
+            }), 'utf-8');
+            // Remove migration pending marker
+            try {
+                await fs.unlink(migrationStateFile);
+            }
+            catch {
+                // Ignore if file doesn't exist
+            }
+            return { success: true };
+        }
+        catch (error) {
+            console.error('IPC library:skipMigration error:', error);
+            throw error;
+        }
+    });
     // API Key storage handlers
     ipcMain.handle('settings:saveApiKeys', async (_, geminiApiKey, openaiApiKey) => {
         try {
+            const previousKeys = getApiKeys();
             const changed = saveApiKeys(geminiApiKey, openaiApiKey);
-            // Only log if keys actually changed to avoid spam from duplicate calls
-            if (changed) {
-                const keys = getApiKeys();
+            const newKeys = getApiKeys();
+            // Check if a new API key was added (previously no key, now has key)
+            const hadKeyBefore = (previousKeys.geminiApiKey && previousKeys.geminiApiKey.trim().length > 0) ||
+                (previousKeys.openaiApiKey && previousKeys.openaiApiKey.trim().length > 0);
+            const hasKeyNow = (newKeys.geminiApiKey && newKeys.geminiApiKey.trim().length > 0) ||
+                (newKeys.openaiApiKey && newKeys.openaiApiKey.trim().length > 0);
+            // If API key was just added (was empty, now has value), auto-index unindexed library files
+            if (changed && !hadKeyBefore && hasKeyNow) {
+                console.log('[Auto-Indexing] API key was just added, starting automatic indexing of unindexed library files...');
+                // Trigger indexing asynchronously (don't block the API key save)
+                const { indexAllLibraryFiles } = await import('./services/indexingService.js');
+                indexAllLibraryFiles(newKeys.geminiApiKey, newKeys.openaiApiKey, true).then((results) => {
+                    const successCount = results.filter(r => r.status.status === 'completed').length;
+                    const errorCount = results.filter(r => r.status.status === 'error').length;
+                    console.log(`[Auto-Indexing] Completed: ${successCount} files indexed successfully, ${errorCount} errors`);
+                }).catch((error) => {
+                    console.error('[Auto-Indexing] Failed to auto-index library files:', error);
+                });
             }
             return { success: true };
         }

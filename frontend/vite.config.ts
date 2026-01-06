@@ -38,6 +38,7 @@ const pdfWorkerPlugin = () => {
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: './', // Use relative paths for Electron file:// protocol compatibility
   plugins: [react(), pdfWorkerPlugin()],
   resolve: {
     alias: {

@@ -32,7 +32,7 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
     ? (theme === 'dark' ? '#1e1e1e' : '#ffffff')
     : (theme === 'dark' ? '#141414' : '#f5f5f5')
   const tabTextColor = isActive
-    ? (theme === 'dark' ? '#D6D6DD' : '#202124')
+    ? (theme === 'dark' ? '#D6D6DD' : '#5f6368')
     : (theme === 'dark' ? '#858585' : '#5f6368')
   // Hover color same as selection color
   const tabHoverBg = theme === 'dark' ? '#1e1e1e' : '#ffffff'

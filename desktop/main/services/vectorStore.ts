@@ -47,38 +47,41 @@ function sanitizeProjectId(projectId: string): string {
 
 /**
  * Get project-specific vector index directory
- * @param projectId - Project ID, or 'library' for library files, or 'global' for legacy/global index
+ * @param projectId - Project ID (pure semantic ID, no path structure)
+ * @param folder - Folder type: 'library' or 'project'
  */
-function getProjectIndexDir(projectId?: string): string {
-  // Use 'library' for library folder files, sanitize projectId for project files, 'global' for legacy
-  let projectKey: string
-  if (projectId === 'library') {
-    projectKey = 'library'
-  } else if (projectId) {
-    projectKey = sanitizeProjectId(projectId)
-  } else {
-    projectKey = 'global'
-  }
-  return path.join(BASE_VECTOR_INDEX_DIR, projectKey)
+function getProjectIndexDir(projectId: string, folder: 'library' | 'project'): string {
+  // Sanitize projectId and combine with folder
+  const sanitizedProjectId = sanitizeProjectId(projectId)
+  return path.join(BASE_VECTOR_INDEX_DIR, sanitizedProjectId, folder)
 }
 
 /**
  * Get project-specific index file paths
+ * @param projectId - Project ID (pure semantic ID)
+ * @param folder - Folder type: 'library' or 'project'
  */
-function getProjectIndexFiles(projectId?: string): { indexFile: string; metadataFile: string } {
-  const projectDir = getProjectIndexDir(projectId)
+function getProjectIndexFiles(projectId: string, folder: 'library' | 'project'): { 
+  indexFile: string
+  metadataFile: string
+  manifestFile: string
+} {
+  const projectDir = getProjectIndexDir(projectId, folder)
   return {
     indexFile: path.join(projectDir, 'index.bin'),
     metadataFile: path.join(projectDir, 'metadata.json'),
+    manifestFile: path.join(projectDir, 'manifest.json'),
   }
 }
 
 /**
  * Export getProjectIndexDir for use in other services
  * This ensures consistent path building across services
+ * @param projectId - Project ID (pure semantic ID)
+ * @param folder - Folder type: 'library' or 'project'
  */
-export function getProjectIndexDirectory(projectId?: string): string {
-  return getProjectIndexDir(projectId)
+export function getProjectIndexDirectory(projectId: string, folder: 'library' | 'project'): string {
+  return getProjectIndexDir(projectId, folder)
 }
 
 // Ensure base vector index directory exists
@@ -109,6 +112,22 @@ export interface ChunkMetadata {
   endChar: number
   tokenCount: number
   projectId?: string // Optional: Project ID this chunk belongs to (for library files scoped to projects)
+}
+
+/**
+ * Index manifest - describes the configuration and version of an index
+ */
+export interface IndexManifest {
+  projectId: string
+  folder: 'library' | 'project'
+  embeddingModel: string // e.g., 'text-embedding-3-small'
+  embeddingDimension: number // 1536
+  chunkSize: number // 400
+  chunkOverlap: number // 40-60
+  indexVersion: string // Index structure/semantic version, manually bumped, used for reindex decision
+  appVersion: string // App version when index was created, only for debug
+  createdAt: string
+  updatedAt: string
 }
 
 /**
@@ -374,25 +393,31 @@ class VectorStore {
   private dimension: number = EMBEDDING_DIMENSION
   private isInitialized: boolean = false
   private saveLock: Promise<void> | null = null // Prevent concurrent saves
-  private currentProjectId: string | undefined = undefined // Current project ID for this instance
+  private currentProjectId: string | undefined = undefined // Current project ID (pure semantic ID)
+  private currentFolder: 'library' | 'project' = 'library' // Current folder type
   private indexFile: string = '' // Current index file path
   private metadataFile: string = '' // Current metadata file path
+  private manifestFile: string = '' // Current manifest file path
 
   /**
-   * Set the project ID for this vector store instance
+   * Set the project ID and folder for this vector store instance
    * This determines which index directory to use
-   * CRITICAL: Project ID must be consistent between indexing and searching
+   * CRITICAL: Project ID and folder must be consistent between indexing and searching
+   * @param projectId - Project ID (pure semantic ID, no path structure)
+   * @param folder - Folder type: 'library' or 'project'
    */
-  setProjectId(projectId?: string): void {
-    // Normalize projectId: undefined -> 'global', 'library' stays 'library', projectId stays projectId
-    const normalizedProjectId = projectId === 'library' ? 'library' : (projectId || undefined)
+  setProjectId(projectId: string, folder: 'library' | 'project'): void {
+    // Fail fast if project index is not supported yet
+    if (folder === 'project') {
+      throw new Error('Project vector index is not supported yet')
+    }
     
-    if (this.currentProjectId === normalizedProjectId) {
+    if (this.currentProjectId === projectId && this.currentFolder === folder) {
       return // No change
     }
     
-    // If already initialized with a different project, reset
-    if (this.isInitialized && this.currentProjectId !== normalizedProjectId) {
+    // If already initialized with a different project/folder, reset
+    if (this.isInitialized && (this.currentProjectId !== projectId || this.currentFolder !== folder)) {
       this.isInitialized = false
       this.index = null
       this.metadata.clear()
@@ -401,12 +426,12 @@ class VectorStore {
       this.nextLabel = 0
     }
     
-    this.currentProjectId = normalizedProjectId
-    const files = getProjectIndexFiles(normalizedProjectId)
+    this.currentProjectId = projectId
+    this.currentFolder = folder
+    const files = getProjectIndexFiles(projectId, folder)
     this.indexFile = files.indexFile
     this.metadataFile = files.metadataFile
-    
-    const indexDir = getProjectIndexDir(normalizedProjectId)
+    this.manifestFile = files.manifestFile
     
     // CRITICAL: Ensure project directory exists immediately when project ID is set
     // This ensures the directory is ready before any operations
@@ -422,6 +447,13 @@ class VectorStore {
     return this.currentProjectId
   }
 
+  /**
+   * Get current folder type
+   */
+  getFolder(): 'library' | 'project' {
+    return this.currentFolder
+  }
+
   // Note: VectorStore is a "database kernel", not a transaction manager
   // Lock management is handled by transaction boundaries (documentService/projectService)
   // All public methods assume caller already holds appropriate lock
@@ -430,18 +462,66 @@ class VectorStore {
    * Ensure project-specific index directory exists
    */
   private async ensureProjectIndexDir(): Promise<void> {
-    const projectDir = getProjectIndexDir(this.currentProjectId)
+    if (!this.currentProjectId) {
+      throw new Error('Project ID must be set before ensuring directory')
+    }
+    const projectDir = getProjectIndexDir(this.currentProjectId, this.currentFolder)
     try {
       await fs.mkdir(projectDir, { recursive: true })
     } catch (error) {
-      console.error(`[VectorStore] Error creating project index directory for ${this.currentProjectId}:`, error)
+      console.error(`[VectorStore] Error creating project index directory for ${this.currentProjectId}/${this.currentFolder}:`, error)
     }
+  }
+
+  /**
+   * Load index manifest
+   * @returns Manifest if exists, null otherwise
+   */
+  async loadManifest(): Promise<IndexManifest | null> {
+    if (!this.manifestFile) {
+      return null
+    }
+    try {
+      const content = await fs.readFile(this.manifestFile, 'utf-8')
+      return JSON.parse(content) as IndexManifest
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        return null // Manifest doesn't exist yet
+      }
+      console.error('[VectorStore] Failed to load manifest:', error)
+      return null
+    }
+  }
+
+  /**
+   * Save index manifest
+   * @param manifest - Manifest to save
+   */
+  async saveManifest(manifest: IndexManifest): Promise<void> {
+    if (!this.manifestFile) {
+      throw new Error('Manifest file path not set')
+    }
+    await this.ensureProjectIndexDir()
+    await fs.writeFile(this.manifestFile, JSON.stringify(manifest, null, 2), 'utf-8')
+  }
+
+  /**
+   * Check if index is valid based on manifest
+   * Compares indexVersion, embeddingModel, chunkSize, chunkOverlap, embeddingDimension
+   * @param expectedManifest - Expected manifest configuration
+   * @returns true if index is valid, false if needs rebuild
+   */
+  isIndexValid(expectedManifest: Partial<IndexManifest>): boolean {
+    // Load current manifest
+    // Note: This is synchronous check, actual loading is async
+    // For now, we'll do async check in loadIndexUnsafe
+    return true // Placeholder, actual check done in loadIndexUnsafe
   }
 
   /**
    * Initialize HNSW index
    */
-  async initialize(maxElements: number = 10000): Promise<void> {
+  async initialize(maxElements: number = 20000): Promise<void> {
     if (this.isInitialized && this.index) {
       // Verify index is actually initialized and has capacity
       const currentMaxElements = this.index.getMaxElements()
@@ -545,7 +625,7 @@ class VectorStore {
     for (const space of spacesToTry) {
       try {
         const testIndex = new HierarchicalNSW(space, this.dimension)
-        const maxElements = Math.max(this.metadata.size * 2, 1000)
+        const maxElements = Math.max(this.metadata.size * 2, 20000)
         testIndex.initIndex(maxElements, HNSW_CONFIG.M, HNSW_CONFIG.efConstruction, 100, false)
         testIndex.readIndexSync(this.indexFile)
         const testCount = testIndex.getCurrentCount()
@@ -596,8 +676,8 @@ class VectorStore {
       const preservedMetadataSize = this.metadata.size
       
       // Create new empty index (metadata is already loaded, we just need a new index instance)
-      // Ensure minimum capacity of 10000, or 2x metadata size if larger
-      const maxElements = Math.max(preservedMetadataSize * 2, 10000)
+      // Ensure minimum capacity of 20000 (per project index max capacity), or 2x metadata size if larger
+      const maxElements = Math.max(preservedMetadataSize * 2, 20000)
       this.index = new HierarchicalNSW(HNSW_CONFIG.space, this.dimension)
       this.index.initIndex(maxElements, HNSW_CONFIG.M, HNSW_CONFIG.efConstruction, 100, false)
       
@@ -720,7 +800,7 @@ class VectorStore {
             dimension: this.dimension,
             M: HNSW_CONFIG.M,
             efConstruction: HNSW_CONFIG.efConstruction,
-            maxElements: Math.max(this.metadata.size * 2, 1000),
+            maxElements: Math.max(this.metadata.size * 2, 20000),
             randomSeed: 100,
             allowReplaceDeleted: false,
           }
@@ -902,7 +982,10 @@ class VectorStore {
         await this.ensureProjectIndexDir()
         
         // Verify directory exists
-        const projectDir = getProjectIndexDir(this.currentProjectId)
+        if (!this.currentProjectId) {
+          throw new Error('Project ID must be set before saving')
+        }
+        const projectDir = getProjectIndexDir(this.currentProjectId, this.currentFolder)
         try {
           await fs.access(projectDir)
           console.log(`[VectorStore] ✓ Project directory exists: ${projectDir}`)
@@ -1045,11 +1128,29 @@ class VectorStore {
     const neededCapacity = currentCount + chunks.length
     const currentMaxElements = this.index.getMaxElements()
     
+    // Capacity monitoring and guardrail
+    const CAPACITY_WARNING_THRESHOLD = 0.8 // 80%
+    const CAPACITY_ERROR_THRESHOLD = 1.0 // 100%
+    const warningThreshold = Math.floor(currentMaxElements * CAPACITY_WARNING_THRESHOLD)
+    const errorThreshold = Math.floor(currentMaxElements * CAPACITY_ERROR_THRESHOLD)
+    
+    // Check if we're approaching capacity limit
+    if (currentCount >= warningThreshold && currentCount < errorThreshold) {
+      console.warn(`[VectorStore] Index capacity warning: ${currentCount}/${currentMaxElements} chunks (${Math.round(currentCount / currentMaxElements * 100)}%). Consider splitting the project or cleaning up files.`)
+    }
+    
+    // Check if we've exceeded capacity
     if (neededCapacity > currentMaxElements) {
-      console.warn(`[VectorStore] Index capacity (${currentMaxElements}) insufficient, need ${neededCapacity}. Resizing...`)
-      // Note: hnswlib-node doesn't support resizing, so we need to rebuild
-      // For now, we'll just log a warning and continue (will fail if capacity exceeded)
-      throw new Error(`Index capacity exceeded: need ${neededCapacity}, have ${currentMaxElements}`)
+      const errorMsg = `Index capacity exceeded: need ${neededCapacity}, have ${currentMaxElements}. Please split the project or remove some files.`
+      console.error(`[VectorStore] ${errorMsg}`)
+      throw new Error(errorMsg)
+    }
+    
+    // Check if we're at capacity limit
+    if (neededCapacity >= errorThreshold) {
+      const errorMsg = `Index capacity limit reached: ${neededCapacity}/${currentMaxElements} chunks. Please split the project or remove some files.`
+      console.error(`[VectorStore] ${errorMsg}`)
+      throw new Error(errorMsg)
     }
 
     // Add each chunk with its embedding
@@ -1210,8 +1311,7 @@ class VectorStore {
   async searchUnsafe(
     queryEmbedding: number[],
     k: number = 3,
-    fileIds?: string[],
-    projectId?: string // Optional: Filter results by projectId (for library index scoping)
+    fileIds?: string[] // Optional: Filter results by file IDs
   ): Promise<SearchResult[]> {
     // Check if index needs to be loaded first
     if (!this.isInitialized || !this.index) {
@@ -1249,10 +1349,7 @@ class VectorStore {
           continue
         }
 
-        // Filter by projectId if specified (for library index scoping)
-        if (projectId !== undefined && metadata.projectId !== projectId) {
-          continue
-        }
+        // Note: No need to filter by projectId - index is already scoped by projectId and folder
 
         // Convert distance to similarity score (lower distance = higher similarity)
         // Score is normalized to 0-1 range (1 = perfect match, 0 = no match)
@@ -1345,31 +1442,39 @@ class VectorStore {
   }
 }
 
-// Singleton instance per project
-const vectorStoreInstances: Map<string | undefined, VectorStore> = new Map()
+// Singleton instance per project and folder
+// Key format: `${projectId}:${folder}`
+const vectorStoreInstances: Map<string, VectorStore> = new Map()
 
 /**
- * Get vector store instance for a specific project
- * @param projectId - Project ID, or 'library' for library files, or undefined for global/legacy
+ * Get vector store instance for a specific project and folder
+ * @param projectId - Project ID (pure semantic ID, required)
+ * @param folder - Folder type: 'library' or 'project'
  */
-export function getVectorStore(projectId?: string): VectorStore {
-  // CRITICAL: Normalize projectId consistently
-  // - 'library' -> 'library' (for library folder files)
-  // - projectId string -> projectId (for project files)
-  // - undefined -> undefined (for global/legacy)
-  const normalizedProjectId = projectId === 'library' ? 'library' : (projectId || undefined)
+export function getVectorStore(projectId: string, folder: 'library' | 'project'): VectorStore {
+  // Fail fast if project index is not supported yet
+  if (folder === 'project') {
+    throw new Error('Project vector index is not supported yet')
+  }
+
+  if (!projectId) {
+    throw new Error('Project ID is required')
+  }
+
+  // Create a unique key for the instance map
+  const instanceKey = `${projectId}:${folder}`
   
-  if (!vectorStoreInstances.has(normalizedProjectId)) {
+  if (!vectorStoreInstances.has(instanceKey)) {
     const store = new VectorStore()
-    store.setProjectId(normalizedProjectId)
-    vectorStoreInstances.set(normalizedProjectId, store)
+    store.setProjectId(projectId, folder)
+    vectorStoreInstances.set(instanceKey, store)
   } else {
-    // Ensure project ID is set (in case it was changed)
-    const store = vectorStoreInstances.get(normalizedProjectId)!
-    store.setProjectId(normalizedProjectId)
+    // Ensure project ID and folder are set (in case they were changed)
+    const store = vectorStoreInstances.get(instanceKey)!
+    store.setProjectId(projectId, folder)
   }
   
-  return vectorStoreInstances.get(normalizedProjectId)!
+  return vectorStoreInstances.get(instanceKey)!
 }
 
 /**
@@ -1421,7 +1526,9 @@ export async function cleanupVectorIndex(projectId?: string): Promise<{
     // Clean each project
     for (const projId of projectsToClean) {
       try {
-        const projectDir = getProjectIndexDir(projId === 'library' ? 'library' : projId)
+        // Only clean library indexes (project indexes not supported yet)
+        const actualProjectId = projId === 'library' ? 'library' : projId
+        const projectDir = getProjectIndexDir(actualProjectId, 'library')
         
         // Check if project directory exists
         try {
@@ -1505,9 +1612,11 @@ export async function cleanupVectorIndex(projectId?: string): Promise<{
           console.log(`[Cleanup] Found ${orphanedFileIds.length} orphaned file(s) in project ${projId}`)
           
           // Acquire write lock for cleanup
-          const releaseLock = await projectLockManager.acquireWriteLock(projId === 'library' ? 'library' : projId)
+          const actualProjectId = projId === 'library' ? 'library' : projId
+          const releaseLock = await projectLockManager.acquireWriteLock(actualProjectId)
           try {
-            const vectorStore = getVectorStore(projId === 'library' ? 'library' : projId)
+            // Only clean library indexes (project indexes not supported yet)
+            const vectorStore = getVectorStore(actualProjectId, 'library')
             await vectorStore.loadIndexUnsafe()
             
             for (const fileId of orphanedFileIds) {

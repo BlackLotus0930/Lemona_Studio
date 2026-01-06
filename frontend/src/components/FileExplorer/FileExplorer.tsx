@@ -638,12 +638,13 @@ function FileExplorer({
             }
 
             // Upload file normally (including DOCX files)
-            // CRITICAL: If uploading to project folder, pass current projectId
+            // CRITICAL: Pass current projectId for BOTH library and project folders
+            // Library files are scoped per project, not shared across all projects
             // This ensures the document is immediately associated with the project
-            // and will be indexed to the correct project index
+            // and will be indexed to the correct project index with correct metadata
             const currentProjectId = documents.find(d => d.id === currentDocumentId)?.projectId
-            const projectIdForUpload = folderId === 'project' ? currentProjectId : undefined
-            const document = await documentApi.uploadFile(finalFilePath, file.name, folderId, projectIdForUpload)
+            // Pass projectId for both library and project files
+            const document = await documentApi.uploadFile(finalFilePath, file.name, folderId, currentProjectId)
             if (document && onFileUploaded) {
               const isBatchUpload = totalFiles > 1
               onFileUploaded(document, isBatchUpload)
@@ -708,7 +709,10 @@ function FileExplorer({
 
     // Add files to upload queue
     supportedFiles.forEach(file => {
-      uploadQueueRef.current.push({ file, folderId })
+      // CRITICAL: PDF files always go to library folder, regardless of drop target
+      const isPDF = file.name.toLowerCase().endsWith('.pdf')
+      const targetFolderId = isPDF ? 'library' : folderId
+      uploadQueueRef.current.push({ file, folderId: targetFolderId })
     })
     
     // Trigger processing by updating trigger state

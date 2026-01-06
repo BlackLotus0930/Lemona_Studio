@@ -3,6 +3,9 @@ import { AIChatMessage, ChatAttachment, Document } from '@shared/types'
 import { aiApi, chatApi, documentApi, settingsApi } from '../../services/api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import { useTheme } from '../../contexts/ThemeContext'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
@@ -73,16 +76,16 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [isInputFocused, setIsInputFocused] = useState(false)
   const [useWebSearch, setUseWebSearch] = useState(false)
   // Load saved model from localStorage, or use default
-  const [selectedModel, setSelectedModel] = useState<'gemini-2.5-flash' | 'gemini-2.5-pro' | 'gpt-5-nano' | 'gpt-5-mini' | 'gpt-5.2'>(() => {
+  const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-2.5-pro' | 'gpt-5-nano' | 'gpt-5-mini' | 'gpt-5.2'>(() => {
     try {
       const savedModel = localStorage.getItem('aiChatSelectedModel')
-      if (savedModel && ['gemini-2.5-flash', 'gemini-2.5-pro', 'gpt-5-nano', 'gpt-5-mini', 'gpt-5.2'].includes(savedModel)) {
-        return savedModel as 'gemini-2.5-flash' | 'gemini-2.5-pro' | 'gpt-5-nano' | 'gpt-5-mini' | 'gpt-5.2'
+      if (savedModel && ['gemini-3-flash-preview', 'gemini-2.5-pro', 'gpt-5-nano', 'gpt-5-mini', 'gpt-5.2'].includes(savedModel)) {
+        return savedModel as 'gemini-3-flash-preview' | 'gemini-2.5-pro' | 'gpt-5-nano' | 'gpt-5-mini' | 'gpt-5.2'
       }
     } catch (error) {
       console.error('Failed to load saved model:', error)
     }
-    return 'gemini-2.5-flash'
+    return 'gemini-3-flash-preview'
   })
   const [selectedStyle, setSelectedStyle] = useState<'Normal' | 'Learning' | 'Concise' | 'Explanatory' | 'Formal'>('Normal')
   const [showSettingsModal, setShowSettingsModal] = useState(false)
@@ -91,7 +94,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [googleApiKey, setGoogleApiKey] = useState('')
   const [openaiApiKey, setOpenaiApiKey] = useState('')
-  const [modalPosition, setModalPosition] = useState({ top: 0, left: 0 })
+  const [modalPosition, setModalPosition] = useState<{ top: number; left?: number; right?: number }>({ top: 0, left: 0 })
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const modelNameRef = useRef<HTMLButtonElement>(null)
   const plusMenuRef = useRef<HTMLDivElement>(null)
@@ -125,12 +128,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const scrollPositionsRef = useRef<Map<string, number>>(new Map())
   const previousChatIdRef = useRef<string | null>(null)
   
-  // @mention autocomplete state (inline)
+  // @mention autocomplete state
   const [mentionQuery, setMentionQuery] = useState('')
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [libraryDocuments, setLibraryDocuments] = useState<Document[]>([])
   const mentionStartIndexRef = useRef<number>(-1)
   const [currentSuggestion, setCurrentSuggestion] = useState<string | null>(null)
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false)
+  const mentionDropdownRef = useRef<HTMLDivElement>(null)
   
   // Load API keys from localStorage on mount and sync to main process
   useEffect(() => {
@@ -177,62 +182,77 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     // If user has GPT model selected but no OpenAI key, switch to Gemini
     if (selectedModel.startsWith('gpt-') && !hasOpenaiKey) {
       if (hasGoogleKey) {
-        setSelectedModel('gemini-2.5-flash')
+        setSelectedModel('gemini-3-flash-preview')
       }
     }
     // If user has Gemini model selected but no Google key, switch to GPT
-    else if ((selectedModel === 'gemini-2.5-flash' || selectedModel === 'gemini-2.5-pro') && !hasGoogleKey) {
+    else if ((selectedModel === 'gemini-3-flash-preview' || selectedModel === 'gemini-2.5-pro') && !hasGoogleKey) {
       if (hasOpenaiKey) {
         setSelectedModel('gpt-5-nano')
       }
     }
     // If both keys are available and current model is invalid, default to Gemini 2.5 Flash
     else if (hasGoogleKey && hasOpenaiKey) {
-      if (!['gemini-2.5-flash', 'gemini-2.5-pro', 'gpt-5-nano', 'gpt-5-mini', 'gpt-5.2'].includes(selectedModel)) {
-        setSelectedModel('gemini-2.5-flash')
+      if (!['gemini-3-flash-preview', 'gemini-2.5-pro', 'gpt-5-nano', 'gpt-5-mini', 'gpt-5.2'].includes(selectedModel)) {
+        setSelectedModel('gemini-3-flash-preview')
       }
     }
   }, [googleApiKey, openaiApiKey]) // Removed selectedModel from dependencies to avoid loops
 
 
   // Load documents for @mention autocomplete (current project files + library)
-  useEffect(() => {
-    const loadMentionDocuments = async () => {
-      try {
-        const allDocuments = await documentApi.list()
-        
-        // Filter to only show:
-        // 1. Files in the library folder (doc.folder === 'library') - these are shared across projects
-        // 2. Files in the current project (doc.projectId === projectId AND folder is 'project' or undefined)
-        const mentionableDocs = allDocuments.filter((doc: Document) => {
-          // Exclude README files
-          if (doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md') {
-            return false
-          }
-          
-          // Include library documents (explicitly marked as library, available across all projects)
-          if (doc.folder === 'library') {
-            return true
-          }
-          
-          // Include documents from the current project only
-          // Must have matching projectId (folder can be 'project' or undefined/null)
-          if (projectId && doc.projectId === projectId) {
-            // This is a project file (already excluded library files above)
-            return true
-          }
-          
+  const loadMentionDocuments = async () => {
+    try {
+      const allDocuments = await documentApi.list()
+      
+      // Filter to only show:
+      // 1. Files in the library folder that belong to the current project (doc.folder === 'library' AND doc.projectId === projectId)
+      // 2. Files in the current project (doc.projectId === projectId AND folder is 'project' or undefined)
+      const mentionableDocs = allDocuments.filter((doc: Document) => {
+        // Exclude README files
+        if (doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md') {
           return false
-        })
+        }
         
-        setLibraryDocuments(mentionableDocs)
-      } catch (error) {
-        console.error('Failed to load documents for mentions:', error)
-        setLibraryDocuments([])
-      }
+        // Include library documents that belong to the current project only
+        // CRITICAL: Library files are scoped per project, not shared across all projects
+        if (doc.folder === 'library') {
+          // Only include if it belongs to the current project
+          if (projectId && doc.projectId === projectId) {
+            return true
+          }
+          // If no projectId is set, exclude it (orphaned library file)
+          return false
+        }
+        
+        // Include documents from the current project only
+        // Must have matching projectId (folder can be 'project' or undefined/null)
+        if (projectId && doc.projectId === projectId) {
+          // This is a project file (already excluded library files above)
+          return true
+        }
+        
+        return false
+      })
+      
+      setLibraryDocuments(mentionableDocs)
+    } catch (error) {
+      console.error('Failed to load documents for mentions:', error)
+      setLibraryDocuments([])
     }
+  }
+
+  // Load documents when projectId changes
+  useEffect(() => {
     loadMentionDocuments()
   }, [projectId])
+
+  // Reload documents when dropdown opens to ensure we have the latest files
+  useEffect(() => {
+    if (showMentionDropdown) {
+      loadMentionDocuments()
+    }
+  }, [showMentionDropdown])
 
 
   // Save Google API key to localStorage and main process
@@ -283,24 +303,18 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       const updatePosition = () => {
         if (modelNameRef.current) {
           const rect = modelNameRef.current.getBoundingClientRect()
-          const modalWidth = 400 // minWidth of modal
           const viewportWidth = window.innerWidth
           
-          // Calculate left position - align to the right edge of the model name, but ensure it fits on screen
-          let left = rect.right - modalWidth + 50 // Start 50px to the left of the right edge
-          
-          // Ensure modal doesn't go off the left edge
-          left = Math.max(20, left)
-          
-          // Ensure modal doesn't go off the right edge
-          if (left + modalWidth > viewportWidth - 20) {
-            left = viewportWidth - modalWidth - 20
-          }
+          // Align modal's right edge with the model button's right edge (same as model dropdown)
+          // Model dropdown uses right: 0 (relative to its parent), which aligns with rect.right
+          // For fixed positioning, calculate right offset from viewport right edge
+          const rightOffset = viewportWidth - rect.right
           
           // Position modal above the model name
           setModalPosition({
             top: rect.top - 8, // 8px above the model name
-            left: left,
+            left: undefined, // Will use right instead
+            right: rightOffset, // Align right edge with model button's right edge
           })
         }
       }
@@ -856,15 +870,44 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         parts.push(text.slice(lastIndex, match.index))
       }
       
-      // Add highlighted mention
-      const mentionText = match[0]
       const mentionName = match[1]
+      const mentionStart = match.index
+      let mentionEnd = match.index + match[0].length
+      let mentionText = match[0]
       const isLibrary = mentionName === 'Library'
-      const isFile = libraryDocuments.some(doc => doc.title === mentionName || doc.id === mentionName)
       
+      // Check if this is a prefix of a document title (like "file" -> "file (2).pdf")
+      let matchedDoc = libraryDocuments.find(doc => doc.title === mentionName || doc.id === mentionName)
+      
+      if (!matchedDoc && !isLibrary) {
+        const textAfterMention = text.slice(mentionEnd)
+        
+        // Find documents that start with the mention name (case-insensitive)
+        const potentialDocs = libraryDocuments.filter(doc => {
+          const docTitle = doc.title
+          return docTitle.toLowerCase().startsWith(mentionName.toLowerCase())
+        })
+        
+        // Check if any of the following text completes a document title
+        for (const doc of potentialDocs) {
+          const remainingTitle = doc.title.slice(mentionName.length)
+          
+          // Check if the text after the mention starts with the remaining title
+          if (remainingTitle && textAfterMention.startsWith(remainingTitle)) {
+            matchedDoc = doc
+            mentionEnd = mentionStart + 1 + doc.title.length // +1 for @
+            mentionText = '@' + doc.title
+            break
+          }
+        }
+      }
+      
+      const isFile = !!matchedDoc || (!isLibrary && libraryDocuments.some(doc => doc.title === mentionName || doc.id === mentionName))
+      
+      // Add highlighted mention
       parts.push(
         <span
-          key={`mention-${match.index}`}
+          key={`mention-${mentionStart}`}
           style={{
             backgroundColor: theme === 'dark' 
               ? (isLibrary ? '#2d4a5c' : isFile ? '#3d2d4a' : '#3d3d3d')
@@ -880,7 +923,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         </span>
       )
       
-      lastIndex = match.index + match[0].length
+      lastIndex = mentionEnd
     }
     
     // Add remaining text
@@ -894,46 +937,97 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
 
   // Helper function to format error messages in a user-friendly way
   const formatErrorMessage = (error: any): string => {
-    const errorMessage = error instanceof Error ? error.message : String(error)
+    let errorMessage = error instanceof Error ? error.message : String(error)
+    let errorDetails = ''
+    
+    // Try to parse JSON error responses
+    try {
+      // Check if error message contains JSON
+      const jsonMatch = errorMessage.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const errorJson = JSON.parse(jsonMatch[0])
+        if (errorJson.error) {
+          errorMessage = errorJson.error.message || errorMessage
+          if (errorJson.error.code) {
+            errorDetails = `Error code: ${errorJson.error.code}`
+          }
+          if (errorJson.error.status) {
+            errorDetails += errorDetails ? `, Status: ${errorJson.error.status}` : `Status: ${errorJson.error.status}`
+          }
+        }
+      }
+    } catch (e) {
+      // If parsing fails, use original error message
+    }
+    
+    // Check for error in error object itself
+    if (error && typeof error === 'object' && error.error) {
+      if (typeof error.error === 'string') {
+        errorMessage = error.error
+      } else if (error.error.message) {
+        errorMessage = error.error.message
+        if (error.error.code) {
+          errorDetails = `Error code: ${error.error.code}`
+        }
+      }
+    }
+    
+    const lowerMessage = errorMessage.toLowerCase()
     
     // API key errors
-    if (errorMessage.includes('API key') || errorMessage.includes('not configured')) {
-      if (errorMessage.includes('OpenAI')) {
+    if (lowerMessage.includes('api key') || lowerMessage.includes('not configured') || lowerMessage.includes('no embedding api key')) {
+      if (lowerMessage.includes('openai')) {
         return 'OpenAI API key is required. Please add your OpenAI API key in Settings > API Keys.'
       }
-      if (errorMessage.includes('Google')) {
+      if (lowerMessage.includes('google') || lowerMessage.includes('gemini')) {
         return 'Google API key is required. Please add your Google API key in Settings > API Keys.'
       }
       return 'API key is required. Please add your API key in Settings > API Keys.'
     }
     
+    // Quota/billing errors (check first before rate limit, as quota is more specific)
+    if (lowerMessage.includes('quota') || lowerMessage.includes('billing') || lowerMessage.includes('insufficient') || 
+        lowerMessage.includes('exceeded your current quota') || lowerMessage.includes('resource_exhausted') ||
+        errorMessage.includes('429') && (lowerMessage.includes('quota') || lowerMessage.includes('exceeded'))) {
+      return `API quota exceeded. Your API account has reached its usage limit.${errorDetails ? ` (${errorDetails})` : ''}\n\nPlease check your API account billing or usage limits:\n• Gemini: https://ai.dev/usage?tab=rate-limit\n• OpenAI: Check your usage dashboard\n\nYou may need to upgrade your plan or wait for quota reset.`
+    }
+    
+    // Rate limit errors (429 without quota mention)
+    if (lowerMessage.includes('rate limit') || (errorMessage.includes('429') && !lowerMessage.includes('quota'))) {
+      return `Rate limit exceeded. Too many requests in a short time.${errorDetails ? ` (${errorDetails})` : ''}\n\nPlease wait a moment and try again.`
+    }
+    
     // Network/connection errors
-    if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('ECONNREFUSED')) {
+    if (lowerMessage.includes('network') || lowerMessage.includes('fetch') || lowerMessage.includes('econnrefused') || 
+        lowerMessage.includes('failed to fetch') || lowerMessage.includes('networkerror')) {
       return 'Connection error. Please check your internet connection and try again.'
     }
     
-    // Rate limit errors
-    if (errorMessage.includes('rate limit') || errorMessage.includes('429')) {
-      return 'Rate limit exceeded. Please wait a moment and try again.'
-    }
-    
     // Authentication errors
-    if (errorMessage.includes('401') || errorMessage.includes('unauthorized') || errorMessage.includes('invalid')) {
-      return 'Invalid API key. Please check your API key in Settings > API Keys.'
-    }
-    
-    // Quota/billing errors
-    if (errorMessage.includes('quota') || errorMessage.includes('billing') || errorMessage.includes('insufficient')) {
-      return 'API quota exceeded. Please check your API account billing or usage limits.'
+    if (lowerMessage.includes('401') || lowerMessage.includes('unauthorized') || lowerMessage.includes('invalid api key') ||
+        lowerMessage.includes('authentication') || lowerMessage.includes('permission denied')) {
+      return 'Invalid API key. Please check your API key in Settings > API Keys and ensure it\'s correct.'
     }
     
     // Model-specific errors
-    if (errorMessage.includes('model') || errorMessage.includes('not found')) {
-      return 'Model unavailable. Please try selecting a different model.'
+    if (lowerMessage.includes('model') && (lowerMessage.includes('not found') || lowerMessage.includes('unavailable') || 
+        lowerMessage.includes('does not exist'))) {
+      return 'Model unavailable. Please try selecting a different model from the dropdown.'
     }
     
-    // Generic error - show a friendly message
-    return 'Unable to process your request. Please try again or check your API keys in Settings.'
+    // Server errors (500, 503, etc.)
+    if (errorMessage.includes('500') || lowerMessage.includes('internal server error') || 
+        errorMessage.includes('503') || lowerMessage.includes('service unavailable')) {
+      return `Server error. The AI service is temporarily unavailable.${errorDetails ? ` (${errorDetails})` : ''}\n\nPlease try again in a few moments.`
+    }
+    
+    // Generic error - show a friendly message with original error if helpful
+    const isDetailedError = errorMessage.length > 50 || errorMessage.includes('Error:') || errorMessage.includes('error:')
+    if (isDetailedError && !lowerMessage.includes('unable to process')) {
+      return `${errorMessage}${errorDetails ? `\n\n${errorDetails}` : ''}\n\nIf this persists, please check your API keys in Settings or try a different model.`
+    }
+    
+    return `Unable to process your request.${errorDetails ? ` (${errorDetails})` : ''}\n\nPlease try again or check your API keys in Settings > API Keys.`
   }
 
   // Handle @mention detection and inline autocomplete
@@ -944,6 +1038,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     // Check if @ exists
     if (lastAtIndex === -1) {
       setCurrentSuggestion(null)
+      setShowMentionDropdown(false)
       return
     }
     
@@ -952,6 +1047,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     // If there's whitespace or newline immediately after @, it's not a mention
     if (textAfterAt.match(/^\s/)) {
       setCurrentSuggestion(null)
+      setShowMentionDropdown(false)
       return
     }
     
@@ -959,6 +1055,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     const mentionText = textBeforeCursor.slice(lastAtIndex + 1)
     if (mentionText.includes(' ')) {
       setCurrentSuggestion(null)
+      setShowMentionDropdown(false)
       return
     }
     
@@ -970,6 +1067,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         const lastAtBeforeSpace = textBeforeSpace.lastIndexOf('@')
         if (lastAtBeforeSpace !== -1 && lastAtBeforeSpace === lastAtIndex) {
           setCurrentSuggestion(null)
+          setShowMentionDropdown(false)
           return
         }
       }
@@ -979,34 +1077,117 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     const charBeforeAt = lastAtIndex > 0 ? textBeforeCursor[lastAtIndex - 1] : ' '
     if (charBeforeAt !== ' ' && charBeforeAt !== '\n' && lastAtIndex > 0) {
       setCurrentSuggestion(null)
+      setShowMentionDropdown(false)
       return
     }
     
     mentionStartIndexRef.current = lastAtIndex
     setMentionQuery(textAfterAt)
     
-    // Get the best suggestion
+    // Get filtered mentions based on current query
     const mentions = getFilteredMentions()
     if (mentions.length > 0) {
-      const selectedMention = mentions[selectedMentionIndex] || mentions[0]
-      const mentionText = selectedMention.type === 'library' ? '@Library' : `@${selectedMention.name}`
+      setShowMentionDropdown(true)
+      
+      // Determine the correct selected index
+      // When user types, always select the first matching item to keep suggestion in sync
+      let newSelectedIndex = 0
+      
+      // If there's no query (just @), keep current selection if valid
+      if (textAfterAt.length === 0) {
+        if (selectedMentionIndex < mentions.length) {
+          newSelectedIndex = selectedMentionIndex
+        } else {
+          newSelectedIndex = 0
+        }
+      } else {
+        // When user types, always select first match to ensure suggestion matches what they're typing
+        newSelectedIndex = 0
+      }
+      
+      // Update selected index if it changed
+      if (newSelectedIndex !== selectedMentionIndex) {
+        setSelectedMentionIndex(newSelectedIndex)
+      }
+      
+      // Update inline suggestion for the selected mention
+      const selectedMention = mentions[newSelectedIndex]
+      const mentionText = selectedMention.type === 'library' ? '@Library'
+        : `@${selectedMention.name}`
+      // Calculate remaining text: everything after what user has typed
       const remainingText = mentionText.slice(textAfterAt.length + 1) // +1 for @
       setCurrentSuggestion(remainingText)
     } else {
+      setShowMentionDropdown(false)
       setCurrentSuggestion(null)
     }
   }
 
   const getFilteredMentions = () => {
     const query = mentionQuery.toLowerCase().trim()
-    const mentions: Array<{ type: 'library' | 'file', id?: string, name: string, folder?: string }> = []
+    const mentions: Array<{ 
+      type: 'library' | 'file', 
+      id?: string, 
+      name: string, 
+      folder?: string,
+      fileType?: 'pdf' | 'docx'
+    }> = []
     
     // Always include @Library option (only if query matches or is empty)
-    // This searches all library documents
-    // Do NOT include workspace files (project files) - only Library is mentionable
     if (!query || 'library'.includes(query)) {
       mentions.push({ type: 'library', name: 'Library' })
     }
+    
+    // Filter library documents: only PDF and DOCX files from current project's library folder
+    // CRITICAL: libraryDocuments already filtered by projectId in loadMentionDocuments
+    // This ensures we only see library files from the current project
+    const libraryFiles = libraryDocuments.filter((doc: Document) => {
+      // Only include files in library folder
+      if (doc.folder !== 'library') return false
+      
+      // Double-check: only include files from current project
+      if (projectId && doc.projectId !== projectId) return false
+      
+      // Only include PDF and DOCX files
+      const fileName = doc.title.toLowerCase()
+      const isPDF = fileName.endsWith('.pdf')
+      const isDOCX = fileName.endsWith('.docx')
+      if (!isPDF && !isDOCX) return false
+      
+      // Filter by query if provided
+      if (query) {
+        const docName = doc.title.toLowerCase()
+        return docName.includes(query) || doc.id.toLowerCase().includes(query)
+      }
+      
+      return true
+    })
+    
+    // Sort library files to match FileExplorer order
+    // Sort by order if available, otherwise by creation time (ascending)
+    const sortDocuments = (docs: Document[]) => {
+      return [...docs].sort((a, b) => {
+        if (a.order !== undefined && b.order !== undefined) {
+          return a.order - b.order
+        }
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      })
+    }
+    
+    const sortedLibraryFiles = sortDocuments(libraryFiles)
+    
+    // Add library files to mentions
+    sortedLibraryFiles.forEach((doc: Document) => {
+      const fileName = doc.title.toLowerCase()
+      const fileType = fileName.endsWith('.pdf') ? 'pdf' : 'docx'
+      mentions.push({
+        type: 'file',
+        id: doc.id,
+        name: doc.title,
+        folder: 'library',
+        fileType
+      })
+    })
     
     return mentions
   }
@@ -1040,6 +1221,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     
     setInput(newValue)
     setCurrentSuggestion(null)
+    setShowMentionDropdown(false)
     
     // Set cursor position after the mention and space (highlighting is now persistent via overlay)
     // Use requestAnimationFrame to ensure the DOM has updated
@@ -1105,7 +1287,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       const errorMessage: AIChatMessage = {
         id: `msg_${Date.now()}`,
         role: 'assistant',
-        content: '⚠️ OpenAI API key is required for GPT models. Please add your OpenAI API key in Settings > API Keys.',
+        content: 'OpenAI API key is required for GPT models. Please add your OpenAI API key in Settings > API Keys.',
         timestamp: new Date().toISOString(),
       }
       setMessages(prev => [...prev, errorMessage])
@@ -1118,7 +1300,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       const errorMessage: AIChatMessage = {
         id: `msg_${Date.now()}`,
         role: 'assistant',
-        content: '⚠️ Google API key is required for Gemini models. Please add your Google API key in Settings > API Keys.',
+        content: 'Google API key is required for Gemini models. Please add your Google API key in API Keys.',
         timestamp: new Date().toISOString(),
       }
       setMessages(prev => [...prev, errorMessage])
@@ -1166,7 +1348,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       
       // Pass chat history (excluding the just-added user message) for conversation continuity
       const chatHistoryForAPI = messages.filter(msg => msg.id !== userMessage.id)
-      const response = await aiApi.streamChat(userMessage.content, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined, selectedStyle)
+      const response = await aiApi.streamChat(userMessage.content, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined, selectedStyle, projectId)
       const reader = response.body?.getReader()
       
       // Store reader reference for cancellation
@@ -1210,6 +1392,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               if (line.startsWith('data: ')) {
                 try {
                   const data = JSON.parse(line.slice(6))
+                  // Check for error in stream data
+                  if (data.error) {
+                    throw new Error(data.error)
+                  }
                   if (data.chunk) {
                     assistantMessage.content += data.chunk
                     setMessages(prev => {
@@ -1221,16 +1407,22 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     await saveMessage(assistantMessage, true)
                   }
                 } catch (e) {
-                  // Ignore parse errors
+                  // If it's an error object, throw it to be caught by outer catch
+                  if (e instanceof Error && e.message) {
+                    throw e
+                  }
+                  // Otherwise ignore parse errors
                 }
               }
             }
           }
         } catch (readError) {
           // Stream was cancelled or error occurred
-          if (streamReaderRef.current) {
-            // Only log if it wasn't a cancellation
+          if (streamReaderRef.current && !isStreamCancelledRef.current) {
+            // Only handle error if it wasn't a cancellation
             console.error('Error reading stream:', readError)
+            // Re-throw to be caught by outer catch block for proper error display
+            throw readError
           }
         }
       }
@@ -1255,7 +1447,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       const errorMessage: AIChatMessage = {
         id: `msg_${Date.now() + 2}`,
         role: 'assistant',
-        content: `⚠️ ${friendlyError}`,
+        content: friendlyError, // formatErrorMessage already includes appropriate emoji
         timestamp: new Date().toISOString(),
       }
       setMessages(prev => [...prev, errorMessage])
@@ -1265,9 +1457,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         await saveMessage(errorMessage, false)
       }
       
-      // If it's an API key error, open settings modal
+      // If it's an API key error or quota error, open settings modal
       const errorMsg = error instanceof Error ? error.message : String(error)
-      if (errorMsg.includes('API key') || errorMsg.includes('not configured')) {
+      const lowerErrorMsg = errorMsg.toLowerCase()
+      if (lowerErrorMsg.includes('api key') || lowerErrorMsg.includes('not configured') || 
+          lowerErrorMsg.includes('quota') || lowerErrorMsg.includes('429') || 
+          lowerErrorMsg.includes('billing') || lowerErrorMsg.includes('no embedding api key')) {
         setTimeout(() => setShowSettingsModal(true), 500)
       }
     } finally {
@@ -1317,16 +1512,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             MozUserSelect: 'text',
             msUserSelect: 'text'
           }}>
-        {messages.length === 0 && (
-          <div style={{
-            textAlign: 'center',
-            color: secondaryTextColor,
-            marginTop: '80px',
-            padding: '16px'
-          }}>
-            <p style={{ color: textColor }}>Start a conversation</p>
-          </div>
-        )}
         {messages.map((message) => (
           <div
             key={message.id}
@@ -1435,23 +1620,76 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   cursor: 'text'
                 }}
               >
-                {message.content.startsWith('⚠️') ? (
+                {(() => {
+                  const contentLower = message.content.toLowerCase()
+                  const isError = contentLower.includes('api quota exceeded') ||
+                    contentLower.includes('rate limit exceeded') ||
+                    contentLower.includes('connection error') ||
+                    contentLower.includes('invalid api key') ||
+                    contentLower.includes('api key is required') ||
+                    contentLower.includes('model unavailable') ||
+                    contentLower.includes('server error') ||
+                    contentLower.includes('unable to process') ||
+                    contentLower.includes('error code:') ||
+                    contentLower.includes('status:')
+                  return isError
+                })() ? (
                   <div
                     style={{
-                      padding: '12px 16px',
+                      padding: '14px 18px',
                       backgroundColor: theme === 'dark' ? '#3a1f1f' : '#fce8e6',
                       borderRadius: '8px',
                       border: `1px solid ${theme === 'dark' ? '#5a2f2f' : '#f28b82'}`,
                       color: theme === 'dark' ? '#ff6b6b' : '#c5221f',
                       fontSize: '14px',
-                      lineHeight: '1.6',
+                      lineHeight: '1.7',
+                      fontWeight: 400,
+                      boxShadow: theme === 'dark' 
+                        ? '0 2px 8px rgba(255, 107, 107, 0.15)' 
+                        : '0 2px 8px rgba(197, 34, 31, 0.1)',
                     }}
                   >
-                    {message.content}
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({node, ...props}) => <p style={{ 
+                          marginBottom: '10px', 
+                          marginTop: 0, 
+                          lineHeight: '1.7', 
+                          color: 'inherit' 
+                        }} {...props} />,
+                        a: ({node, ...props}: any) => <a 
+                          style={{ 
+                            color: theme === 'dark' ? '#4a9eff' : '#1a73e8',
+                            textDecoration: 'underline',
+                            fontWeight: 500
+                          }} 
+                          {...props} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                        />,
+                        ul: ({node, ...props}) => <ul style={{ 
+                          marginTop: '8px', 
+                          marginBottom: '8px', 
+                          paddingLeft: '20px' 
+                        }} {...props} />,
+                        li: ({node, ...props}) => <li style={{ 
+                          marginBottom: '6px',
+                          lineHeight: '1.6'
+                        }} {...props} />,
+                        strong: ({node, ...props}) => <strong style={{ 
+                          fontWeight: 600,
+                          color: 'inherit'
+                        }} {...props} />,
+                      }}
+                    >
+                      {message.content}
+                    </ReactMarkdown>
                   </div>
                 ) : (
                   <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
                   components={{
                     // Headers
                     h1: ({node, ...props}) => <h1 style={{ 
@@ -1950,33 +2188,38 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     detectMention(textareaRef.current.value, cursorPosition)
                   }
                 }}
-                onBlur={() => {
+                onBlur={(e) => {
+                  // Don't hide dropdown if clicking on it
+                  if (mentionDropdownRef.current?.contains(e.relatedTarget as Node)) {
+                    return
+                  }
                   setIsInputFocused(false)
                   setCurrentSuggestion(null)
+                  setShowMentionDropdown(false)
                 }}
                 onPaste={handlePaste}
                 onKeyDown={(e) => {
-                  // Handle Tab to accept inline autocomplete
-                  if (e.key === 'Tab' && currentSuggestion) {
-                    e.preventDefault()
+                  // Handle mention autocomplete navigation
+                  if (showMentionDropdown || currentSuggestion) {
                     const mentions = getFilteredMentions()
-                    const selectedMention = mentions[selectedMentionIndex] || mentions[0]
-                    if (selectedMention) {
-                      insertMention(selectedMention)
+                    
+                    if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && showMentionDropdown)) {
+                      e.preventDefault()
+                      const selectedMention = mentions[selectedMentionIndex] || mentions[0]
+                      if (selectedMention) {
+                        insertMention(selectedMention)
+                      }
+                      return
                     }
-                    return
-                  }
-                  
-                  // Handle Arrow keys to cycle through suggestions
-                  if (currentSuggestion) {
-                    const mentions = getFilteredMentions()
+                    
                     if (e.key === 'ArrowDown') {
                       e.preventDefault()
                       const newIndex = selectedMentionIndex < mentions.length - 1 ? selectedMentionIndex + 1 : 0
                       setSelectedMentionIndex(newIndex)
                       const selectedMention = mentions[newIndex]
                       if (selectedMention) {
-                        const mentionText = selectedMention.type === 'library' ? '@Library' : `@${selectedMention.name}`
+                        const mentionText = selectedMention.type === 'library' ? '@Library'
+                          : `@${selectedMention.name}`
                         const textAfterAt = textareaRef.current?.value.slice(mentionStartIndexRef.current + 1, textareaRef.current?.selectionStart || 0) || ''
                         const remainingText = mentionText.slice(textAfterAt.length + 1)
                         setCurrentSuggestion(remainingText)
@@ -1990,7 +2233,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       setSelectedMentionIndex(newIndex)
                       const selectedMention = mentions[newIndex]
                       if (selectedMention) {
-                        const mentionText = selectedMention.type === 'library' ? '@Library' : `@${selectedMention.name}`
+                        const mentionText = selectedMention.type === 'library' ? '@Library'
+                          : `@${selectedMention.name}`
                         const textAfterAt = textareaRef.current?.value.slice(mentionStartIndexRef.current + 1, textareaRef.current?.selectionStart || 0) || ''
                         const remainingText = mentionText.slice(textAfterAt.length + 1)
                         setCurrentSuggestion(remainingText)
@@ -2001,6 +2245,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     if (e.key === 'Escape') {
                       e.preventDefault()
                       setCurrentSuggestion(null)
+                      setShowMentionDropdown(false)
                       return
                     }
                   }
@@ -2016,16 +2261,45 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     mentionRegex.lastIndex = 0
                     
                     while ((match = mentionRegex.exec(text)) !== null) {
+                      const mentionName = match[1]
                       const mentionStart = match.index
-                      const mentionEnd = match.index + match[0].length
+                      let mentionEnd = match.index + match[0].length
+                      
+                      // Check if this is a prefix of a document title (like "file" -> "file (2).pdf")
+                      if (mentionName !== 'Library') {
+                        const textAfterMention = text.slice(mentionEnd)
+                        
+                        // Find documents that start with the mention name (case-insensitive)
+                        const potentialDocs = libraryDocuments.filter(doc => {
+                          const docTitle = doc.title
+                          return docTitle.toLowerCase().startsWith(mentionName.toLowerCase())
+                        })
+                        
+                        // Check if any of the following text completes a document title
+                        for (const doc of potentialDocs) {
+                          const remainingTitle = doc.title.slice(mentionName.length)
+                          
+                          // Check if the text after the mention starts with the remaining title
+                          if (remainingTitle && textAfterMention.startsWith(remainingTitle)) {
+                            mentionEnd = mentionStart + 1 + doc.title.length // +1 for @
+                            break
+                          }
+                        }
+                      }
                       
                       // Check if cursor is at the start, end, or within the mention
                       // Also check if cursor is right after the mention (to delete it)
                       if (cursorPosition >= mentionStart && cursorPosition <= mentionEnd + 1) {
                         e.preventDefault()
                         
-                        // Delete the entire mention (including @ symbol)
-                        const newValue = text.slice(0, mentionStart) + text.slice(mentionEnd)
+                        // Check if there's a space after the mention and include it in deletion
+                        let deleteEnd = mentionEnd
+                        if (text[mentionEnd] === ' ') {
+                          deleteEnd = mentionEnd + 1
+                        }
+                        
+                        // Delete the entire mention (including @ symbol, full name, and trailing space if present)
+                        const newValue = text.slice(0, mentionStart) + text.slice(deleteEnd)
                         setInput(newValue)
                         
                         // Set cursor position where the mention was
@@ -2040,7 +2314,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     }
                   }
                   
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (e.key === 'Enter' && !e.shiftKey && !showMentionDropdown) {
                     e.preventDefault()
                     handleSend()
                   }
@@ -2091,11 +2365,44 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             while ((match = mentionRegex.exec(input)) !== null) {
               const mentionName = match[1]
               const isLibrary = mentionName === 'Library'
-              const isFile = libraryDocuments.some(doc => doc.title === mentionName || doc.id === mentionName)
+              
+              // Check for exact match first
+              let matchedDoc = libraryDocuments.find(doc => doc.title === mentionName || doc.id === mentionName)
+              let highlightEnd = match.index + match[0].length
+              let highlightText = match[0]
+              
+              // If no exact match, check if this is a prefix of any document title
+              // and if the following text matches the rest of the document name
+              if (!matchedDoc && !isLibrary) {
+                const mentionStart = match.index
+                const textAfterMention = input.slice(highlightEnd)
+                
+                // Find documents that start with the mention name (case-insensitive)
+                const potentialDocs = libraryDocuments.filter(doc => {
+                  const docTitle = doc.title
+                  return docTitle.toLowerCase().startsWith(mentionName.toLowerCase())
+                })
+                
+                // Check if any of the following text completes a document title
+                for (const doc of potentialDocs) {
+                  const remainingTitle = doc.title.slice(mentionName.length)
+                  
+                  // Check if the text after the mention starts with the remaining title
+                  if (remainingTitle && textAfterMention.startsWith(remainingTitle)) {
+                    matchedDoc = doc
+                    highlightEnd = mentionStart + 1 + doc.title.length // +1 for @
+                    highlightText = '@' + doc.title
+                    break
+                  }
+                }
+              }
+              
+              const isFile = !!matchedDoc || (!isLibrary && libraryDocuments.some(doc => doc.title === mentionName || doc.id === mentionName))
+              
               highlights.push({
                 start: match.index,
-                end: match.index + match[0].length,
-                text: match[0],
+                end: highlightEnd,
+                text: highlightText,
                 isLibrary,
                 isFile
               })
@@ -2199,6 +2506,173 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               </span>
             </div>
           )}
+          
+          {/* Mention Autocomplete Dropdown */}
+          {showMentionDropdown && textareaRef.current && (() => {
+            const mentions = getFilteredMentions()
+            if (mentions.length === 0) return null
+            
+            // Calculate dropdown position - show ABOVE the @ symbol
+            const textarea = textareaRef.current
+            const textareaRect = textarea.getBoundingClientRect()
+            const containerRect = unifiedContainerRef.current?.getBoundingClientRect()
+            
+            // Estimate cursor position
+            const textBeforeCursor = textarea.value.slice(0, textarea.selectionStart)
+            const lines = textBeforeCursor.split('\n')
+            const currentLine = lines.length - 1
+            const lineStart = textBeforeCursor.lastIndexOf('\n') + 1
+            
+            // Create a temporary span to measure text width
+            const tempSpan = document.createElement('span')
+            tempSpan.style.visibility = 'hidden'
+            tempSpan.style.position = 'absolute'
+            tempSpan.style.fontSize = '13px'
+            tempSpan.style.fontFamily = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif'
+            tempSpan.style.whiteSpace = 'pre'
+            tempSpan.textContent = textBeforeCursor.slice(lineStart, textBeforeCursor.length)
+            document.body.appendChild(tempSpan)
+            const textWidth = tempSpan.offsetWidth
+            document.body.removeChild(tempSpan)
+            
+            // Calculate line height (approximate)
+            const lineHeight = 20.8 // Same as used in calculation
+            
+            // Position dropdown ABOVE the cursor line
+            // Calculate cursor line bottom position relative to container
+            const cursorLineBottom = containerRect 
+              ? (textareaRect.top - containerRect.top + (currentLine + 1) * lineHeight)
+              : 0
+            
+            // Position dropdown above the cursor line using bottom positioning
+            // bottom = distance from container bottom to cursor line bottom
+            const dropdownBottom = containerRect 
+              ? (containerRect.height - cursorLineBottom)
+              : 0
+            const dropdownLeft = containerRect ? (textareaRect.left - containerRect.left + textWidth + 6) : 0
+            
+            // Match model dropdown design
+            const dropdownBg = theme === 'dark' ? '#1e1e1e' : '#ffffff'
+            const dropdownBorder = theme === 'dark' ? '#333' : '#e0e0e0'
+            const dropdownShadow = theme === 'dark'
+              ? '0 -4px 16px rgba(0, 0, 0, 0.5), 0 -2px 4px rgba(0, 0, 0, 0.3)'
+              : '0 -4px 16px rgba(0, 0, 0, 0.2), 0 -2px 4px rgba(0, 0, 0, 0.1)'
+            const itemHoverBg = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+            const itemSelectedBg = theme === 'dark' ? '#2d2d2d' : '#e8e8e8'
+            const textColor = theme === 'dark' ? '#d6d6d6' : '#202124'
+            const textColorSelected = theme === 'dark' ? '#ffffff' : '#202124'
+            
+            return (
+              <div
+                ref={mentionDropdownRef}
+                style={{
+                  position: 'absolute',
+                  bottom: `${dropdownBottom}px`,
+                  left: `${dropdownLeft}px`,
+                  backgroundColor: dropdownBg,
+                  border: `1px solid ${dropdownBorder}`,
+                  borderRadius: '8px',
+                  boxShadow: dropdownShadow,
+                  minWidth: '240px',
+                  maxWidth: '350px',
+                  maxHeight: '300px',
+                  overflowY: 'auto',
+                  zIndex: 1000,
+                  padding: '6px',
+                  marginBottom: '4px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '2px',
+                  fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                }}
+                onMouseDown={(e) => e.preventDefault()} // Prevent textarea blur
+              >
+                {mentions.map((mention, index) => {
+                  const isSelected = index === selectedMentionIndex
+                  const mentionText = mention.type === 'library' ? '@Library'
+                    : `@${mention.name}`
+                  // Display text without @ symbol in the menu
+                  const displayText = mention.type === 'library' ? 'Library'
+                    : mention.name
+                  
+                  return (
+                    <div
+                      key={mention.id || mention.name}
+                      onClick={() => {
+                        insertMention(mention)
+                      }}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        backgroundColor: isSelected ? itemSelectedBg : 'transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        transition: 'all 0.15s',
+                        border: 'none',
+                        width: '100%',
+                        textAlign: 'left'
+                      }}
+                      onMouseEnter={(e) => {
+                        setSelectedMentionIndex(index)
+                        const textAfterAt = textareaRef.current?.value.slice(mentionStartIndexRef.current + 1, textareaRef.current?.selectionStart || 0) || ''
+                        const remainingText = mentionText.slice(textAfterAt.length + 1)
+                        setCurrentSuggestion(remainingText)
+                        if (!isSelected) {
+                          e.currentTarget.style.backgroundColor = itemHoverBg
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isSelected) {
+                          e.currentTarget.style.backgroundColor = 'transparent'
+                        }
+                      }}
+                    >
+                      {/* Icon */}
+                      <div style={{
+                        width: '20px',
+                        height: '20px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
+                      }}>
+                        {mention.type === 'library' ? (
+                          <FolderIcon style={{ fontSize: '18px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
+                        ) : mention.fileType === 'pdf' ? (
+                          <PictureAsPdfIcon style={{ fontSize: '18px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
+                        ) : (
+                          <FileCopyOutlinedIcon style={{ fontSize: '18px', color: theme === 'dark' ? '#34a853' : '#137333' }} />
+                        )}
+                      </div>
+                      
+                      {/* Text - Single line, no description */}
+                      <div style={{
+                        flex: 1,
+                        minWidth: 0,
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}>
+                        <div style={{
+                          fontSize: '13px',
+                          fontWeight: '300',
+                          color: isSelected ? textColorSelected : textColor,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                        }}>
+                          {displayText}
+                        </div>
+                      </div>
+                      
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
               </div>
           
           {/* Bottom Controls Section */}
@@ -2618,7 +3092,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     }
                   }}
                   title={
-                    selectedModel === 'gemini-2.5-flash' ? 'Gemini 2.5 Flash - Faster responses' :
+                    selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash Preview - Faster responses' :
                     selectedModel === 'gemini-2.5-pro' ? 'Gemini 3 Pro - More capable' :
                     selectedModel === 'gpt-5-nano' ? 'GPT-5 Nano - Fast and efficient' :
                     selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini - Balanced performance' :
@@ -2626,7 +3100,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   }
                 >
                   <span>{
-                    selectedModel === 'gemini-2.5-flash' ? 'Flash 2.5' :
+                    selectedModel === 'gemini-3-flash-preview' ? 'Flash 3' :
                     selectedModel === 'gemini-2.5-pro' ? 'Pro 3' :
                     selectedModel === 'gpt-5-nano' ? 'GPT-5 Nano' :
                     selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini' :
@@ -2669,16 +3143,16 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         <>
                           <button
                             onClick={() => {
-                              setSelectedModel('gemini-2.5-flash')
+                              setSelectedModel('gemini-3-flash-preview')
                               setShowModelDropdown(false)
                             }}
                             disabled={isLoading}
                             style={{
                               padding: '10px 14px',
-                              backgroundColor: selectedModel === 'gemini-2.5-flash' 
+                              backgroundColor: selectedModel === 'gemini-3-flash-preview' 
                                 ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
                                 : 'transparent',
-                              color: selectedModel === 'gemini-2.5-flash'
+                              color: selectedModel === 'gemini-3-flash-preview'
                                 ? (theme === 'dark' ? '#ffffff' : '#202124')
                                 : (theme === 'dark' ? '#d6d6d6' : '#202124'),
                               border: 'none',
@@ -2693,17 +3167,17 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               width: '100%'
                             }}
                             onMouseEnter={(e) => {
-                              if (!isLoading && selectedModel !== 'gemini-2.5-flash') {
+                              if (!isLoading && selectedModel !== 'gemini-3-flash-preview') {
                                 e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
                               }
                             }}
                             onMouseLeave={(e) => {
-                              if (!isLoading && selectedModel !== 'gemini-2.5-flash') {
+                              if (!isLoading && selectedModel !== 'gemini-3-flash-preview') {
                                 e.currentTarget.style.backgroundColor = 'transparent'
                               }
                             }}
                           >
-                            Gemini 2.5 Flash
+                            Gemini 3 Flash
                           </button>
                           
                           <button
@@ -2997,12 +3471,15 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           style={{
             position: 'fixed',
             top: `${modalPosition.top}px`,
-            left: `${modalPosition.left}px`,
+            ...(modalPosition.right !== undefined 
+              ? { right: `${modalPosition.right}px`, left: undefined }
+              : { left: `${modalPosition.left || 0}px` }
+            ),
             backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
             borderRadius: '8px',
             padding: '20px',
-            minWidth: '400px',
-            maxWidth: '500px',
+            minWidth: '390px',
+            maxWidth: '490px',
             boxShadow: theme === 'dark'
               ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
               : '0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1)',
@@ -3050,9 +3527,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           {/* API Keys heading */}
           <h2
             style={{
-              fontSize: '18px',
+              fontSize: '14px',
               fontWeight: '500',
-              color: theme === 'dark' ? '#ffffff' : '#202124',
+              color: theme === 'dark' ? '#e0e0e0' : '#202124',
               margin: '0 0 20px 0',
             }}
           >
@@ -3064,9 +3541,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             <label
               style={{
                 display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: theme === 'dark' ? '#e0e0e0' : '#202124',
+                fontSize: '12px',
+                fontWeight: '400',
+                color: theme === 'dark' ? '#b0b0b0' : '#777',
                 marginBottom: '8px',
               }}
             >
@@ -3157,9 +3634,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             <label
               style={{
                 display: 'block',
-                fontSize: '14px',
-                fontWeight: '500',
-                color: theme === 'dark' ? '#e0e0e0' : '#202124',
+                fontSize: '12px',
+                fontWeight: '400',
+                color: theme === 'dark' ? '#b0b0b0' : '#777',
                 marginBottom: '8px',
               }}
             >
@@ -3242,6 +3719,28 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 e.target.style.borderColor = theme === 'dark' ? '#333' : '#dadce0'
               }}
             />
+          </div>
+
+          {/* Tip */}
+          <div
+            style={{
+              marginTop: '16px',
+              padding: '10px 12px',
+              backgroundColor: theme === 'dark' ? '#1e1e1e' : '#f8f9fa',
+              borderLeft: `3px solid ${theme === 'dark' ? '#4a9eff' : '#1a73e8'}`,
+              borderRadius: '4px',
+            }}
+          >
+            <p
+              style={{
+                fontSize: '11px',
+                color: theme === 'dark' ? '#999' : '#666',
+                margin: 0,
+                lineHeight: '1.5',
+              }}
+            >
+              Use a single API key to ensure stable AI document search.
+            </p>
           </div>
         </div>
       )}

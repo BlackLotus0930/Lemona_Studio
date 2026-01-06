@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import fs from 'fs/promises';
 import path from 'path';
+import crypto from 'crypto';
 import { extractPDFTextAsync } from './pdfTextExtractor.js';
 import { parseDocx, convertHtmlToTipTap } from './docxParser.js';
 import { indexLibraryFile, reindexFile } from './indexingService.js';
@@ -197,7 +198,9 @@ export const documentService = {
                 console.log(`[documentService.deleteMany] Document ${id} is already marked as deleted`);
                 continue;
             }
-            const projectId = document.folder === 'library' ? 'library' : document.projectId;
+            // Use document.projectId for both library and project files
+            // Library files must have projectId set (per new architecture)
+            const projectId = document.projectId;
             if (!documentsByProject.has(projectId)) {
                 documentsByProject.set(projectId, []);
             }
@@ -227,16 +230,20 @@ export const documentService = {
             console.log(`[documentService.deleteMany] Acquired write lock for project: ${projectId || 'global'} (${docs.length} documents)`);
             try {
                 // Load index once for all deletions in this project
-                let vectorStore = null;
-                if (docs.some(d => d.document.folder === 'library' || d.document.projectId)) {
-                    vectorStore = getVectorStore(projectId);
-                    await vectorStore.loadIndexUnsafe();
-                }
+                // Group by projectId and folder to get correct vector stores
+                const vectorStores = new Map();
                 // Process all deletions in this project
                 for (const { id, document } of docs) {
                     try {
-                        // Remove from vector index if indexed
-                        if (vectorStore && (document.folder === 'library' || document.projectId)) {
+                        // Remove from vector index if indexed (only library files)
+                        if (document.folder === 'library' && document.projectId) {
+                            const storeKey = `${document.projectId}:library`;
+                            if (!vectorStores.has(storeKey)) {
+                                const store = getVectorStore(document.projectId, 'library');
+                                await store.loadIndexUnsafe();
+                                vectorStores.set(storeKey, store);
+                            }
+                            const vectorStore = vectorStores.get(storeKey);
                             await vectorStore.removeChunksByFileUnsafe(id, false); // autoSave=false, save once at end
                         }
                         // Mark document as deleted
@@ -248,11 +255,11 @@ export const documentService = {
                         results.set(id, false);
                     }
                 }
-                // Save index once after all deletions in this project
-                if (vectorStore && docs.some(d => d.document.folder === 'library' || d.document.projectId)) {
+                // Save all affected indexes once after all deletions
+                for (const [storeKey, store] of vectorStores.entries()) {
                     try {
-                        await vectorStore.saveIndexUnsafe();
-                        console.log(`[documentService.deleteMany] Saved index after deleting ${docs.length} files from project: ${projectId || 'global'}`);
+                        await store.saveIndexUnsafe();
+                        console.log(`[documentService.deleteMany] Saved index for ${storeKey}`);
                     }
                     catch (saveError) {
                         console.error(`[documentService.deleteMany] Failed to save index:`, saveError);
@@ -350,6 +357,8 @@ export const documentService = {
         }
         // Read the source file
         const fileBuffer = await fs.readFile(sourceFilePath);
+        // Calculate content hash (SHA-256) for change detection
+        const contentHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
         // Generate document ID
         const id = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const now = new Date().toISOString();
@@ -512,6 +521,9 @@ export const documentService = {
             updatedAt: now,
             folder,
             ...(projectId ? { projectId } : {}), // Set projectId for both library and project files if provided
+            metadata: {
+                contentHash, // Store content hash for change detection
+            },
         };
         // Log projectId assignment for debugging
         if (folder === 'project') {
@@ -546,21 +558,31 @@ export const documentService = {
             });
         }
         // Auto-index library files asynchronously (don't block upload)
+        // Only index new files that need indexing (use shouldReindexFile for strict checking)
         if (folder === 'library') {
             // Check if file type is supported for indexing (PDF or DOCX)
             const fileExt = finalFileName.toLowerCase().split('.').pop() || '';
             if (fileExt === 'pdf' || fileExt === 'docx') {
-                console.log(`[Auto-Indexing] Starting indexing for library file: ${finalFileName} (${id})`);
-                // Get API keys from store for auto-indexing
-                const { geminiApiKey, openaiApiKey } = getApiKeys();
-                // Trigger indexing asynchronously (non-blocking) with API keys
-                indexLibraryFile(id, geminiApiKey, openaiApiKey).then((status) => {
-                    console.log(`[Auto-Indexing] Completed indexing for ${id}: ${status.status}, ${status.chunksCount || 0} chunks`);
-                }).catch((error) => {
-                    console.error(`[Auto-Indexing] Failed to index ${id}:`, error);
-                    // Don't throw - indexing failure shouldn't break upload
-                    // The indexing service will handle API key errors gracefully
-                });
+                // Use shouldReindexFile to check if file needs indexing
+                // This ensures we only index new files or files that have changed
+                const { shouldReindexFile } = await import('./indexingService.js');
+                const needsIndexing = await shouldReindexFile(id);
+                if (needsIndexing) {
+                    console.log(`[Auto-Indexing] Starting indexing for library file: ${finalFileName} (${id})`);
+                    // Get API keys from store for auto-indexing
+                    const { geminiApiKey, openaiApiKey } = getApiKeys();
+                    // Trigger indexing asynchronously (non-blocking) with API keys
+                    indexLibraryFile(id, geminiApiKey, openaiApiKey).then((status) => {
+                        console.log(`[Auto-Indexing] Completed indexing for ${id}: ${status.status}, ${status.chunksCount || 0} chunks`);
+                    }).catch((error) => {
+                        console.error(`[Auto-Indexing] Failed to index ${id}:`, error);
+                        // Don't throw - indexing failure shouldn't break upload
+                        // The indexing service will handle API key errors gracefully
+                    });
+                }
+                else {
+                    console.log(`[Auto-Indexing] Skipping indexing for ${finalFileName}: file already correctly indexed`);
+                }
             }
             else {
                 console.log(`[Auto-Indexing] Skipping indexing for ${finalFileName}: unsupported file type (${fileExt})`);

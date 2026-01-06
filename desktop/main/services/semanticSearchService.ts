@@ -64,23 +64,27 @@ export function parseMentions(message: string): ParsedMentions {
 /**
  * Resolve file mentions to document IDs
  * Tries to match by filename or document ID
- * Searches both library and project files
+ * Only searches library files in the current project
  */
 async function resolveFileMentions(
-  mentions: string[]
+  mentions: string[],
+  projectId: string // Required: Current project ID
 ): Promise<string[]> {
   if (mentions.length === 0) {
     return []
   }
 
-  // Search all documents (both library and project files)
+  // Search only library files in the current project
   const allDocuments = await documentService.getAll()
+  const projectLibraryDocuments = allDocuments.filter(
+    doc => doc.folder === 'library' && doc.projectId === projectId
+  )
   
   const resolvedIds: string[] = []
 
   for (const mention of mentions) {
-    // Try exact match first (case-insensitive) - search all documents
-    const exactMatch = allDocuments.find(
+    // Try exact match first (case-insensitive) - search only project's library files
+    const exactMatch = projectLibraryDocuments.find(
       doc => doc.title.toLowerCase() === mention.toLowerCase() ||
              doc.id === mention
     )
@@ -90,9 +94,9 @@ async function resolveFileMentions(
       continue
     }
 
-    // Try partial match (filename without extension) - search all documents
+    // Try partial match (filename without extension) - search only project's library files
     const mentionLower = mention.toLowerCase()
-    const partialMatch = allDocuments.find(doc => {
+    const partialMatch = projectLibraryDocuments.find(doc => {
       const fileName = doc.title.toLowerCase()
       const nameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.'))
       return nameWithoutExt === mentionLower || fileName.includes(mentionLower)
@@ -139,15 +143,38 @@ ${chunk.text}
  */
 export async function searchLibrary(
   query: string,
+  projectId: string,
+  folder: 'library' | 'project',
   geminiApiKey?: string,
   openaiApiKey?: string,
   fileIds?: string[],
-  k: number = 3,
-  projectId?: string, // Project ID for project-specific search, or 'library' for library search
-  filterProjectId?: string // Optional: Project ID to filter results by (for library index scoping)
+  k: number = 3
 ): Promise<SearchResult[]> {
   if (!query || query.trim().length === 0) {
     return []
+  }
+
+  // Check for deprecated old library index (only for library folder)
+  if (folder === 'library') {
+    try {
+      const { app } = await import('electron')
+      const fs = await import('fs/promises')
+      const path = await import('path')
+      const BASE_VECTOR_INDEX_DIR = path.join(app.getPath('userData'), 'vectorIndex')
+      const oldLibraryIndexDir = path.join(BASE_VECTOR_INDEX_DIR, 'library')
+      const deprecatedMarker = path.join(oldLibraryIndexDir, '.deprecated')
+      
+      try {
+        await fs.access(deprecatedMarker)
+        // Old index is deprecated, don't search it
+        // Only search the new project-isolated index
+        console.log('[SemanticSearch] Old library index is deprecated, using project-isolated index only')
+      } catch {
+        // .deprecated marker doesn't exist, continue normally
+      }
+    } catch (error) {
+      // Ignore errors checking deprecated marker
+    }
   }
 
   // Check for API keys
@@ -167,16 +194,14 @@ export async function searchLibrary(
       openaiApiKey
     )
 
-    // Get vector store for the correct project
-    // Use 'library' for library search, projectId for project search
-    const searchProjectId = projectId === 'library' ? 'library' : projectId
+    // Get vector store for the correct project and folder
     const projectLockManager = getProjectLockManager()
     
     // Try read lock first (most common case)
-    let releaseLock = await projectLockManager.acquireReadLock(searchProjectId)
+    let releaseLock = await projectLockManager.acquireReadLock(projectId)
     
     try {
-      const vectorStore = getVectorStore(searchProjectId)
+      const vectorStore = getVectorStore(projectId, folder)
       
       // Try to load with read lock first
       try {
@@ -184,20 +209,19 @@ export async function searchLibrary(
       } catch (loadError: any) {
         // If loadIndexUnsafe fails (e.g., needs rebuilding), upgrade to write lock explicitly
         releaseLock()
-        releaseLock = await projectLockManager.acquireWriteLock(searchProjectId)
+        releaseLock = await projectLockManager.acquireWriteLock(projectId)
         try {
           await vectorStore.loadIndexUnsafe()
         } finally {
           // Release write lock and re-acquire read lock for search
           releaseLock()
-          releaseLock = await projectLockManager.acquireReadLock(searchProjectId)
+          releaseLock = await projectLockManager.acquireReadLock(projectId)
         }
       }
 
       // Search - we hold read lock
-      // For library index, filter by filterProjectId if provided (to scope @library to current project)
-      // For project-specific indexes, filterProjectId is undefined (index is already scoped)
-      const results = await vectorStore.searchUnsafe(embedding, k, fileIds, filterProjectId)
+      // Index is already scoped by projectId and folder, no need for additional filtering
+      const results = await vectorStore.searchUnsafe(embedding, k, fileIds)
       return results
     } finally {
       releaseLock()
@@ -220,15 +244,15 @@ export async function searchLibrary(
  * Automatically detects @Library or @filename mentions and performs search
  * 
  * SEARCH STRATEGY:
- * - @library → Search entire library index (projectId = 'library', fileIds = undefined)
- * - @document → Search specific file(s) (fileIds = [docId], projectId determined by document's folder)
+ * - @library → Search project's library index ({projectId}/library)
+ * - @files → Search specific library file(s) in current project
  */
 export async function searchLibraryWithMentions(
   message: string,
+  projectId: string, // Required: Current project ID
   geminiApiKey?: string,
   openaiApiKey?: string,
-  k: number = 3,
-  projectId?: string // Default project ID (overridden by @library mention or document's folder)
+  k: number = 3
 ): Promise<{
   results: SearchResult[]
   mentions: ParsedMentions
@@ -246,13 +270,11 @@ export async function searchLibraryWithMentions(
     }
   }
 
-  // Resolve file mentions to document IDs
+  // Resolve file mentions to document IDs (only library files in current project)
   let fileIds: string[] | undefined
-  let searchProjectId: string | undefined = projectId // Default to provided projectId
-  let filterProjectId: string | undefined = projectId // ProjectId to filter results by (for library index scoping)
   
   if (mentions.fileMentions.length > 0) {
-    fileIds = await resolveFileMentions(mentions.fileMentions)
+    fileIds = await resolveFileMentions(mentions.fileMentions, projectId)
     
     // If no files found, return empty results
     if (fileIds.length === 0) {
@@ -263,51 +285,21 @@ export async function searchLibraryWithMentions(
         formattedResults: '',
       }
     }
-    
-    // CRITICAL: Determine projectId based on mentioned documents' folders
-    // If any mentioned file is in library folder, use 'library' index
-    // Otherwise, use the document's projectId (if it's a project file)
-    const documents = await documentService.getAll()
-    const mentionedDocs = documents.filter(doc => fileIds!.includes(doc.id))
-    
-    // Check if any mentioned document is in library folder
-    const hasLibraryFile = mentionedDocs.some(doc => doc.folder === 'library')
-    
-    if (hasLibraryFile) {
-      // At least one library file mentioned → use 'library' index
-      searchProjectId = 'library'
-      // Keep original projectId for filtering (to scope library results to current project)
-      filterProjectId = projectId
-    } else if (mentionedDocs.length > 0) {
-      // All mentioned files are project files → use first document's projectId
-      const firstDoc = mentionedDocs[0]
-      searchProjectId = firstDoc.projectId
-      // No filtering needed for project-specific indexes
-      filterProjectId = undefined
-    }
-    // If no documents found, keep default projectId
-  } else if (mentions.hasLibraryMention) {
-    // @library mention → always use 'library' index (ignore projectId for index selection)
-    searchProjectId = 'library'
-    // But filter by original projectId to scope results to current project
-    filterProjectId = projectId
-  } else {
-    // No mentions - use project-specific index, no filtering needed
-    filterProjectId = undefined
   }
 
   // Use cleaned message (without @mentions) for search
   const searchQuery = mentions.cleanedMessage || message
 
-  // Perform search
+  // Perform search in current project's library index
+  // Index is already scoped by projectId and folder='library', no need for filtering
   const results = await searchLibrary(
     searchQuery,
+    projectId,
+    'library',
     geminiApiKey,
     openaiApiKey,
     fileIds,
-    k,
-    searchProjectId,
-    filterProjectId // Pass filter projectId separately
+    k
   )
 
   // Format results for AI context
