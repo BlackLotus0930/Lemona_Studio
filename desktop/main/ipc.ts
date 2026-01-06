@@ -739,6 +739,16 @@ Rephrased text:`
     }
   })
 
+  ipcMain.handle('library:indexProject', async (_, projectId: string, geminiApiKey?: string, openaiApiKey?: string, onlyUnindexed?: boolean) => {
+    try {
+      const results = await indexingService.indexProjectLibraryFiles(projectId, geminiApiKey, openaiApiKey, onlyUnindexed ?? true)
+      return results
+    } catch (error: any) {
+      console.error('IPC library:indexProject error:', error)
+      throw error
+    }
+  })
+
   ipcMain.handle('library:removeFromIndex', async (_, documentId: string) => {
     try {
       await indexingService.removeFromIndex(documentId)
@@ -883,18 +893,11 @@ Rephrased text:`
       const hasKeyNow = (newKeys.geminiApiKey && newKeys.geminiApiKey.trim().length > 0) || 
                         (newKeys.openaiApiKey && newKeys.openaiApiKey.trim().length > 0)
       
-      // If API key was just added (was empty, now has value), auto-index unindexed library files
+      // Note: We no longer auto-index all projects when API key is added
+      // Instead, indexing happens on-demand when user opens a project
+      // This prevents quota exhaustion from indexing all projects at once
       if (changed && !hadKeyBefore && hasKeyNow) {
-        console.log('[Auto-Indexing] API key was just added, starting automatic indexing of unindexed library files...')
-        // Trigger indexing asynchronously (don't block the API key save)
-        const { indexAllLibraryFiles } = await import('./services/indexingService.js')
-        indexAllLibraryFiles(newKeys.geminiApiKey, newKeys.openaiApiKey, true).then((results) => {
-          const successCount = results.filter(r => r.status.status === 'completed').length
-          const errorCount = results.filter(r => r.status.status === 'error').length
-          console.log(`[Auto-Indexing] Completed: ${successCount} files indexed successfully, ${errorCount} errors`)
-        }).catch((error) => {
-          console.error('[Auto-Indexing] Failed to auto-index library files:', error)
-        })
+        console.log('[Auto-Indexing] API key was just added. Indexing will happen automatically when you open a project.')
       }
       
       return { success: true }

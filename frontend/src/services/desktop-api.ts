@@ -223,3 +223,9 @@ export const settingsApi = {
   },
 }
 
+export const indexingApi = {
+  getIndexingStatus: (documentId: string) => invokeOrFetch('library:getIndexingStatus', documentId),
+  indexProjectLibraryFiles: (projectId: string, geminiApiKey?: string, openaiApiKey?: string, onlyUnindexed?: boolean) =>
+    invokeOrFetch('library:indexProject', projectId, geminiApiKey, openaiApiKey, onlyUnindexed),
+}
+

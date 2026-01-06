@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Project, Document } from '@shared/types'
 import { documentApi, projectApi } from '../services/api'
+import { indexingApi, settingsApi } from '../services/desktop-api'
 import { useTheme } from '../contexts/ThemeContext'
 // @ts-ignore
 import SearchIcon from '@mui/icons-material/Search'
@@ -144,6 +145,34 @@ export default function DocumentList() {
         // If update fails, continue anyway - not critical
         console.warn('Failed to update project timestamp:', updateError)
       }
+      
+      // Trigger indexing for this project's library files (async, non-blocking)
+      // This happens in the background and doesn't block project opening
+      settingsApi.getApiKeys().then((keys) => {
+        const hasApiKey = (keys.geminiApiKey && keys.geminiApiKey.trim().length > 0) ||
+                         (keys.openaiApiKey && keys.openaiApiKey.trim().length > 0)
+        
+        if (hasApiKey) {
+          console.log(`[Auto-Indexing] Project ${projectId} opened, starting library file indexing...`)
+          indexingApi.indexProjectLibraryFiles(
+            projectId,
+            keys.geminiApiKey,
+            keys.openaiApiKey,
+            true // onlyUnindexed = true
+          ).then((results) => {
+            const successCount = results.filter(r => r.status.status === 'completed').length
+            const errorCount = results.filter(r => r.status.status === 'error').length
+            if (successCount > 0 || errorCount > 0) {
+              console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
+            }
+          }).catch((error) => {
+            // Don't show error to user - indexing failures shouldn't interrupt workflow
+            console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
+          })
+        }
+      }).catch((error) => {
+        console.warn('[Auto-Indexing] Failed to get API keys:', error)
+      })
       
       // Get documents in project
       const documents = await projectApi.getDocuments(projectId)

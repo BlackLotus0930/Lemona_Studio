@@ -24,6 +24,8 @@ import { DocumentEditorSkeleton } from '../Editor/DocumentEditorSkeleton'
 import FullScreenPDFViewer, { PDFViewerSearchHandle } from '../PDFViewer/FullScreenPDFViewer'
 import { Document } from '@shared/types'
 import { documentApi, exportApi, projectApi } from '../../services/api'
+import { indexingApi } from '../../services/desktop-api'
+import { settingsApi } from '../../services/desktop-api'
 import { FontSize } from '../Editor/FontSize'
 import { FontFamily } from '../Editor/FontFamily'
 import { LineHeight } from '../Editor/LineHeight'
@@ -769,6 +771,37 @@ export default function Layout(): JSX.Element {
       previousProjectIdRef.current = currentProjectId
       // Pass the projectId explicitly to ensure we load the correct project's documents
       loadDocuments(currentProjectId)
+      
+      // Auto-index library files for this project when project changes
+      // This happens asynchronously and doesn't block UI
+      if (currentProjectId) {
+        // Get API keys and trigger indexing
+        settingsApi.getApiKeys().then((keys) => {
+          const hasApiKey = (keys.geminiApiKey && keys.geminiApiKey.trim().length > 0) ||
+                           (keys.openaiApiKey && keys.openaiApiKey.trim().length > 0)
+          
+          if (hasApiKey) {
+            console.log(`[Auto-Indexing] Project ${currentProjectId} opened, starting library file indexing...`)
+            indexingApi.indexProjectLibraryFiles(
+              currentProjectId,
+              keys.geminiApiKey,
+              keys.openaiApiKey,
+              true // onlyUnindexed = true
+            ).then((results) => {
+              const successCount = results.filter(r => r.status.status === 'completed').length
+              const errorCount = results.filter(r => r.status.status === 'error').length
+              if (successCount > 0 || errorCount > 0) {
+                console.log(`[Auto-Indexing] Completed indexing for project ${currentProjectId}: ${successCount} succeeded, ${errorCount} errors`)
+              }
+            }).catch((error) => {
+              // Don't show error to user - indexing failures shouldn't interrupt workflow
+              console.warn(`[Auto-Indexing] Failed to index project ${currentProjectId}:`, error)
+            })
+          }
+        }).catch((error) => {
+          console.warn('[Auto-Indexing] Failed to get API keys:', error)
+        })
+      }
     } else {
       // Even if projectId didn't change, reload project name to catch any updates
       loadProjectName()

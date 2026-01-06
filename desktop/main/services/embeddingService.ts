@@ -161,22 +161,63 @@ export async function generateEmbedding(
       const embedding = await generateGeminiEmbedding(text, geminiApiKey)
       return { embedding, provider: 'gemini' }
     } catch (error: any) {
+      // If it's a quota error, don't fallback - throw immediately
+      if (isQuotaError(error)) {
+        console.error('[Embedding] Gemini quota exceeded, stopping:', error.message)
+        throw error
+      }
       console.warn('[Embedding] Gemini embedding failed, trying OpenAI:', error.message)
-      // Fall through to OpenAI
+      // Fall through to OpenAI for other errors
     }
   }
   
   // Fall back to OpenAI
   if (openaiApiKey && openaiApiKey.trim().length > 0) {
-    const embedding = await generateOpenAIEmbedding(text, openaiApiKey)
-    return { embedding, provider: 'openai' }
+    try {
+      const embedding = await generateOpenAIEmbedding(text, openaiApiKey)
+      return { embedding, provider: 'openai' }
+    } catch (error: any) {
+      // If OpenAI also has quota error, throw it
+      if (isQuotaError(error)) {
+        console.error('[Embedding] OpenAI quota exceeded:', error.message)
+        throw error
+      }
+      throw error
+    }
   }
   
   throw new Error('No embedding API key available. Please configure Gemini or OpenAI API key.')
 }
 
 /**
+ * Check if error is a quota/billing error (should not retry)
+ * Exported for use in other services
+ */
+export function isQuotaError(error: any): boolean {
+  const errorMsg = (error.message || '').toLowerCase()
+  return errorMsg.includes('quota') ||
+         errorMsg.includes('billing') ||
+         errorMsg.includes('exceeded your current quota') ||
+         errorMsg.includes('resource_exhausted') ||
+         (error.status === 429 && errorMsg.includes('quota'))
+}
+
+/**
+ * Check if error is a temporary rate limit (can retry)
+ */
+function isTemporaryRateLimit(error: any): boolean {
+  const errorMsg = (error.message || '').toLowerCase()
+  // Rate limit without quota/billing keywords might be temporary
+  return (error.status === 429 || error.message?.includes('429')) &&
+         !isQuotaError(error) &&
+         !errorMsg.includes('quota') &&
+         !errorMsg.includes('billing')
+}
+
+/**
  * Retry helper with exponential backoff
+ * Does NOT retry on quota/billing errors (permanent errors)
+ * For rate limit errors (RPM limits), waits 1 minute between retries
  */
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
@@ -190,10 +231,17 @@ async function retryWithBackoff<T>(
     } catch (error: any) {
       lastError = error
       
-      // Check if it's a rate limit error
-      const isRateLimit = error.message?.includes('rate limit') || 
-                         error.message?.includes('429') ||
-                         error.status === 429 ||
+      // Check if it's a quota/billing error - DO NOT RETRY
+      if (isQuotaError(error)) {
+        console.error('[Embedding] Quota/billing error detected, stopping retries:', error.message)
+        throw error // Immediately throw, don't retry
+      }
+      
+      // Check if it's a temporary rate limit (429 but not quota exceeded)
+      // These are RPM limits that reset every minute, so we wait 1 minute and retry
+      const isRateLimit = isTemporaryRateLimit(error) ||
+                         (error.status === 429 && !isQuotaError(error)) ||
+                         error.message?.includes('rate limit') ||
                          error.code === 'rate_limit_exceeded'
       
       // Check if it's a temporary error (network, timeout, etc.)
@@ -202,15 +250,23 @@ async function retryWithBackoff<T>(
                          error.message?.includes('ECONNREFUSED') ||
                          error.code === 'ECONNREFUSED'
       
-      // Only retry on rate limits or temporary errors
+      // Only retry on temporary rate limits or temporary errors
       if (!isRateLimit && !isTemporary) {
         throw error // Don't retry on permanent errors
       }
       
       if (attempt < maxRetries - 1) {
-        // Exponential backoff: delay increases with each retry
-        const delay = baseDelay * Math.pow(2, attempt)
-        console.warn(`[Embedding] Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms delay:`, error.message)
+        // For rate limit errors (RPM limits), use fixed 1 minute delay
+        // For other temporary errors, use exponential backoff
+        const delay = isRateLimit ? 60000 : (baseDelay * Math.pow(2, attempt))
+        const delaySeconds = Math.round(delay / 1000)
+        
+        if (isRateLimit) {
+          console.warn(`[Embedding] Rate limit (RPM) detected, waiting ${delaySeconds} seconds before retry ${attempt + 1}/${maxRetries}:`, error.message)
+        } else {
+          console.warn(`[Embedding] Retry attempt ${attempt + 1}/${maxRetries} after ${delaySeconds}s delay:`, error.message)
+        }
+        
         await new Promise(resolve => setTimeout(resolve, delay))
       }
     }
@@ -222,6 +278,8 @@ async function retryWithBackoff<T>(
  * Generate embeddings for multiple texts (batch)
  * Processes in batches to respect API rate limits
  * Includes retry logic for rate limits and temporary failures
+ * For rate limit errors (RPM), waits 1 minute between retries
+ * Stops immediately on quota/billing errors
  */
 export async function generateEmbeddingsBatch(
   texts: string[],
@@ -248,12 +306,18 @@ export async function generateEmbeddingsBatch(
     const batch = texts.slice(i, i + batchSize)
     
     // Process batch in parallel with retry logic
+    // Increased max retries for rate limit errors (RPM limits reset every minute)
     const batchPromises = batch.map(async (text, batchIndex) => {
       return retryWithBackoff(
         () => generateEmbedding(text, geminiApiKey, openaiApiKey),
-        3, // max retries
-        1000 // base delay 1 second
+        10, // max retries (allows up to 10 minutes for rate limit recovery)
+        1000 // base delay 1 second (for non-rate-limit errors)
       ).catch((error: any) => {
+        // If quota error, throw immediately to stop batch processing
+        if (isQuotaError(error)) {
+          console.error(`[Embedding] Quota error detected, stopping batch processing:`, error.message)
+          throw error
+        }
         console.error(`[Embedding] Failed to generate embedding after retries for text at index ${i + batchIndex}:`, error.message)
         throw error
       })
@@ -263,19 +327,30 @@ export async function generateEmbeddingsBatch(
       const batchResults = await Promise.all(batchPromises)
       results.push(...batchResults)
     } catch (error: any) {
-      // If batch fails, try processing items individually
+      // If it's a quota error, stop immediately - don't try individual processing
+      if (isQuotaError(error)) {
+        console.error('[Embedding] Quota error detected, stopping all batch processing:', error.message)
+        throw error
+      }
+      
+      // If batch fails, try processing items individually (only for non-quota errors)
       console.warn(`[Embedding] Batch failed, processing items individually:`, error.message)
       for (const text of batch) {
         try {
           const result = await retryWithBackoff(
             () => generateEmbedding(text, geminiApiKey, openaiApiKey),
-            3,
-            1000
+            10, // max retries for rate limit recovery
+            1000 // base delay
           )
           results.push(result)
         } catch (itemError: any) {
+          // If quota error during individual processing, stop immediately
+          if (isQuotaError(itemError)) {
+            console.error('[Embedding] Quota error during individual processing, stopping:', itemError.message)
+            throw itemError
+          }
           console.error(`[Embedding] Failed to generate embedding for individual item:`, itemError.message)
-          // Continue with other items even if one fails
+          // Continue with other items even if one fails (only for non-quota errors)
           // This allows partial success for large batches
         }
       }
@@ -303,5 +378,6 @@ export const embeddingService = {
   generateEmbeddingsBatch,
   estimateTokens,
   EMBEDDING_DIMENSION,
+  isQuotaError,
 }
 

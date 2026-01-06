@@ -4,7 +4,7 @@ import { documentService } from './documentService.js'
 import { extractPDFText } from './pdfTextExtractor.js'
 import { parseDocx } from './docxParser.js'
 import { chunkPDF, chunkDocx, chunkTipTap, Chunk, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from './chunkingService.js'
-import { generateEmbeddingsBatch, EMBEDDING_DIMENSION } from './embeddingService.js'
+import { generateEmbeddingsBatch, EMBEDDING_DIMENSION, isQuotaError } from './embeddingService.js'
 import { getVectorStore, ChunkMetadata, getProjectIndexDirectory, getProjectLockManager, IndexManifest } from './vectorStore.js'
 import { app } from 'electron'
 import fs from 'fs/promises'
@@ -307,26 +307,42 @@ export async function indexLibraryFile(
         const batchSize = 10
         const allEmbeddings: number[][] = []
 
-        for (let i = 0; i < chunks.length; i += batchSize) {
-          const batch = chunks.slice(i, i + batchSize)
-          const batchTexts = batch.map(chunk => chunk.text)
-          
-          const batchResults = await generateEmbeddingsBatch(
-            batchTexts,
-            geminiApiKey,
-            openaiApiKey,
-            batchSize
-          )
-          
-          const batchEmbeddings = batchResults.map(result => result.embedding)
-          allEmbeddings.push(...batchEmbeddings)
+        try {
+          for (let i = 0; i < chunks.length; i += batchSize) {
+            const batch = chunks.slice(i, i + batchSize)
+            const batchTexts = batch.map(chunk => chunk.text)
+            
+            const batchResults = await generateEmbeddingsBatch(
+              batchTexts,
+              geminiApiKey,
+              openaiApiKey,
+              batchSize
+            )
+            
+            const batchEmbeddings = batchResults.map(result => result.embedding)
+            allEmbeddings.push(...batchEmbeddings)
 
-          // Update progress
-          status.progress = {
-            totalChunks: chunks.length,
-            processedChunks: Math.min(i + batchSize, chunks.length),
+            // Update progress
+            status.progress = {
+              totalChunks: chunks.length,
+              processedChunks: Math.min(i + batchSize, chunks.length),
+            }
+            await saveIndexingStatus(status)
           }
-          await saveIndexingStatus(status)
+        } catch (embeddingError: any) {
+          // If quota error, stop immediately and update status
+          if (isQuotaError(embeddingError)) {
+            console.error(`[Indexing] Quota error detected for document ${documentId}, stopping indexing:`, embeddingError.message)
+            status = {
+              documentId,
+              status: 'error',
+              error: `API quota exceeded: ${embeddingError.message}. Please check your API plan and billing details.`,
+            }
+            await saveIndexingStatus(status)
+            throw embeddingError // Re-throw to stop processing
+          }
+          // For other errors, re-throw to be handled by outer try-catch
+          throw embeddingError
         }
 
         // Add chunks to vector store - we hold write lock
@@ -550,8 +566,103 @@ export async function shouldReindexFile(documentId: string): Promise<boolean> {
 }
 
 /**
+ * Index library files for a specific project only
+ * This is the preferred method to avoid indexing all projects at once
+ * @param projectId - The project ID to index library files for
+ * @param geminiApiKey - Optional Gemini API key
+ * @param openaiApiKey - Optional OpenAI API key
+ * @param onlyUnindexed - If true, only index files that need indexing (default: true)
+ */
+export async function indexProjectLibraryFiles(
+  projectId: string,
+  geminiApiKey?: string,
+  openaiApiKey?: string,
+  onlyUnindexed: boolean = true
+): Promise<Array<{ documentId: string; status: IndexingStatus }>> {
+  if (!projectId) {
+    throw new Error('Project ID is required for indexing library files')
+  }
+
+  const allDocuments = await documentService.getAll()
+  // Filter to only library files belonging to this project
+  const projectLibraryDocuments = allDocuments.filter(
+    doc => doc.folder === 'library' && doc.projectId === projectId
+  )
+
+  // Filter to only PDF and DOCX files
+  const indexableDocuments = projectLibraryDocuments.filter(doc => {
+    const fileExt = doc.title.toLowerCase().split('.').pop() || ''
+    return fileExt === 'pdf' || fileExt === 'docx'
+  })
+
+  if (indexableDocuments.length === 0) {
+    console.log(`[Indexing] No indexable library files found for project ${projectId}`)
+    return []
+  }
+
+  console.log(`[Indexing] Starting indexing for project ${projectId}: ${indexableDocuments.length} files`)
+
+  // Check index validity for this project
+  const indexValid = await isIndexValid(projectId, 'library')
+  if (!indexValid) {
+    console.warn(`[Indexing] Index for project ${projectId}/library is invalid, will rebuild during indexing`)
+  }
+
+  const results: Array<{ documentId: string; status: IndexingStatus }> = []
+
+  for (const doc of indexableDocuments) {
+    // If onlyUnindexed is true, use shouldReindexFile for strict checking
+    if (onlyUnindexed) {
+      const needsReindex = await shouldReindexFile(doc.id)
+      if (!needsReindex) {
+        console.log(`[Indexing] Skipping ${doc.title}: already correctly indexed`)
+        continue // Skip files that are correctly indexed
+      }
+    }
+
+    try {
+      const status = await indexLibraryFile(doc.id, geminiApiKey, openaiApiKey)
+      results.push({ documentId: doc.id, status })
+    } catch (error: any) {
+      // If quota error, stop processing all remaining files
+      if (isQuotaError(error)) {
+        console.error(`[Indexing] Quota error detected while indexing ${doc.id}, stopping project indexing:`, error.message)
+        results.push({
+          documentId: doc.id,
+          status: {
+            documentId: doc.id,
+            status: 'error',
+            error: `API quota exceeded: ${error.message}. Please check your API plan and billing details.`,
+          },
+        })
+        // Stop processing remaining files in this project
+        break
+      }
+      
+      // For other errors, continue with next file
+      console.error(`[Indexing] Failed to index ${doc.title}:`, error.message)
+      results.push({
+        documentId: doc.id,
+        status: {
+          documentId: doc.id,
+          status: 'error',
+          error: error.message || 'Unknown error',
+        },
+      })
+    }
+  }
+
+  const successCount = results.filter(r => r.status.status === 'completed').length
+  const errorCount = results.filter(r => r.status.status === 'error').length
+  console.log(`[Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
+
+  return results
+}
+
+/**
  * Index all library files (batch operation)
  * Groups files by project and indexes them to project-specific library indexes
+ * NOTE: This indexes ALL projects. Use indexProjectLibraryFiles() for single-project indexing.
  */
 export async function indexAllLibraryFiles(
   geminiApiKey?: string,
@@ -616,6 +727,22 @@ export async function indexAllLibraryFiles(
         const status = await indexLibraryFile(doc.id, geminiApiKey, openaiApiKey)
         results.push({ documentId: doc.id, status })
       } catch (error: any) {
+        // If quota error, stop processing all remaining files
+        if (isQuotaError(error)) {
+          console.error(`[Indexing] Quota error detected while indexing ${doc.id}, stopping batch processing:`, error.message)
+          results.push({
+            documentId: doc.id,
+            status: {
+              documentId: doc.id,
+              status: 'error',
+              error: `API quota exceeded: ${error.message}. Please check your API plan and billing details.`,
+            },
+          })
+          // Stop processing remaining files
+          break
+        }
+        
+        // For other errors, continue with next file
         results.push({
           documentId: doc.id,
           status: {
@@ -885,6 +1012,7 @@ export const indexingService = {
   reindexFile,
   getIndexingStatus,
   indexAllLibraryFiles,
+  indexProjectLibraryFiles,
   removeFromIndex,
   isIndexValid,
   shouldReindexFile,
