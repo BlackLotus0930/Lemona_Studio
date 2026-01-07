@@ -48,8 +48,6 @@ function RouteRestorer() {
 }
 
 function AppRoutes() {
-  const location = useLocation()
-  
   return (
     <>
       <RouteRestorer />
