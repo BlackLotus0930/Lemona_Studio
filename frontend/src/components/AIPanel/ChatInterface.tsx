@@ -58,6 +58,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [messages, setMessages] = useState<AIChatMessage[]>([])
   const [input, setInput] = useState(initialInput || '')
   const [isLoading, setIsLoading] = useState(false)
+  const [lastUserMessageForSearch, setLastUserMessageForSearch] = useState<string>('')
   
   // Handle initial input from external source (e.g., "Add to Chat" from editor)
   useEffect(() => {
@@ -991,6 +992,46 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     return parts.length > 0 ? <>{parts}</> : text
   }
 
+  // Get search status text based on @mentions in last user message
+  const getSearchStatusText = (): string => {
+    if (!lastUserMessageForSearch) {
+      return 'Generating response...'
+    }
+
+    const mentionRegex = /@(Library|[^\s@]+)/g
+    const matches = Array.from(lastUserMessageForSearch.matchAll(mentionRegex))
+    
+    if (matches.length === 0) {
+      return 'Generating response...'
+    }
+
+    // Check for @Library mention first
+    const hasLibraryMention = matches.some(match => match[1].toLowerCase() === 'library')
+    if (hasLibraryMention) {
+      return 'Searching Library'
+    }
+
+    // Check for file mentions
+    const fileMentions = matches
+      .filter(match => match[1].toLowerCase() !== 'library')
+      .map(match => {
+        const mentionName = match[1]
+        // Try to find matching document
+        const matchedDoc = libraryDocuments.find(
+          doc => doc.title === mentionName || 
+                 doc.id === mentionName ||
+                 doc.title.toLowerCase().startsWith(mentionName.toLowerCase())
+        )
+        return matchedDoc ? matchedDoc.title : mentionName
+      })
+
+    if (fileMentions.length > 0) {
+      // Show first file mention
+      return `Searching ${fileMentions[0]}`
+    }
+
+    return 'Generating response...'
+  }
 
   // Helper function to format error messages in a user-friendly way
   const formatErrorMessage = (error: any): string => {
@@ -1324,6 +1365,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     
     setIsLoading(false)
     setIsStreaming(false)
+    setLastUserMessageForSearch('')
   }
 
   const handleSend = async () => {
@@ -1386,6 +1428,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
     setIsLoading(true)
     setIsStreaming(true)
+    setLastUserMessageForSearch(userMessage.content)
 
     // Notify parent about first message for chat naming (only when message is actually being sent)
     if (!hasNotifiedFirstMessage.current && onFirstMessage && messageContent) {
@@ -1525,6 +1568,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     } finally {
       setIsLoading(false)
       setIsStreaming(false)
+      setLastUserMessageForSearch('')
       currentAssistantMessageIdRef.current = null
       streamReaderRef.current = null
       abortControllerRef.current = null
@@ -2086,7 +2130,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             <span style={{
               color: textColor,
               fontWeight: 400
-            }}>Generating response...</span>
+            }}>{getSearchStatusText()}</span>
             <style>{`
               @keyframes pulse {
                 0%, 60%, 100% {
