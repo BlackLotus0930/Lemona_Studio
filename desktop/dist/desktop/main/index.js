@@ -85,12 +85,17 @@ function createWindow() {
         frame: false, // Remove default frame completely - we use custom title bar
         titleBarStyle: 'hidden', // Hide default title bar (macOS)
         backgroundColor: '#141414', // Set dark background to prevent white flash
+        show: false, // Don't show window until content is ready (prevents white flash)
         // Note: titleBarOverlay only works on macOS, removed for Windows compatibility
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
             preload: path.join(__dirname, '../../preload/index.js'),
         },
+    });
+    // Show window only when content is ready to prevent white flash
+    mainWindow.once('ready-to-show', () => {
+        mainWindow?.show();
     });
     // Handle window close: notify renderer to cleanup before closing
     mainWindow.on('close', (event) => {
