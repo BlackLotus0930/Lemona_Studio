@@ -2601,6 +2601,16 @@ export default function Layout(): JSX.Element {
   useEffect(() => {
     const handleWindowWillClose = async () => {
       
+      // Save last project and document for next app launch
+      if (document?.id) {
+        try {
+          localStorage.setItem('lastSession_projectId', document.projectId || '')
+          localStorage.setItem('lastSession_documentId', document.id)
+        } catch (error) {
+          console.error('Failed to save last session:', error)
+        }
+      }
+      
       // Reload current document from backend to restore to last saved state
       if (document?.id) {
         const editor = getEditor(document.id)
@@ -2629,6 +2639,16 @@ export default function Layout(): JSX.Element {
     
     // Fallback to beforeunload for non-Electron environments (e.g., web)
     const handleBeforeUnload = async () => {
+      // Save last project and document for next app launch
+      if (document?.id) {
+        try {
+          localStorage.setItem('lastSession_projectId', document.projectId || '')
+          localStorage.setItem('lastSession_documentId', document.id)
+        } catch (error) {
+          console.error('Failed to save last session:', error)
+        }
+      }
+      
       // Save current document before leaving
       if (document?.id) {
         // Clear any pending debounced saves and save immediately
@@ -3035,6 +3055,16 @@ export default function Layout(): JSX.Element {
   // Handle app close: restore documents to last saved state
   useEffect(() => {
     const handleWindowWillClose = async () => {
+      
+      // Save last project and document for next app launch
+      if (document?.id) {
+        try {
+          localStorage.setItem('lastSession_projectId', document.projectId || '')
+          localStorage.setItem('lastSession_documentId', document.id)
+        } catch (error) {
+          console.error('Failed to save last session:', error)
+        }
+      }
       
       // Reload current document from backend to restore to last saved state
       if (document?.id) {
@@ -3064,6 +3094,16 @@ export default function Layout(): JSX.Element {
     
     // Fallback to beforeunload for non-Electron environments (e.g., web)
     const handleBeforeUnload = async () => {
+      // Save last project and document for next app launch
+      if (document?.id) {
+        try {
+          localStorage.setItem('lastSession_projectId', document.projectId || '')
+          localStorage.setItem('lastSession_documentId', document.id)
+        } catch (error) {
+          console.error('Failed to save last session:', error)
+        }
+      }
+      
       // Save current document before leaving
       if (document?.id) {
         // Clear any pending debounced saves and save immediately
@@ -3470,6 +3510,16 @@ export default function Layout(): JSX.Element {
   // Handle app close: restore documents to last saved state
   useEffect(() => {
     const handleWindowWillClose = async () => {
+      
+      // Save last project and document for next app launch
+      if (document?.id) {
+        try {
+          localStorage.setItem('lastSession_projectId', document.projectId || '')
+          localStorage.setItem('lastSession_documentId', document.id)
+        } catch (error) {
+          console.error('Failed to save last session:', error)
+        }
+      }
       
       // Reload current document from backend to restore to last saved state
       if (document?.id) {
@@ -3499,6 +3549,16 @@ export default function Layout(): JSX.Element {
     
     // Fallback to beforeunload for non-Electron environments (e.g., web)
     const handleBeforeUnload = async () => {
+      // Save last project and document for next app launch
+      if (document?.id) {
+        try {
+          localStorage.setItem('lastSession_projectId', document.projectId || '')
+          localStorage.setItem('lastSession_documentId', document.id)
+        } catch (error) {
+          console.error('Failed to save last session:', error)
+        }
+      }
+      
       // Save current document before leaving
       if (document?.id) {
         // Clear any pending debounced saves and save immediately
@@ -3906,6 +3966,16 @@ export default function Layout(): JSX.Element {
   useEffect(() => {
     const handleWindowWillClose = async () => {
       
+      // Save last project and document for next app launch
+      if (document?.id) {
+        try {
+          localStorage.setItem('lastSession_projectId', document.projectId || '')
+          localStorage.setItem('lastSession_documentId', document.id)
+        } catch (error) {
+          console.error('Failed to save last session:', error)
+        }
+      }
+      
       // Reload current document from backend to restore to last saved state
       if (document?.id) {
         const editor = getEditor(document.id)
@@ -3934,6 +4004,16 @@ export default function Layout(): JSX.Element {
     
     // Fallback to beforeunload for non-Electron environments (e.g., web)
     const handleBeforeUnload = async () => {
+      // Save last project and document for next app launch
+      if (document?.id) {
+        try {
+          localStorage.setItem('lastSession_projectId', document.projectId || '')
+          localStorage.setItem('lastSession_documentId', document.id)
+        } catch (error) {
+          console.error('Failed to save last session:', error)
+        }
+      }
+      
       // Save current document before leaving
       if (document?.id) {
         // Clear any pending debounced saves and save immediately
