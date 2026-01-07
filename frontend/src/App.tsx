@@ -1,91 +1,64 @@
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
-import { useEffect, useState, useRef } from 'react'
 import DocumentList from './pages/DocumentList'
 import Layout from './components/Layout/Layout'
 import { EditorProvider } from './contexts/EditorContext'
-import { documentApi } from './services/desktop-api'
+import { useEffect, useState } from 'react'
+import { documentApi } from './services/api'
 
-function AppRouter() {
+// Component to restore last opened document on app startup
+function RouteRestorer() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [isCheckingLastSession, setIsCheckingLastSession] = useState(true)
-  const hasCheckedRef = useRef(false)
+  const [hasRestored, setHasRestored] = useState(false)
 
   useEffect(() => {
-    // Only check on initial load (when path is "/")
-    // Use ref to ensure we only check once
-    if (hasCheckedRef.current) {
-      setIsCheckingLastSession(false)
+    // Only restore on initial load (when at root or documents page)
+    if (hasRestored || (location.pathname !== '/' && location.pathname !== '/documents')) {
       return
     }
 
-    if (location.pathname === '/') {
-      hasCheckedRef.current = true
-      
-      // Check for last session on app startup
-      const checkLastSession = async () => {
-        try {
-          const lastProjectId = localStorage.getItem('lastSession_projectId')
-          const lastDocumentId = localStorage.getItem('lastSession_documentId')
-
-          if (lastDocumentId) {
-            // Verify the document still exists
-            try {
-              const document = await documentApi.get(lastDocumentId)
-              if (document && document.id) {
-                // Document exists, navigate to it
-                navigate(`/document/${lastDocumentId}`, { replace: true })
-                setIsCheckingLastSession(false)
-                return
-              }
-            } catch (error) {
-              console.error('Failed to load last document:', error)
-              // Document doesn't exist or error occurred, clear saved session
-              localStorage.removeItem('lastSession_projectId')
-              localStorage.removeItem('lastSession_documentId')
-            }
+    const restoreLastDocument = async () => {
+      try {
+        const lastDocumentId = localStorage.getItem('lastOpenedDocument')
+        if (lastDocumentId) {
+          // Verify the document still exists
+          const document = await documentApi.get(lastDocumentId)
+          if (document && document.id) {
+            // Navigate to the last opened document
+            navigate(`/document/${lastDocumentId}`, { replace: true })
+            setHasRestored(true)
+            return
+          } else {
+            // Document doesn't exist anymore, clear the saved ID
+            localStorage.removeItem('lastOpenedDocument')
           }
-          
-          // No valid last session, navigate to documents page
-          setIsCheckingLastSession(false)
-          navigate('/documents', { replace: true })
-        } catch (error) {
-          console.error('Error checking last session:', error)
-          setIsCheckingLastSession(false)
-          navigate('/documents', { replace: true })
         }
+      } catch (error) {
+        console.error('Failed to restore last document:', error)
+        // Clear invalid saved document ID
+        localStorage.removeItem('lastOpenedDocument')
       }
-
-      checkLastSession()
-    } else {
-      // Already on a specific route, don't check
-      hasCheckedRef.current = true
-      setIsCheckingLastSession(false)
+      setHasRestored(true)
     }
-  }, [navigate, location.pathname])
 
-  // Show loading state while checking last session
-  if (isCheckingLastSession) {
-    return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh',
-        backgroundColor: '#141414',
-        color: '#D6D6DD'
-      }}>
-        Loading...
-      </div>
-    )
-  }
+    restoreLastDocument()
+  }, [navigate, location.pathname, hasRestored])
 
+  return null
+}
+
+function AppRoutes() {
+  const location = useLocation()
+  
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/documents" replace />} />
-      <Route path="/documents" element={<DocumentList />} />
-      <Route path="/document/:id" element={<Layout />} />
-    </Routes>
+    <>
+      <RouteRestorer />
+      <Routes>
+        <Route path="/" element={<Navigate to="/documents" replace />} />
+        <Route path="/documents" element={<DocumentList />} />
+        <Route path="/document/:id" element={<Layout />} />
+      </Routes>
+    </>
   )
 }
 
@@ -93,7 +66,7 @@ function App() {
   return (
     <HashRouter>
       <EditorProvider>
-        <AppRouter />
+        <AppRoutes />
       </EditorProvider>
     </HashRouter>
   )

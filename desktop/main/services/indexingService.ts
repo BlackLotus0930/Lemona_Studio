@@ -600,8 +600,6 @@ export async function indexProjectLibraryFiles(
     return []
   }
 
-  console.log(`[Indexing] Starting indexing for project ${projectId}: ${indexableDocuments.length} files`)
-
   // Check index validity for this project
   const indexValid = await isIndexValid(projectId, 'library')
   if (!indexValid) {
@@ -615,7 +613,6 @@ export async function indexProjectLibraryFiles(
     if (onlyUnindexed) {
       const needsReindex = await shouldReindexFile(doc.id)
       if (!needsReindex) {
-        console.log(`[Indexing] Skipping ${doc.title}: already correctly indexed`)
         continue // Skip files that are correctly indexed
       }
     }
@@ -654,7 +651,6 @@ export async function indexProjectLibraryFiles(
 
   const successCount = results.filter(r => r.status.status === 'completed').length
   const errorCount = results.filter(r => r.status.status === 'error').length
-  console.log(`[Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
 
   return results
 }
