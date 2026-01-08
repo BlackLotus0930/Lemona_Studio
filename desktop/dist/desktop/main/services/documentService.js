@@ -6,11 +6,106 @@ import { extractPDFTextAsync } from './pdfTextExtractor.js';
 import { parseDocx, convertHtmlToTipTap } from './docxParser.js';
 import { indexLibraryFile, reindexFile } from './indexingService.js';
 import { getVectorStore, getProjectLockManager } from './vectorStore.js';
-import { getApiKeys } from './apiKeyStore.js';
+import { getApiKeys, getSmartIndexing } from './apiKeyStore.js';
 // Use Electron's userData directory for documents
 const DOCUMENTS_DIR = path.join(app.getPath('userData'), 'documents');
 console.log('Desktop Document service initialized:');
 console.log('  DOCUMENTS_DIR:', DOCUMENTS_DIR);
+// Background cleanup service for deleted documents
+class DeletedDocumentsCleanupService {
+    intervalId = null;
+    isRunning = false;
+    CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+    BATCH_SIZE = 10; // Process 10 documents at a time
+    /**
+     * Start the background cleanup service
+     */
+    start() {
+        if (this.isRunning) {
+            console.log('[DeletedDocumentsCleanupService] Already running');
+            return;
+        }
+        this.isRunning = true;
+        console.log(`[DeletedDocumentsCleanupService] Started (interval: ${this.CLEANUP_INTERVAL_MS / 1000}s)`);
+        // Run cleanup immediately on start
+        this.runCleanup();
+        // Schedule periodic cleanup
+        this.intervalId = setInterval(() => {
+            this.runCleanup();
+        }, this.CLEANUP_INTERVAL_MS);
+    }
+    /**
+     * Stop the background cleanup service
+     */
+    stop() {
+        if (!this.isRunning) {
+            return;
+        }
+        this.isRunning = false;
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
+        console.log('[DeletedDocumentsCleanupService] Stopped');
+    }
+    /**
+     * Run cleanup for deleted documents
+     */
+    async runCleanup() {
+        if (!this.isRunning) {
+            return;
+        }
+        try {
+            // Import documentService dynamically to avoid circular dependency
+            const { documentService } = await import('./documentService.js');
+            // Get all documents
+            const allDocuments = await documentService.getAll();
+            // Filter to deleted library documents
+            const deletedLibraryDocs = allDocuments.filter(doc => doc.deleted === true &&
+                doc.folder === 'library' &&
+                doc.projectId);
+            if (deletedLibraryDocs.length === 0) {
+                return; // No deleted documents to clean up
+            }
+            console.log(`[DeletedDocumentsCleanupService] Found ${deletedLibraryDocs.length} deleted library document(s) to clean up`);
+            // Process in batches to avoid blocking
+            const batches = [];
+            for (let i = 0; i < deletedLibraryDocs.length; i += this.BATCH_SIZE) {
+                batches.push(deletedLibraryDocs.slice(i, i + this.BATCH_SIZE));
+            }
+            let cleanedCount = 0;
+            let errorCount = 0;
+            for (const batch of batches) {
+                // Process batch asynchronously
+                await Promise.allSettled(batch.map(async (doc) => {
+                    try {
+                        // cleanupIndexForDeletedDocument is idempotent, safe to call multiple times
+                        await documentService.cleanupIndexForDeletedDocument(doc.id, doc.projectId);
+                        cleanedCount++;
+                    }
+                    catch (error) {
+                        errorCount++;
+                        // Log but don't throw - will retry on next run
+                        console.warn(`[DeletedDocumentsCleanupService] Failed to cleanup ${doc.id}:`, error.message);
+                    }
+                }));
+                // Small delay between batches to avoid overwhelming the system
+                if (batches.length > 1) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+            if (cleanedCount > 0 || errorCount > 0) {
+                console.log(`[DeletedDocumentsCleanupService] Cleanup completed: ${cleanedCount} succeeded, ${errorCount} failed`);
+            }
+        }
+        catch (error) {
+            console.error('[DeletedDocumentsCleanupService] Error during cleanup:', error);
+            // Don't throw - service will retry on next interval
+        }
+    }
+}
+// Create singleton instance
+const deletedDocumentsCleanupService = new DeletedDocumentsCleanupService();
 // Ensure documents directory exists
 async function ensureDocumentsDir() {
     try {
@@ -225,57 +320,119 @@ export const documentService = {
                 }
                 continue;
             }
-            // Acquire write lock once for this project
-            const releaseLock = await projectLockManager.acquireWriteLock(projectId);
-            console.log(`[documentService.deleteMany] Acquired write lock for project: ${projectId || 'global'} (${docs.length} documents)`);
-            try {
-                // Load index once for all deletions in this project
-                // Group by projectId and folder to get correct vector stores
-                const vectorStores = new Map();
-                // Process all deletions in this project
-                for (const { id, document } of docs) {
-                    try {
-                        // Remove from vector index if indexed (only library files)
-                        if (document.folder === 'library' && document.projectId) {
-                            const storeKey = `${document.projectId}:library`;
-                            if (!vectorStores.has(storeKey)) {
-                                const store = getVectorStore(document.projectId, 'library');
-                                await store.loadIndexUnsafe();
-                                vectorStores.set(storeKey, store);
+            // 🎯 SOLUTION: Delete only marks documents as deleted, doesn't clean up index
+            // Index cleanup happens asynchronously in background to avoid lock conflicts
+            // This allows deletion to proceed even when indexing is in progress
+            // Process all deletions without acquiring write lock
+            // We only need to mark documents as deleted, which doesn't require index access
+            for (const { id, document } of docs) {
+                try {
+                    // Mark document as deleted (logical deletion)
+                    // Index cleanup will happen asynchronously in background
+                    await this.deleteUnsafe(id, document);
+                    results.set(id, true);
+                    // Schedule async index cleanup (non-blocking, doesn't hold lock)
+                    // This will be handled by background cleanup task
+                    if (document.folder === 'library' && document.projectId) {
+                        // Queue index cleanup for background processing
+                        setImmediate(async () => {
+                            try {
+                                await this.cleanupIndexForDeletedDocument(id, document.projectId);
                             }
-                            const vectorStore = vectorStores.get(storeKey);
-                            await vectorStore.removeChunksByFileUnsafe(id, false); // autoSave=false, save once at end
-                        }
-                        // Mark document as deleted
-                        await this.deleteUnsafe(id, document);
-                        results.set(id, true);
-                    }
-                    catch (error) {
-                        console.error(`[documentService.deleteMany] Failed to delete document: ${id}`, error);
-                        results.set(id, false);
+                            catch (cleanupError) {
+                                // Don't fail deletion if cleanup fails - it will be retried by background task
+                                console.warn(`[documentService.deleteMany] Background index cleanup failed for ${id}:`, cleanupError.message);
+                            }
+                        });
                     }
                 }
-                // Save all affected indexes once after all deletions
-                for (const [storeKey, store] of vectorStores.entries()) {
-                    try {
-                        await store.saveIndexUnsafe();
-                        console.log(`[documentService.deleteMany] Saved index for ${storeKey}`);
-                    }
-                    catch (saveError) {
-                        console.error(`[documentService.deleteMany] Failed to save index:`, saveError);
-                        // Don't fail the entire operation, but log the error
-                    }
+                catch (error) {
+                    console.error(`[documentService.deleteMany] Failed to delete document: ${id}`, error);
+                    results.set(id, false);
                 }
-            }
-            finally {
-                releaseLock();
             }
         }
         // Return results in the same order as input
         return ids.map(id => results.get(id) ?? false);
     },
     /**
-     * Internal unsafe delete method - assumes caller holds appropriate lock
+     * Cleanup index for a deleted document (async, non-blocking)
+     * This is called asynchronously after deletion to avoid lock conflicts
+     *
+     * IDEMPOTENT: This method can be called multiple times safely:
+     * - If document is not deleted, returns early (no-op)
+     * - If chunks don't exist, returns early (no-op)
+     * - If lock acquisition fails, returns early (will be retried)
+     * - Safe to call after crashes, restarts, timeouts, or retries
+     *
+     * @param documentId - Document ID
+     * @param projectId - Project ID
+     */
+    async cleanupIndexForDeletedDocument(documentId, projectId) {
+        // 🎯 IDEMPOTENCY CHECK 1: Verify document is still deleted
+        // If document was restored, don't clean up index
+        try {
+            const document = await this.getById(documentId);
+            if (!document || document.deleted !== true) {
+                console.log(`[documentService.cleanupIndexForDeletedDocument] Document ${documentId} is not deleted, skipping cleanup (idempotent)`);
+                return; // Idempotent: document not deleted, nothing to clean up
+            }
+        }
+        catch (error) {
+            // If document doesn't exist, assume it's deleted and proceed with cleanup
+            // This handles the case where document file was already removed
+            console.log(`[documentService.cleanupIndexForDeletedDocument] Document ${documentId} not found, assuming deleted and proceeding with cleanup`);
+        }
+        const projectLockManager = getProjectLockManager();
+        // 🎯 IDEMPOTENCY CHECK 2: Try to acquire write lock with timeout
+        // If lock acquisition fails, return early (will be retried later)
+        let releaseLock = null;
+        try {
+            releaseLock = await Promise.race([
+                projectLockManager.acquireWriteLock(projectId),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Lock acquisition timeout')), 1000))
+            ]);
+        }
+        catch (error) {
+            // 🎯 IDEMPOTENT: Lock acquisition failed, return early (will be retried)
+            console.log(`[documentService.cleanupIndexForDeletedDocument] Lock acquisition failed for ${documentId}, will retry later:`, error.message);
+            return; // Idempotent: can be called again later
+        }
+        try {
+            // 🎯 IDEMPOTENCY CHECK 3: Double-check document is still deleted after acquiring lock
+            // Document might have been restored while waiting for lock
+            const documentAfterLock = await this.getById(documentId);
+            if (!documentAfterLock || documentAfterLock.deleted !== true) {
+                console.log(`[documentService.cleanupIndexForDeletedDocument] Document ${documentId} was restored after lock acquisition, skipping cleanup (idempotent)`);
+                return; // Idempotent: document not deleted, nothing to clean up
+            }
+            const vectorStore = getVectorStore(projectId, 'library');
+            await vectorStore.loadIndexUnsafe();
+            // 🎯 IDEMPOTENCY CHECK 4: removeChunksByFileUnsafe is already idempotent
+            // It returns early if no chunks exist (removedCount === 0)
+            // This handles the case where cleanup was already completed
+            await vectorStore.removeChunksByFileUnsafe(documentId, true); // autoSave=true
+            console.log(`[documentService.cleanupIndexForDeletedDocument] Successfully cleaned up index for ${documentId}`);
+        }
+        catch (error) {
+            // 🎯 IDEMPOTENT: If cleanup fails, log but don't throw
+            // This allows the method to be called again safely
+            // Common failure cases:
+            // - Index file doesn't exist (already cleaned up)
+            // - Chunks don't exist (already cleaned up)
+            // - Save failed (will be retried)
+            console.warn(`[documentService.cleanupIndexForDeletedDocument] Cleanup failed for ${documentId} (idempotent, will retry):`, error.message);
+            // Don't throw - allow retry on next call
+        }
+        finally {
+            if (releaseLock) {
+                releaseLock();
+            }
+        }
+    },
+    /**
+     * Internal unsafe delete method - marks document as deleted without index cleanup
+     * Index cleanup happens asynchronously via cleanupIndexForDeletedDocument
      * @param id - Document ID
      * @param document - Document object (must be provided to avoid re-fetching)
      */
@@ -560,6 +717,12 @@ export const documentService = {
         // Auto-index library files asynchronously (don't block upload)
         // Only index new files that need indexing (use shouldReindexFile for strict checking)
         if (folder === 'library') {
+            // Check if Smart indexing is enabled
+            const smartIndexingEnabled = getSmartIndexing();
+            if (!smartIndexingEnabled) {
+                console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for ${finalFileName}`);
+                return document;
+            }
             // Check if file type is supported for indexing (PDF or DOCX)
             const fileExt = finalFileName.toLowerCase().split('.').pop() || '';
             if (fileExt === 'pdf' || fileExt === 'docx') {
@@ -695,5 +858,19 @@ export const documentService = {
             console.error('[cleanupDeletedDocuments] Error during cleanup:', error);
             return { removed: 0, errors: [String(error)] };
         }
+    },
+    /**
+     * Start background cleanup service for deleted documents
+     * This should be called once on app startup
+     */
+    startDeletedDocumentsCleanupService() {
+        deletedDocumentsCleanupService.start();
+    },
+    /**
+     * Stop background cleanup service
+     * This should be called on app shutdown
+     */
+    stopDeletedDocumentsCleanupService() {
+        deletedDocumentsCleanupService.stop();
     },
 };

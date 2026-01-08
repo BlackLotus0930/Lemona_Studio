@@ -221,6 +221,37 @@ export const settingsApi = {
       throw error
     }
   },
+  saveSmartIndexing: async (enabled: boolean) => {
+    try {
+      return await invokeOrFetch('settings:saveSmartIndexing', enabled)
+    } catch (error: any) {
+      // If handler not registered, log warning but don't fail (app may need restart)
+      if (error?.message?.includes('No handler registered')) {
+        console.warn('[Settings API] Handler not registered - app may need restart. Smart indexing saved to localStorage only.')
+        return { success: false, needsRestart: true }
+      }
+      throw error
+    }
+  },
+  getSmartIndexing: async () => {
+    try {
+      const result = await invokeOrFetch('settings:getSmartIndexing')
+      return result.enabled === true // Default to false if not set
+    } catch (error: any) {
+      // If handler not registered, return default value (app may need restart)
+      if (error?.message?.includes('No handler registered')) {
+        console.warn('[Settings API] Handler not registered - app may need restart.')
+        // Return default from localStorage
+        try {
+          const setting = localStorage.getItem('smartIndexing')
+          return setting === null ? false : setting === 'true'
+        } catch {
+          return false // Default to disabled
+        }
+      }
+      throw error
+    }
+  },
 }
 
 export const indexingApi = {

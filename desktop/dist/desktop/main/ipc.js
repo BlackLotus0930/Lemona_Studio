@@ -877,4 +877,25 @@ Rephrased text:`;
             throw error;
         }
     });
+    ipcMain.handle('settings:saveSmartIndexing', async (_, enabled) => {
+        try {
+            const { saveSmartIndexing } = await import('./services/apiKeyStore.js');
+            saveSmartIndexing(enabled);
+            return { success: true };
+        }
+        catch (error) {
+            console.error('IPC settings:saveSmartIndexing error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('settings:getSmartIndexing', async () => {
+        try {
+            const { getSmartIndexing } = await import('./services/apiKeyStore.js');
+            return { enabled: getSmartIndexing() };
+        }
+        catch (error) {
+            console.error('IPC settings:getSmartIndexing error:', error);
+            throw error;
+        }
+    });
 }

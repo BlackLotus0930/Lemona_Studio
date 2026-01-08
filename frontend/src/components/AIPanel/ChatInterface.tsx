@@ -96,6 +96,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [googleApiKey, setGoogleApiKey] = useState('')
   const [openaiApiKey, setOpenaiApiKey] = useState('')
+  const [smartIndexing, setSmartIndexing] = useState(false)
   const [modalPosition, setModalPosition] = useState<{ top: number; left?: number; right?: number }>({ top: 0, left: 0 })
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const modelNameRef = useRef<HTMLButtonElement>(null)
@@ -139,7 +140,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [showMentionDropdown, setShowMentionDropdown] = useState(false)
   const mentionDropdownRef = useRef<HTMLDivElement>(null)
   
-  // Load API keys from localStorage on mount and sync to main process
+  // Load API keys and Smart indexing setting from localStorage on mount and sync to main process
   useEffect(() => {
     try {
       const googleKey = localStorage.getItem('googleApiKey') || undefined
@@ -152,12 +153,22 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         setOpenaiApiKey(openaiKey)
       }
       
+      // Load Smart indexing setting (default to false if not set)
+      const smartIndexingSetting = localStorage.getItem('smartIndexing')
+      const isSmartIndexingEnabled = smartIndexingSetting === null ? false : smartIndexingSetting === 'true'
+      setSmartIndexing(isSmartIndexingEnabled)
+      
       // Sync both keys to main process for auto-indexing
       if (googleKey || openaiKey) {
         settingsApi.saveApiKeys(googleKey, openaiKey).catch((error) => {
           console.error('Failed to sync API keys to main process:', error)
         })
       }
+      
+      // Sync Smart indexing setting to main process
+      settingsApi.saveSmartIndexing(isSmartIndexingEnabled).catch((error) => {
+        console.error('Failed to sync Smart indexing setting to main process:', error)
+      })
     } catch (error) {
       console.error('Failed to load API keys:', error)
     }
@@ -276,26 +287,36 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         await settingsApi.saveApiKeys(value || undefined, currentOpenaiKey)
         
         // If API key was just added (was empty, now has value) and we have a projectId,
-        // trigger indexing for the current project
+        // trigger indexing for the current project (only if Smart indexing is enabled)
         const hasKeyNow = (value && value.trim().length > 0) ||
                          (currentOpenaiKey && currentOpenaiKey.trim().length > 0)
         
         if (!hadKeyBefore && hasKeyNow && projectId) {
-          console.log(`[Auto-Indexing] API key was just added in project ${projectId}, starting library file indexing...`)
-          indexingApi.indexProjectLibraryFiles(
-            projectId,
-            value || undefined,
-            currentOpenaiKey,
-            true // onlyUnindexed = true
-          ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
-            const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
-            const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
-            if (successCount > 0 || errorCount > 0) {
-              console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
+          // Check if Smart indexing is enabled before triggering indexing
+          settingsApi.getSmartIndexing().then((smartIndexingEnabled) => {
+            if (!smartIndexingEnabled) {
+              console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for project ${projectId}`)
+              return
             }
+            
+            console.log(`[Auto-Indexing] API key was just added in project ${projectId}, starting library file indexing...`)
+            indexingApi.indexProjectLibraryFiles(
+              projectId,
+              value || undefined,
+              currentOpenaiKey,
+              true // onlyUnindexed = true
+            ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+              const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+              const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+              if (successCount > 0 || errorCount > 0) {
+                console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
+              }
+            }).catch((error) => {
+              // Don't show error to user - indexing failures shouldn't interrupt workflow
+              console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
+            })
           }).catch((error) => {
-            // Don't show error to user - indexing failures shouldn't interrupt workflow
-            console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
+            console.warn('[Auto-Indexing] Failed to get Smart indexing setting:', error)
           })
         }
       } catch (error) {
@@ -325,26 +346,36 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         await settingsApi.saveApiKeys(currentGoogleKey, value || undefined)
         
         // If API key was just added (was empty, now has value) and we have a projectId,
-        // trigger indexing for the current project
+        // trigger indexing for the current project (only if Smart indexing is enabled)
         const hasKeyNow = (currentGoogleKey && currentGoogleKey.trim().length > 0) ||
                          (value && value.trim().length > 0)
         
         if (!hadKeyBefore && hasKeyNow && projectId) {
-          console.log(`[Auto-Indexing] API key was just added in project ${projectId}, starting library file indexing...`)
-          indexingApi.indexProjectLibraryFiles(
-            projectId,
-            currentGoogleKey,
-            value || undefined,
-            true // onlyUnindexed = true
-          ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
-            const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
-            const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
-            if (successCount > 0 || errorCount > 0) {
-              console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
+          // Check if Smart indexing is enabled before triggering indexing
+          settingsApi.getSmartIndexing().then((smartIndexingEnabled) => {
+            if (!smartIndexingEnabled) {
+              console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for project ${projectId}`)
+              return
             }
+            
+            console.log(`[Auto-Indexing] API key was just added in project ${projectId}, starting library file indexing...`)
+            indexingApi.indexProjectLibraryFiles(
+              projectId,
+              currentGoogleKey,
+              value || undefined,
+              true // onlyUnindexed = true
+            ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+              const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+              const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+              if (successCount > 0 || errorCount > 0) {
+                console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
+              }
+            }).catch((error) => {
+              // Don't show error to user - indexing failures shouldn't interrupt workflow
+              console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
+            })
           }).catch((error) => {
-            // Don't show error to user - indexing failures shouldn't interrupt workflow
-            console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
+            console.warn('[Auto-Indexing] Failed to get Smart indexing setting:', error)
           })
         }
       } catch (error) {
@@ -3822,26 +3853,116 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             />
           </div>
 
-          {/* Tip */}
-          <div
-            style={{
-              marginTop: '16px',
-              padding: '10px 12px',
-              backgroundColor: theme === 'dark' ? '#1e1e1e' : '#f8f9fa',
-              borderLeft: `3px solid ${theme === 'dark' ? '#4a9eff' : '#1a73e8'}`,
-              borderRadius: '4px',
-            }}
-          >
-            <p
+          {/* Smart Indexing Option */}
+          <div style={{ marginBottom: '20px' }}>
+            <label
               style={{
-                fontSize: '11px',
-                color: theme === 'dark' ? '#999' : '#666',
-                margin: 0,
-                lineHeight: '1.5',
+                display: 'flex',
+                alignItems: 'flex-start',
+                cursor: 'pointer',
+                fontSize: '13px',
+                color: theme === 'dark' ? '#e0e0e0' : '#202124',
+                userSelect: 'none',
+                gap: '10px',
               }}
             >
-              Use a single API key to ensure stable AI document search.
-            </p>
+              <div
+                style={{
+                  position: 'relative',
+                  width: '18px',
+                  height: '18px',
+                  flexShrink: 0,
+                  marginTop: '2px',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={smartIndexing}
+                  onChange={async (e) => {
+                    const newValue = e.target.checked
+                    setSmartIndexing(newValue)
+                    try {
+                      localStorage.setItem('smartIndexing', String(newValue))
+                      await settingsApi.saveSmartIndexing(newValue)
+                    } catch (error) {
+                      console.error('Failed to save Smart indexing setting:', error)
+                    }
+                  }}
+                  style={{
+                    position: 'absolute',
+                    width: '18px',
+                    height: '18px',
+                    margin: 0,
+                    cursor: 'pointer',
+                    opacity: 0,
+                    zIndex: 1,
+                  }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '18px',
+                    height: '18px',
+                    border: `2px solid ${smartIndexing 
+                      ? (theme === 'dark' ? '#4a9eff' : '#1a73e8')
+                      : (theme === 'dark' ? '#444' : '#dadce0')}`,
+                    borderRadius: '4px',
+                    backgroundColor: smartIndexing
+                      ? (theme === 'dark' ? '#4a9eff' : '#1a73e8')
+                      : (theme === 'dark' ? '#252525' : '#ffffff'),
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {smartIndexing && (
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 12 12"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      style={{
+                        transition: 'opacity 0.2s ease',
+                      }}
+                    >
+                      <path
+                        d="M2 6L5 9L10 2"
+                        stroke={theme === 'dark' ? '#141414' : '#ffffff'}
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    color: theme === 'dark' ? '#e0e0e0' : '#202124',
+                    marginBottom: '4px',
+                  }}
+                >
+                  Smart indexing
+                </div>
+                <p
+                  style={{
+                    fontSize: '11px',
+                    color: theme === 'dark' ? '#999' : '#666',
+                    margin: 0,
+                    lineHeight: '1.4',
+                  }}
+                >
+                  Use a single API key to ensure stable AI document search.
+                </p>
+              </div>
+            </label>
           </div>
         </div>
       )}

@@ -775,31 +775,43 @@ export default function Layout(): JSX.Element {
       // Auto-index library files for this project when project changes
       // This happens asynchronously and doesn't block UI
       if (currentProjectId) {
-        // Get API keys and trigger indexing
-        settingsApi.getApiKeys().then((keys) => {
-          const hasApiKey = (keys.geminiApiKey && keys.geminiApiKey.trim().length > 0) ||
-                           (keys.openaiApiKey && keys.openaiApiKey.trim().length > 0)
-          
-          if (hasApiKey) {
-            console.log(`[Auto-Indexing] Project ${currentProjectId} opened, starting library file indexing...`)
-            indexingApi.indexProjectLibraryFiles(
-              currentProjectId,
-              keys.geminiApiKey,
-              keys.openaiApiKey,
-              true // onlyUnindexed = true
-            ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
-              const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
-              const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
-              if (successCount > 0 || errorCount > 0) {
-                console.log(`[Auto-Indexing] Completed indexing for project ${currentProjectId}: ${successCount} succeeded, ${errorCount} errors`)
-              }
-            }).catch((error) => {
-              // Don't show error to user - indexing failures shouldn't interrupt workflow
-              console.warn(`[Auto-Indexing] Failed to index project ${currentProjectId}:`, error)
-            })
+        // Check if Smart indexing is enabled
+        settingsApi.getSmartIndexing().then((smartIndexingEnabled) => {
+          if (!smartIndexingEnabled) {
+            console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for project ${currentProjectId}`)
+            return
           }
+          
+          // Get API keys and trigger indexing
+          settingsApi.getApiKeys().then((keys) => {
+            const hasApiKey = (keys.geminiApiKey && keys.geminiApiKey.trim().length > 0) ||
+                             (keys.openaiApiKey && keys.openaiApiKey.trim().length > 0)
+            
+            if (hasApiKey) {
+              console.log(`[Auto-Indexing] Project ${currentProjectId} opened, starting library file indexing...`)
+              indexingApi.indexProjectLibraryFiles(
+                currentProjectId,
+                keys.geminiApiKey,
+                keys.openaiApiKey,
+                true // onlyUnindexed = true
+              ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+                const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+                const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+                if (successCount > 0 || errorCount > 0) {
+                  console.log(`[Auto-Indexing] Completed indexing for project ${currentProjectId}: ${successCount} succeeded, ${errorCount} errors`)
+                }
+              }).catch((error) => {
+                // Don't show error to user - indexing failures shouldn't interrupt workflow
+                console.warn(`[Auto-Indexing] Failed to index project ${currentProjectId}:`, error)
+              })
+            }
+          }).catch((error) => {
+            console.warn('[Auto-Indexing] Failed to get API keys:', error)
+          })
         }).catch((error) => {
-          console.warn('[Auto-Indexing] Failed to get API keys:', error)
+          console.warn('[Auto-Indexing] Failed to get Smart indexing setting:', error)
+          // If we can't get the setting, skip indexing (default is disabled)
+          console.log(`[Auto-Indexing] Smart indexing setting unavailable, skipping automatic indexing for project ${currentProjectId}`)
         })
       }
     } else {
@@ -2551,7 +2563,7 @@ export default function Layout(): JSX.Element {
                 : firstLineText.trim()
               
               if (titleCandidate && titleCandidate !== currentDoc.title) {
-                const updatedDocument = await documentApi.updateTitle(docId, titleCandidate)
+                await documentApi.updateTitle(docId, titleCandidate)
                 
                 // Mark as updated to prevent future auto-updates
                 titleUpdatedRef.current.add(docId)

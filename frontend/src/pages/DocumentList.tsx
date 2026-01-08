@@ -148,30 +148,41 @@ export default function DocumentList() {
       
       // Trigger indexing for this project's library files (async, non-blocking)
       // This happens in the background and doesn't block project opening
-      settingsApi.getApiKeys().then((keys) => {
-        const hasApiKey = (keys.geminiApiKey && keys.geminiApiKey.trim().length > 0) ||
-                         (keys.openaiApiKey && keys.openaiApiKey.trim().length > 0)
-        
-        if (hasApiKey) {
-          console.log(`[Auto-Indexing] Project ${projectId} opened, starting library file indexing...`)
-          indexingApi.indexProjectLibraryFiles(
-            projectId,
-            keys.geminiApiKey,
-            keys.openaiApiKey,
-            true // onlyUnindexed = true
-          ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
-            const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
-            const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
-            if (successCount > 0 || errorCount > 0) {
-              console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
-            }
-          }).catch((error) => {
-            // Don't show error to user - indexing failures shouldn't interrupt workflow
-            console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
-          })
+      settingsApi.getSmartIndexing().then((smartIndexingEnabled) => {
+        if (!smartIndexingEnabled) {
+          console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for project ${projectId}`)
+          return
         }
+        
+        settingsApi.getApiKeys().then((keys) => {
+          const hasApiKey = (keys.geminiApiKey && keys.geminiApiKey.trim().length > 0) ||
+                           (keys.openaiApiKey && keys.openaiApiKey.trim().length > 0)
+          
+          if (hasApiKey) {
+            console.log(`[Auto-Indexing] Project ${projectId} opened, starting library file indexing...`)
+            indexingApi.indexProjectLibraryFiles(
+              projectId,
+              keys.geminiApiKey,
+              keys.openaiApiKey,
+              true // onlyUnindexed = true
+            ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+              const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+              const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+              if (successCount > 0 || errorCount > 0) {
+                console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
+              }
+            }).catch((error) => {
+              // Don't show error to user - indexing failures shouldn't interrupt workflow
+              console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
+            })
+          }
+        }).catch((error) => {
+          console.warn('[Auto-Indexing] Failed to get API keys:', error)
+        })
       }).catch((error) => {
-        console.warn('[Auto-Indexing] Failed to get API keys:', error)
+        console.warn('[Auto-Indexing] Failed to get Smart indexing setting:', error)
+        // If we can't get the setting, skip indexing (default is disabled)
+        console.log(`[Auto-Indexing] Smart indexing setting unavailable, skipping automatic indexing for project ${projectId}`)
       })
       
       // Get documents in project

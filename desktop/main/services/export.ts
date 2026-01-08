@@ -106,6 +106,99 @@ function generateFontFaceCSS(): string {
   return css
 }
 
+// Helper function to load image from document:// URL
+async function loadDocumentImage(src: string): Promise<string | null> {
+  if (!src.startsWith('document://')) {
+    return null
+  }
+  
+  try {
+    // Parse document://documentId/image/imageId
+    const match = src.match(/^document:\/\/([^/]+)\/image\/(.+)$/)
+    if (!match) {
+      return null
+    }
+    
+    const documentId = match[1]
+    const imageId = match[2]
+    
+    // Get file path - images are stored as documentId_imageId.ext
+    const FILES_DIR = path.join(app.getPath('userData'), 'files')
+    const files = await fs.readdir(FILES_DIR)
+    const imageFile = files.find((f: string) => f.startsWith(`${documentId}_img_`) && f.includes(imageId))
+    
+    if (!imageFile) {
+      return null
+    }
+    
+    const imagePath = path.join(FILES_DIR, imageFile)
+    const fileBuffer = await fs.readFile(imagePath)
+    
+    // Determine content type from file extension
+    const ext = imageFile.split('.').pop()?.toLowerCase() || 'png'
+    const contentType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 
+                       ext === 'gif' ? 'image/gif' : 
+                       ext === 'webp' ? 'image/webp' : 'image/png'
+    
+    const base64 = fileBuffer.toString('base64')
+    return `data:${contentType};base64,${base64}`
+  } catch (error) {
+    console.error('[Export] Failed to load document image:', error)
+    return null
+  }
+}
+
+// Preprocess TipTap content to convert document:// URLs to data URLs
+async function preprocessContentForExport(content: any): Promise<any> {
+  if (!content || !content.content) {
+    return content
+  }
+  
+  async function processNode(node: any): Promise<any> {
+    if (!node || !node.type) {
+      return node
+    }
+    
+    // Process image nodes
+    if (node.type === 'image' && node.attrs?.src) {
+      const src = node.attrs.src
+      const documentSrc = node.attrs['data-document-src'] || ''
+      const actualSrc = documentSrc || src
+      
+      // If it's a document:// URL, load it and convert to data URL
+      if (actualSrc.startsWith('document://')) {
+        const dataUrl = await loadDocumentImage(actualSrc)
+        if (dataUrl) {
+          return {
+            ...node,
+            attrs: {
+              ...node.attrs,
+              src: dataUrl,
+              'data-document-src': undefined, // Remove data-document-src after conversion
+            }
+          }
+        }
+      }
+    }
+    
+    // Recursively process children
+    if (node.content && Array.isArray(node.content)) {
+      const processedContent = await Promise.all(node.content.map(processNode))
+      return {
+        ...node,
+        content: processedContent
+      }
+    }
+    
+    return node
+  }
+  
+  const processedContent = await Promise.all(content.content.map(processNode))
+  return {
+    ...content,
+    content: processedContent
+  }
+}
 
 // Convert TipTap JSON to HTML with inline styles (WYSIWYG)
 function tipTapToHTML(content: any): string {

@@ -8,7 +8,7 @@ import { extractPDFTextAsync } from './pdfTextExtractor.js'
 import { parseDocx, convertHtmlToTipTap } from './docxParser.js'
 import { indexLibraryFile, reindexFile } from './indexingService.js'
 import { getVectorStore, cleanupVectorIndex, getProjectLockManager } from './vectorStore.js'
-import { getApiKeys } from './apiKeyStore.js'
+import { getApiKeys, getSmartIndexing } from './apiKeyStore.js'
 
 // Use Electron's userData directory for documents
 const DOCUMENTS_DIR = path.join(app.getPath('userData'), 'documents')
@@ -801,6 +801,13 @@ export const documentService = {
     // Auto-index library files asynchronously (don't block upload)
     // Only index new files that need indexing (use shouldReindexFile for strict checking)
     if (folder === 'library') {
+      // Check if Smart indexing is enabled
+      const smartIndexingEnabled = getSmartIndexing()
+      if (!smartIndexingEnabled) {
+        console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for ${finalFileName}`)
+        return document
+      }
+      
       // Check if file type is supported for indexing (PDF or DOCX)
       const fileExt = finalFileName.toLowerCase().split('.').pop() || ''
       if (fileExt === 'pdf' || fileExt === 'docx') {
