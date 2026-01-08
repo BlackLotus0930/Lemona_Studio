@@ -345,18 +345,15 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         const maxScrollLeft = container.scrollWidth - containerWidth
         desiredScrollLeft = Math.max(0, Math.min(desiredScrollLeft, maxScrollLeft))
         
-        // Scroll to the desired position
-        container.scrollTo({
-          left: desiredScrollLeft,
-          behavior: 'smooth'
-        })
+        // Scroll to the desired position (no animation)
+        container.scrollLeft = desiredScrollLeft
       }
     }, 50) // Small delay to ensure DOM update
     
     return () => clearTimeout(timeoutId)
   }, [activeChatId, chats])
 
-  // Add scroll detection and edge detection to show scrollbar
+  // Add scroll detection and edge detection to show scrollbar for header
   useEffect(() => {
     const container = headerScrollRef.current
     if (!container) return
@@ -412,6 +409,36 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
       container.removeEventListener('mouseleave', handleMouseLeave)
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Add scroll detection for chat tabs to hide scrollbar when not scrolling
+  const chatTabsScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    const container = chatTabsScrollRef.current
+    if (!container) return
+
+    const handleScroll = () => {
+      if (container) {
+        container.classList.add('scrolling')
+        if (chatTabsScrollTimeoutRef.current) {
+          clearTimeout(chatTabsScrollTimeoutRef.current)
+        }
+        chatTabsScrollTimeoutRef.current = setTimeout(() => {
+          if (container) {
+            container.classList.remove('scrolling')
+          }
+        }, 600) // Hide scrollbar after 600ms of no scrolling
+      }
+    }
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    
+    return () => {
+      container.removeEventListener('scroll', handleScroll)
+      if (chatTabsScrollTimeoutRef.current) {
+        clearTimeout(chatTabsScrollTimeoutRef.current)
       }
     }
   }, [])
@@ -682,7 +709,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
             scrollbarWidth: 'thin', // Firefox - thin scrollbar
             msOverflowStyle: 'auto', // IE/Edge
           } as React.CSSProperties}
-          className="chat-tabs-scrollable"
+          className="chat-tabs-scrollable scrollable-container"
         >
           {chats.map((chat) => {
             const isDragging = draggedChatId === chat.id

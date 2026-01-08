@@ -677,7 +677,7 @@ input[type="number"] {
 /* Chat tabs horizontal scrollbar styling */
 .chat-tabs-scrollable {
   scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-color-thumb) transparent;
+  scrollbar-color: transparent transparent;
 }
 
 .chat-tabs-scrollable::-webkit-scrollbar {
@@ -689,11 +689,32 @@ input[type="number"] {
 }
 
 .chat-tabs-scrollable::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-color-thumb);
+  background-color: transparent;
   border-radius: 2px;
+  transition: background-color 0.4s ease, opacity 0.4s ease;
+  opacity: 0;
 }
 
 .dark-theme .chat-tabs-scrollable::-webkit-scrollbar-thumb {
-  background-color: #3e3e3e;
+  background-color: transparent;
+}
+
+/* Show scrollbar when scrolling */
+.chat-tabs-scrollable.scrolling::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-color-thumb);
+  opacity: 1;
+}
+
+.dark-theme .chat-tabs-scrollable.scrolling::-webkit-scrollbar-thumb {
+  background-color: #3e3e42;
+}
+
+/* Firefox - show scrollbar when scrolling */
+.chat-tabs-scrollable.scrolling {
+  scrollbar-color: var(--scrollbar-color-thumb) transparent;
+}
+
+.dark-theme .chat-tabs-scrollable.scrolling {
+  scrollbar-color: #3e3e42 transparent;
 }
 

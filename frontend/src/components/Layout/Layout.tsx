@@ -19,8 +19,6 @@ import DocumentEditor, { DocumentEditorSearchHandle } from '../Editor/DocumentEd
 import Toolbar from '../Editor/Toolbar'
 import AIPanel from '../AIPanel/AIPanel'
 import FileExplorer from '../FileExplorer/FileExplorer'
-import { FileExplorerSkeleton } from '../FileExplorer/FileExplorerSkeleton'
-import { DocumentEditorSkeleton } from '../Editor/DocumentEditorSkeleton'
 import FullScreenPDFViewer, { PDFViewerSearchHandle } from '../PDFViewer/FullScreenPDFViewer'
 import { Document, IndexingStatus } from '@shared/types'
 import { documentApi, exportApi, projectApi } from '../../services/api'
@@ -2412,6 +2410,46 @@ export default function Layout(): JSX.Element {
   // Store editor instance in map
   const setEditor = (docId: string, editor: Editor): void => {
     editorsMapRef.current.set(docId, editor)
+    
+    // Immediately set scroll position when editor is created to prevent showing top first
+    // This ensures the document opens directly at the saved scroll position
+    requestAnimationFrame(() => {
+      if (!editor || editor.isDestroyed || !editor.view) return
+      
+      try {
+        const saved = localStorage.getItem(`documentScroll_${docId}`)
+        const savedScrollTop = saved ? parseFloat(saved) : null
+        
+        if (savedScrollTop !== null && savedScrollTop > 0) {
+          const scrollContainer = editor.view.dom.closest('.scrollable-container') as HTMLElement
+          if (scrollContainer) {
+            // Disable smooth scrolling temporarily
+            const originalScrollBehavior = scrollContainer.style.scrollBehavior || ''
+            scrollContainer.style.scrollBehavior = 'auto'
+            
+            // Set scroll position immediately
+            scrollContainer.scrollTop = savedScrollTop
+            
+            // Use another requestAnimationFrame to ensure DOM is fully laid out
+            requestAnimationFrame(() => {
+              if (!editor || editor.isDestroyed || !scrollContainer) return
+              scrollContainer.style.scrollBehavior = 'auto'
+              scrollContainer.scrollTop = savedScrollTop
+              
+              // Restore original scroll behavior after a short delay
+              setTimeout(() => {
+                if (scrollContainer) {
+                  scrollContainer.style.scrollBehavior = originalScrollBehavior || ''
+                }
+              }, 100)
+            })
+          }
+        }
+      } catch (error) {
+        // Ignore errors when setting scroll position
+      }
+    })
+    
     // If this is the active editor, update EditorContext using requestAnimationFrame
     // This ensures toolbar gets the editor smoothly without flash when a new file is created
     if (activeTabId === docId) {
@@ -2789,8 +2827,17 @@ export default function Layout(): JSX.Element {
               scrollContainer.style.scrollBehavior = 'auto'
               
               // Set scroll position BEFORE setting content to prevent any scroll animation
+              // Use requestAnimationFrame to ensure this happens before browser paints
               if (savedScrollTop !== null && savedScrollTop > 0) {
+                // Set immediately
                 scrollContainer.scrollTop = savedScrollTop
+                // Also set in next frame to ensure it sticks after content renders
+                requestAnimationFrame(() => {
+                  if (scrollContainer && !isCancelled) {
+                    scrollContainer.style.scrollBehavior = 'auto'
+                    scrollContainer.scrollTop = savedScrollTop
+                  }
+                })
               } else if (isNewTab) {
                 scrollContainer.scrollTop = 0
               }
@@ -3242,8 +3289,17 @@ export default function Layout(): JSX.Element {
               scrollContainer.style.scrollBehavior = 'auto'
               
               // Set scroll position BEFORE setting content to prevent any scroll animation
+              // Use requestAnimationFrame to ensure this happens before browser paints
               if (savedScrollTop !== null && savedScrollTop > 0) {
+                // Set immediately
                 scrollContainer.scrollTop = savedScrollTop
+                // Also set in next frame to ensure it sticks after content renders
+                requestAnimationFrame(() => {
+                  if (scrollContainer && !isCancelled) {
+                    scrollContainer.style.scrollBehavior = 'auto'
+                    scrollContainer.scrollTop = savedScrollTop
+                  }
+                })
               } else if (isNewTab) {
                 scrollContainer.scrollTop = 0
               }
@@ -3686,8 +3742,17 @@ export default function Layout(): JSX.Element {
               scrollContainer.style.scrollBehavior = 'auto'
               
               // Set scroll position BEFORE setting content to prevent any scroll animation
+              // Use requestAnimationFrame to ensure this happens before browser paints
               if (savedScrollTop !== null && savedScrollTop > 0) {
+                // Set immediately
                 scrollContainer.scrollTop = savedScrollTop
+                // Also set in next frame to ensure it sticks after content renders
+                requestAnimationFrame(() => {
+                  if (scrollContainer && !isCancelled) {
+                    scrollContainer.style.scrollBehavior = 'auto'
+                    scrollContainer.scrollTop = savedScrollTop
+                  }
+                })
               } else if (isNewTab) {
                 scrollContainer.scrollTop = 0
               }
@@ -4139,8 +4204,17 @@ export default function Layout(): JSX.Element {
               scrollContainer.style.scrollBehavior = 'auto'
               
               // Set scroll position BEFORE setting content to prevent any scroll animation
+              // Use requestAnimationFrame to ensure this happens before browser paints
               if (savedScrollTop !== null && savedScrollTop > 0) {
+                // Set immediately
                 scrollContainer.scrollTop = savedScrollTop
+                // Also set in next frame to ensure it sticks after content renders
+                requestAnimationFrame(() => {
+                  if (scrollContainer && !isCancelled) {
+                    scrollContainer.style.scrollBehavior = 'auto'
+                    scrollContainer.scrollTop = savedScrollTop
+                  }
+                })
               } else if (isNewTab) {
                 scrollContainer.scrollTop = 0
               }
@@ -4905,12 +4979,7 @@ export default function Layout(): JSX.Element {
             
             {/* File Explorer Content */}
             <div style={{ flex: 1, overflow: 'hidden', backgroundColor: bgColor, padding: 0, margin: 0 }}>
-              {(() => {
-                if (isLoadingDocuments) {
-                  return <FileExplorerSkeleton projectName={projectName} />
-                }
-                return (
-                  <FileExplorer
+              <FileExplorer
                   documents={documents}
                   currentDocumentId={document?.id || null}
                   onDocumentClick={handleDocumentClick}
@@ -5006,8 +5075,6 @@ export default function Layout(): JSX.Element {
                     }
                   }}
                 />
-                )
-              })()}
             </div>
           </div>
         </Panel>
@@ -5033,11 +5100,7 @@ export default function Layout(): JSX.Element {
           } 
           minSize={40}
         >
-          {isLoadingDocument && !document ? (
-            // Show skeleton in editor area when loading first document
-            <DocumentEditorSkeleton />
-          ) : (
-            <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+          <div style={{ width: '100%', height: '100%', position: 'relative' }}>
               {/* Render all PDF Viewers for open PDF tabs, but only show the active one */}
               {openTabs
                 .filter(tab => tab.title.toLowerCase().endsWith('.pdf'))
@@ -5100,7 +5163,6 @@ export default function Layout(): JSX.Element {
                 })}
               
             </div>
-          )}
         </Panel>
         {isAIPanelOpen && (
           <>

@@ -686,16 +686,23 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         // Reset notification flag if chat already has messages
         hasNotifiedFirstMessage.current = messages.length > 0
         
-        // Restore scroll position after messages are loaded
-        const savedScrollPosition = scrollPositionsRef.current.get(chatId)
-        if (savedScrollPosition !== undefined && scrollContainerRef.current) {
-          // Use requestAnimationFrame to ensure DOM is fully updated
-          requestAnimationFrame(() => {
-            if (scrollContainerRef.current) {
-              scrollContainerRef.current.scrollTop = savedScrollPosition
-            }
-          })
-        }
+        // Always scroll to bottom when opening a chat
+        // Use requestAnimationFrame to ensure DOM is fully updated before scrolling
+        requestAnimationFrame(() => {
+          if (messagesEndRef.current && scrollContainerRef.current) {
+            // Use instant scroll (auto) for immediate positioning, then smooth if needed
+            messagesEndRef.current.scrollIntoView({ behavior: 'auto' })
+            // Also ensure scroll container is at bottom
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
+          }
+        })
+        // Double-check with another frame to ensure it sticks
+        requestAnimationFrame(() => {
+          if (messagesEndRef.current && scrollContainerRef.current) {
+            messagesEndRef.current.scrollIntoView({ behavior: 'auto' })
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
+          }
+        })
       } catch (error) {
         console.error('Failed to load chat messages:', error)
         setMessages([])
