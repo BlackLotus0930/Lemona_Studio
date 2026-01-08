@@ -214,12 +214,39 @@ export async function indexLibraryFile(
       console.log(`[Indexing] Indexing library document ${documentId} with projectId: ${projectId}`)
       console.log(`[Indexing] Index strategy: PROJECT-ISOLATED library index (${projectId}/library)`)
       
+      // 📌 Check if document was deleted before indexing
+      // If deleted, skip indexing (cleanup will handle it)
+      const currentDocument = await documentService.getById(documentId)
+      if (!currentDocument || currentDocument.deleted === true) {
+        console.log(`[Indexing] Skipping indexing for deleted document: ${documentId}`)
+        const skippedStatus: IndexingStatus = {
+          documentId,
+          status: 'error',
+          error: 'Document was deleted',
+        }
+        await saveIndexingStatus(skippedStatus)
+        return skippedStatus
+      }
+      
       // 📌 Acquire write lock at transaction boundary for entire indexing operation
       // VectorStore is a "database kernel" - it doesn't manage locks
       const projectLockManager = getProjectLockManager()
       const releaseLock = await projectLockManager.acquireWriteLock(projectId)
       
       try {
+        // Double-check document wasn't deleted while waiting for lock
+        const documentAfterLock = await documentService.getById(documentId)
+        if (!documentAfterLock || documentAfterLock.deleted === true) {
+          console.log(`[Indexing] Document ${documentId} was deleted while waiting for lock, skipping indexing`)
+          const skippedStatus: IndexingStatus = {
+            documentId,
+            status: 'error',
+            error: 'Document was deleted',
+          }
+          await saveIndexingStatus(skippedStatus)
+          return skippedStatus
+        }
+        
         const vectorStore = getVectorStore(projectId, 'library')
         // Load index - we hold write lock
         await vectorStore.loadIndexUnsafe()

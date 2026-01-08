@@ -2575,9 +2575,16 @@ export default function Layout(): JSX.Element {
                 })
                 
                 // Update current document if it's the active one
+                // IMPORTANT: Preserve the current document's content to avoid overwriting unsaved changes
+                // Only update the title, not the entire document object
                 setDocument(prevDoc => {
                   if (prevDoc?.id === docId) {
-                    return updatedDocument
+                    // Preserve current content to avoid overwriting editor content that hasn't been saved yet
+                    return {
+                      ...prevDoc,
+                      title: titleCandidate,
+                      updatedAt: new Date().toISOString()
+                    }
                   }
                   return prevDoc
                 })

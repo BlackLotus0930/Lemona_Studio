@@ -216,33 +216,60 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       requestAnimationFrame(() => {
         if (!scrollContainerRef.current || !editor || editor.isDestroyed || !editor.view) return
         
-        // Get ProseMirror coordinates first (more reliable for text selections)
-        const startCoords = editor.view.coordsAtPos(from)
-        const endCoords = editor.view.coordsAtPos(to)
+        // Re-read selection positions inside requestAnimationFrame to ensure they're still valid
+        // This prevents "Position out of range" errors when document changes during async operations
+        const currentSelection = editor.state.selection
+        const currentFrom = currentSelection.from
+        const currentTo = currentSelection.to
         
-        // Try DOM selection, but validate it's not suspiciously wide (drag selection edge case)
-        const domSelection = window.getSelection()
-        if (domSelection && domSelection.rangeCount > 0) {
-          const domRange = domSelection.getRangeAt(0)
-          const rect = domRange.getBoundingClientRect()
-          
-          // Check if DOM selection rect is valid and not suspiciously wide
-          // If rect.right is too close to screen edge (within 50px), it's likely a drag selection
-          // spanning full width, so prefer ProseMirror coordinates instead
-          const screenWidth = window.innerWidth
-          const isNearRightEdge = rect.right >= screenWidth - 50
-          const isSuspiciouslyWide = rect.width > screenWidth * 0.8 // More than 80% of screen width
-          
-          if ((rect.width > 0 || rect.height > 0) && !isNearRightEdge && !isSuspiciouslyWide) {
-            // DOM selection looks good, use it
-            setPopupPosition({ x: rect.right + 8, y: rect.top - 4 })
-            return
-          }
+        // Validate positions are within document bounds
+        const docSize = editor.state.doc.content.size
+        if (currentFrom < 0 || currentTo < 0 || currentFrom > docSize || currentTo > docSize) {
+          // Selection is invalid, hide popup
+          setShowRephrasePopup(false)
+          return
         }
         
-        // Use ProseMirror coordinates (more reliable, especially for drag selections)
-        if (startCoords && endCoords) {
-          setPopupPosition({ x: endCoords.right + 8, y: startCoords.top - 4 })
+        if (currentFrom === currentTo) {
+          // Selection became empty, hide popup
+          setShowRephrasePopup(false)
+          return
+        }
+        
+        try {
+          // Get ProseMirror coordinates first (more reliable for text selections)
+          const startCoords = editor.view.coordsAtPos(currentFrom)
+          const endCoords = editor.view.coordsAtPos(currentTo)
+          
+          // Try DOM selection, but validate it's not suspiciously wide (drag selection edge case)
+          const domSelection = window.getSelection()
+          if (domSelection && domSelection.rangeCount > 0) {
+            const domRange = domSelection.getRangeAt(0)
+            const rect = domRange.getBoundingClientRect()
+            
+            // Check if DOM selection rect is valid and not suspiciously wide
+            // If rect.right is too close to screen edge (within 50px), it's likely a drag selection
+            // spanning full width, so prefer ProseMirror coordinates instead
+            const screenWidth = window.innerWidth
+            const isNearRightEdge = rect.right >= screenWidth - 50
+            const isSuspiciouslyWide = rect.width > screenWidth * 0.8 // More than 80% of screen width
+            
+            if ((rect.width > 0 || rect.height > 0) && !isNearRightEdge && !isSuspiciouslyWide) {
+              // DOM selection looks good, use it
+              setPopupPosition({ x: rect.right + 8, y: rect.top - 4 })
+              return
+            }
+          }
+          
+          // Use ProseMirror coordinates (more reliable, especially for drag selections)
+          if (startCoords && endCoords) {
+            setPopupPosition({ x: endCoords.right + 8, y: startCoords.top - 4 })
+          }
+        } catch (error) {
+          // Handle position out of range errors gracefully
+          // This can happen during paste operations or document updates
+          console.warn('[DocumentEditor] Error updating popup position:', error)
+          setShowRephrasePopup(false)
         }
       })
     }
@@ -346,11 +373,18 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           range: { from, to }
         }
         
-        // 计算位置
-        const startCoords = currentEditor.view.coordsAtPos(from)
-        const endCoords = currentEditor.view.coordsAtPos(to)
-        if (startCoords && endCoords) {
-          setPopupPosition({ x: endCoords.right + 8, y: startCoords.top - 4 })
+        // 计算位置 - 验证位置有效性
+        try {
+          const docSize = currentEditor.state.doc.content.size
+          if (from >= 0 && to >= 0 && from <= docSize && to <= docSize) {
+            const startCoords = currentEditor.view.coordsAtPos(from)
+            const endCoords = currentEditor.view.coordsAtPos(to)
+            if (startCoords && endCoords) {
+              setPopupPosition({ x: endCoords.right + 8, y: startCoords.top - 4 })
+            }
+          }
+        } catch (error) {
+          console.warn('[DocumentEditor] Error calculating popup position for Ctrl+K:', error)
         }
         
         // 打开 popup
@@ -715,15 +749,25 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       // Scroll to match
       setTimeout(() => {
         if (editor.isDestroyed || !editor.view) return
-        const coords = editor.view.coordsAtPos(match.from)
-        if (coords && scrollContainerRef.current) {
-          const container = scrollContainerRef.current
-          const containerRect = container.getBoundingClientRect()
-          const matchY = coords.top - containerRect.top + container.scrollTop
-          const viewportHeight = container.clientHeight
-          const targetY = matchY - viewportHeight * 0.3 // Position at 30% from top
-          
-          container.scrollTop = Math.max(0, targetY)
+        try {
+          // Validate position is within document bounds
+          const docSize = editor.state.doc.content.size
+          if (match.from < 0 || match.from > docSize) {
+            console.warn('[DocumentEditor] Match position out of range:', match.from)
+            return
+          }
+          const coords = editor.view.coordsAtPos(match.from)
+          if (coords && scrollContainerRef.current) {
+            const container = scrollContainerRef.current
+            const containerRect = container.getBoundingClientRect()
+            const matchY = coords.top - containerRect.top + container.scrollTop
+            const viewportHeight = container.clientHeight
+            const targetY = matchY - viewportHeight * 0.3 // Position at 30% from top
+            
+            container.scrollTop = Math.max(0, targetY)
+          }
+        } catch (error) {
+          console.warn('[DocumentEditor] Error scrolling to match:', error)
         }
       }, 50)
     } catch (error) {
@@ -1658,6 +1702,94 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
               from: domPos, 
               to: domPos + text.length 
             }).run()
+          }
+        }}
+        onDragOver={(e) => {
+          // Allow drop by preventing default
+          e.preventDefault()
+          e.stopPropagation()
+          
+          // Add visual feedback (optional - can add a class for styling)
+          if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = 'copy'
+          }
+        }}
+        onDragLeave={(e) => {
+          // Remove visual feedback when leaving drop zone
+          e.preventDefault()
+          e.stopPropagation()
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          
+          if (!editor || editor.isDestroyed || !editor.view) return
+          
+          const files = e.dataTransfer.files
+          if (!files || files.length === 0) return
+          
+          // Filter for image files
+          const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'))
+          if (imageFiles.length === 0) return
+          
+          // Get cursor position at drop coordinates
+          const dropX = e.clientX
+          const dropY = e.clientY
+          
+          try {
+            // Get position at drop coordinates
+            const coords = { left: dropX, top: dropY }
+            const posResult = editor.view.posAtCoords(coords)
+            
+            // If we can't get position from coordinates, use current selection
+            const insertPos = posResult ? posResult.pos : editor.state.selection.from
+            
+            // Set cursor position first
+            editor.chain().focus().setTextSelection(insertPos).run()
+            
+            // Process images sequentially to insert them one after another
+            let processedCount = 0
+            const processNextImage = () => {
+              if (processedCount >= imageFiles.length) {
+                // All images processed, add a paragraph at the end for cursor placement
+                editor.chain().focus().insertContent('<p></p>').run()
+                return
+              }
+              
+              const file = imageFiles[processedCount]
+              const reader = new FileReader()
+              reader.onload = (event) => {
+                const dataUrl = event.target?.result as string
+                if (dataUrl) {
+                  // Insert image at current cursor position
+                  editor.chain()
+                    .focus()
+                    .setImage({ src: dataUrl })
+                    .run()
+                  
+                  // Move cursor after the inserted image and process next image
+                  processedCount++
+                  // Small delay to ensure the image is inserted before processing next
+                  setTimeout(() => {
+                    processNextImage()
+                  }, 50)
+                } else {
+                  processedCount++
+                  processNextImage()
+                }
+              }
+              reader.onerror = (error) => {
+                console.error('Error reading image file:', error)
+                processedCount++
+                processNextImage()
+              }
+              reader.readAsDataURL(file)
+            }
+            
+            // Start processing images
+            processNextImage()
+          } catch (error) {
+            console.error('Error handling image drop:', error)
           }
         }}
       >

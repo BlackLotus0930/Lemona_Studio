@@ -194,6 +194,9 @@ app.whenReady().then(async () => {
   // Validate index integrity for all projects
   await validateAllIndexes();
   
+  // Start background cleanup service for deleted documents
+  documentService.startDeletedDocumentsCleanupService();
+
   // Then create window
   createWindow();
 
@@ -202,6 +205,11 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
+});
+
+// Stop background services on app quit
+app.on('before-quit', () => {
+  documentService.stopDeletedDocumentsCleanupService();
 });
 
 /**

@@ -23,6 +23,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { existsSync } from 'fs'
 import { Document } from '../../../shared/types.js'
+import { app } from 'electron'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -217,18 +218,23 @@ function tipTapToHTML(content: any): string {
 
     if (node.type === 'image') {
       let src = node.attrs?.src || ''
+      // Check for data-document-src attribute (set by ResizableImage renderHTML)
+      const documentSrc = node.attrs?.['data-document-src'] || ''
+      const actualSrc = documentSrc || src
       const alt = node.attrs?.alt || ''
       const width = node.attrs?.width
       const height = node.attrs?.height
       
       // Check image source type
-      const srcType = src.startsWith('data:') ? 'data-url' :
-                     src.startsWith('blob:') ? 'blob-url' :
-                     src.startsWith('http://') || src.startsWith('https://') ? 'http-url' :
-                     src.startsWith('file://') ? 'file-url' : 'unknown'
+      const srcType = actualSrc.startsWith('data:') ? 'data-url' :
+                     actualSrc.startsWith('blob:') ? 'blob-url' :
+                     actualSrc.startsWith('http://') || actualSrc.startsWith('https://') ? 'http-url' :
+                     actualSrc.startsWith('file://') ? 'file-url' :
+                     actualSrc.startsWith('document://') ? 'document-url' : 'unknown'
       
-      // Handle blob URLs - these won't work in Puppeteer
-      // Keep the blob URL but it likely won't load - this is a limitation
+      // For document:// URLs, we'll keep them as-is in HTML
+      // They will be handled by preprocessing before export or by the browser
+      // Note: Puppeteer won't be able to load document:// URLs, so preprocessing is needed
       
       // Build style attributes for responsive image display
       const imgStyles: string[] = []
@@ -246,8 +252,10 @@ function tipTapToHTML(content: any): string {
       
       // Add data attribute to track image loading
       const dataTypeAttr = ` data-img-type="${srcType}"`
+      // Store document:// URL in data attribute if present
+      const dataDocumentSrcAttr = actualSrc.startsWith('document://') ? ` data-document-src="${escapeHTML(actualSrc)}"` : ''
       
-      return `<img src="${src}"${altAttr}${widthAttr}${heightAttr}${styleAttr}${dataTypeAttr} />`
+      return `<img src="${src}"${altAttr}${widthAttr}${heightAttr}${styleAttr}${dataTypeAttr}${dataDocumentSrcAttr} />`
     }
 
     if (node.type === 'chart') {
@@ -673,7 +681,10 @@ export const exportService = {
       throw new Error('Document not found')
     }
 
-    const content = JSON.parse(document.content)
+    let content = JSON.parse(document.content)
+    
+    // Preprocess content to convert document:// URLs to data URLs
+    content = await preprocessContentForExport(content)
 
     if (format === 'pdf') {
       return this.exportToPDF(document.title, content)
@@ -688,14 +699,20 @@ export const exportService = {
       throw new Error('No documents selected')
     }
 
-    // Load all documents
+    // Load all documents and preprocess content
     const documents: Document[] = []
     for (const id of documentIds) {
       const doc = await documentService.getById(id)
       if (!doc) {
         throw new Error(`Document not found: ${id}`)
       }
-      documents.push(doc)
+      // Preprocess content to convert document:// URLs to data URLs
+      const content = JSON.parse(doc.content)
+      const processedContent = await preprocessContentForExport(content)
+      documents.push({
+        ...doc,
+        content: JSON.stringify(processedContent)
+      })
     }
 
     // Sort by order field
@@ -1087,8 +1104,15 @@ export const exportService = {
       } else if (node.type === 'image') {
         // Standalone image node
         const src = node.attrs?.src || ''
-        if (src.startsWith('data:image/')) {
-          const imageData = base64ToBuffer(src)
+        // After preprocessing, document:// URLs should be converted to data URLs
+        // But we also check for data-document-src as fallback
+        const documentSrc = node.attrs?.['data-document-src'] || ''
+        const actualSrc = documentSrc || src
+        
+        // Handle data URLs (including converted document:// URLs)
+        if (actualSrc.startsWith('data:image/') || src.startsWith('data:image/')) {
+          const imageSrcToUse = actualSrc.startsWith('data:image/') ? actualSrc : src
+          const imageData = base64ToBuffer(imageSrcToUse)
           if (imageData) {
             const width = node.attrs?.width || imageData.width
             const height = node.attrs?.height || imageData.height

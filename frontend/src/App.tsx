@@ -12,8 +12,13 @@ function RouteRestorer() {
   const [hasRestored, setHasRestored] = useState(false)
 
   useEffect(() => {
-    // Only restore on initial load (when at root or documents page)
-    if (hasRestored || (location.pathname !== '/' && location.pathname !== '/documents')) {
+    // Check if we've already restored in this session
+    const sessionRestoredKey = 'routeRestorer_hasRestored'
+    const hasRestoredThisSession = sessionStorage.getItem(sessionRestoredKey) === 'true'
+    
+    // Only restore on initial app load (when at root), not when user navigates to /documents
+    // This prevents restoring when user clicks Home button
+    if (hasRestored || hasRestoredThisSession || location.pathname !== '/') {
       return
     }
 
@@ -27,6 +32,7 @@ function RouteRestorer() {
             // Navigate to the last opened document
             navigate(`/document/${lastDocumentId}`, { replace: true })
             setHasRestored(true)
+            sessionStorage.setItem(sessionRestoredKey, 'true')
             return
           } else {
             // Document doesn't exist anymore, clear the saved ID
@@ -39,6 +45,7 @@ function RouteRestorer() {
         localStorage.removeItem('lastOpenedDocument')
       }
       setHasRestored(true)
+      sessionStorage.setItem(sessionRestoredKey, 'true')
     }
 
     restoreLastDocument()

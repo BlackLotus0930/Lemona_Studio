@@ -18,12 +18,15 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
   // Load image from document:// reference if needed
   useEffect(() => {
     const src = node.attrs.src || ''
+    // Also check for data-document-src attribute (set by renderHTML when filtering document:// URLs)
+    const documentSrc = (node.attrs as any)['data-document-src'] || ''
+    const actualSrc = documentSrc || src
     
     // Don't set document:// URLs directly - they violate CSP
-    if (src.startsWith('document://')) {
+    if (actualSrc.startsWith('document://')) {
       setIsLoading(true)
       // Parse document://documentId/image/imageId
-      const match = src.match(/^document:\/\/([^/]+)\/image\/(.+)$/)
+      const match = actualSrc.match(/^document:\/\/([^/]+)\/image\/(.+)$/)
       if (match) {
         const documentId = match[1]
         const imageId = match[2]
@@ -71,14 +74,17 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
       }
     } else if (src.startsWith('data:') || src.startsWith('blob:') || src.startsWith('http')) {
       // Direct data/blob/http URLs are fine
-      setImageSrc(src)
-      setIsLoading(false)
+      // Skip placeholder SVG if we have a document:// URL stored in data-document-src
+      if (!documentSrc || !src.includes('data:image/svg+xml')) {
+        setImageSrc(src)
+        setIsLoading(false)
+      }
     } else {
       // Empty or invalid URL
       setImageSrc('')
       setIsLoading(false)
     }
-  }, [node.attrs.src])
+  }, [node.attrs.src, (node.attrs as any)['data-document-src']])
 
   // Cleanup blob URL on unmount
   useEffect(() => {
@@ -428,6 +434,26 @@ export const ResizableImage = Image.extend({
         },
       },
     }
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    // Filter out document:// URLs to prevent CSP violations
+    // These URLs are handled by ReactNodeViewRenderer in the component
+    const src = HTMLAttributes.src || ''
+    if (src.startsWith('document://')) {
+      // Return a placeholder data URL instead of document:// URL
+      // This prevents CSP violations when TipTap renders HTML (e.g., copy/paste, export)
+      return [
+        'img',
+        {
+          ...HTMLAttributes,
+          src: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2Y1ZjVmNSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5JbWFnZTwvdGV4dD48L3N2Zz4=',
+          'data-document-src': src, // Store original URL as data attribute for component to use
+        },
+      ]
+    }
+    // For other URLs (data:, blob:, http:, https:), use parent's renderHTML
+    return ['img', HTMLAttributes]
   },
 
   addNodeView() {
