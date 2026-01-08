@@ -530,38 +530,254 @@ export default function DocumentList() {
           margin: '0 auto',
           padding: '28px 24px',
         }}>
-        {/* Header */}
+        {/* Fancy Header */}
         <div style={{
-          marginBottom: '28px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          marginBottom: '48px',
+          position: 'relative',
+          overflow: 'hidden',
         }}>
-          <div>
-            <style>{`
-              @keyframes gradient-flow {
-                0% {
-                  background-position: 0% 50%;
-                }
-                50% {
-                  background-position: 100% 50%;
-                }
-                100% {
-                  background-position: 0% 50%;
-                }
+          <style>{`
+            @keyframes gradient-flow {
+              0% {
+                background-position: 0% 50%;
               }
-            `}</style>
-            <h1 style={{ 
-              fontSize: '26px', 
-              fontWeight: 600, 
-              color: textColor,
-              margin: 0,
-              marginBottom: '4px',
-              fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-            } as React.CSSProperties}>
-              Projects
-            </h1>
+              50% {
+                background-position: 100% 50%;
+              }
+              100% {
+                background-position: 0% 50%;
+              }
+            }
+            @keyframes float {
+              0%, 100% {
+                transform: translateY(0px) rotate(0deg);
+              }
+              50% {
+                transform: translateY(-20px) rotate(5deg);
+              }
+            }
+            @keyframes shimmer {
+              0% {
+                background-position: -200% center;
+              }
+              100% {
+                background-position: 200% center;
+              }
+            }
+            @keyframes glow-pulse {
+              0%, 100% {
+                opacity: 0.5;
+                transform: scale(1);
+              }
+              50% {
+                opacity: 0.8;
+                transform: scale(1.05);
+              }
+            }
+            @keyframes text-shimmer {
+              0% {
+                background-position: -200% center;
+              }
+              100% {
+                background-position: 200% center;
+              }
+            }
+            @keyframes fade-in-up {
+              from {
+                opacity: 0;
+                transform: translateY(20px);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+            @keyframes particle-float {
+              0%, 100% {
+                transform: translate(0, 0) scale(1);
+                opacity: 0.3;
+              }
+              50% {
+                transform: translate(20px, -30px) scale(1.2);
+                opacity: 0.6;
+              }
+            }
+          `}</style>
+          
+          {/* Animated background gradient */}
+          <div style={{
+            position: 'absolute',
+            top: '-50%',
+            left: '-50%',
+            width: '200%',
+            height: '200%',
+            background: theme === 'dark'
+              ? 'radial-gradient(circle at 30% 50%, rgba(244, 114, 182, 0.15) 0%, transparent 50%), radial-gradient(circle at 70% 50%, rgba(59, 130, 246, 0.1) 0%, transparent 50%)'
+              : 'radial-gradient(circle at 30% 50%, rgba(244, 114, 182, 0.08) 0%, transparent 50%), radial-gradient(circle at 70% 50%, rgba(59, 130, 246, 0.06) 0%, transparent 50%)',
+            animation: 'float 20s ease-in-out infinite',
+            pointerEvents: 'none',
+          }} />
+          
+          {/* Floating particles */}
+          {[...Array(6)].map((_, i) => (
+            <div
+              key={i}
+              style={{
+                position: 'absolute',
+                width: `${4 + i * 2}px`,
+                height: `${4 + i * 2}px`,
+                borderRadius: '50%',
+                background: theme === 'dark'
+                  ? `rgba(${244 - i * 10}, ${114 - i * 5}, ${182 - i * 8}, 0.4)`
+                  : `rgba(${244 - i * 10}, ${114 - i * 5}, ${182 - i * 8}, 0.2)`,
+                top: `${20 + i * 15}%`,
+                left: `${10 + i * 12}%`,
+                animation: `particle-float ${8 + i * 2}s ease-in-out infinite`,
+                animationDelay: `${i * 0.5}s`,
+                filter: 'blur(1px)',
+                pointerEvents: 'none',
+              }}
+            />
+          ))}
+          
+          {/* Main header content */}
+          <div style={{
+            position: 'relative',
+            zIndex: 1,
+            padding: '40px 0',
+            animation: 'fade-in-up 1s ease-out',
+          }}>
+            {/* Greeting line */}
+            <div style={{
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+            }}>
+              <div style={{
+                fontSize: '18px',
+                fontWeight: 500,
+                color: secondaryTextColor,
+                fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                letterSpacing: '0.5px',
+                animation: 'fade-in-up 1s ease-out 0.2s both',
+              }}>
+                Hi, I'm
+              </div>
+              <div style={{
+                fontSize: '32px',
+                fontWeight: 700,
+                background: theme === 'dark'
+                  ? 'linear-gradient(135deg, #f472b6 0%, #ec4899 25%, #f59e0b 50%, #3b82f6 75%, #8b5cf6 100%)'
+                  : 'linear-gradient(135deg, #ec4899 0%, #f472b6 25%, #f59e0b 50%, #3b82f6 75%, #8b5cf6 100%)',
+                backgroundSize: '200% 200%',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                animation: 'gradient-flow 8s ease infinite, fade-in-up 1s ease-out 0.3s both',
+                fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                letterSpacing: '-0.5px',
+                position: 'relative',
+                display: 'inline-block',
+              }}>
+                Yinfan
+                {/* Glow effect */}
+                <div style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: theme === 'dark'
+                    ? 'linear-gradient(135deg, rgba(244, 114, 182, 0.3) 0%, rgba(59, 130, 246, 0.3) 100%)'
+                    : 'linear-gradient(135deg, rgba(236, 72, 153, 0.2) 0%, rgba(59, 130, 246, 0.2) 100%)',
+                  filter: 'blur(12px)',
+                  zIndex: -1,
+                  animation: 'glow-pulse 3s ease-in-out infinite',
+                  opacity: 0.6,
+                }} />
+              </div>
+            </div>
+            
+            {/* Tagline lines */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+            }}>
+              <div style={{
+                fontSize: '20px',
+                fontWeight: 600,
+                color: textColor,
+                fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                letterSpacing: '-0.3px',
+                animation: 'fade-in-up 1s ease-out 0.4s both',
+                position: 'relative',
+                display: 'inline-block',
+                width: 'fit-content',
+              }}>
+                Building product-oriented software
+                {/* Underline effect */}
+                <div style={{
+                  position: 'absolute',
+                  bottom: '-4px',
+                  left: 0,
+                  right: 0,
+                  height: '3px',
+                  background: theme === 'dark'
+                    ? 'linear-gradient(90deg, rgba(244, 114, 182, 0.6) 0%, rgba(59, 130, 246, 0.6) 100%)'
+                    : 'linear-gradient(90deg, rgba(236, 72, 153, 0.4) 0%, rgba(59, 130, 246, 0.4) 100%)',
+                  borderRadius: '2px',
+                  animation: 'shimmer 3s ease-in-out infinite',
+                  backgroundSize: '200% 100%',
+                }} />
+              </div>
+              
+              <div style={{
+                fontSize: '16px',
+                fontWeight: 400,
+                color: secondaryTextColor,
+                fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                letterSpacing: '0.2px',
+                animation: 'fade-in-up 1s ease-out 0.5s both',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}>
+                <span>Local-first</span>
+                <span style={{
+                  display: 'inline-block',
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  background: theme === 'dark' ? 'rgba(244, 114, 182, 0.6)' : 'rgba(236, 72, 153, 0.5)',
+                  animation: 'glow-pulse 2s ease-in-out infinite',
+                }} />
+                <span>AI tools</span>
+                <span style={{
+                  display: 'inline-block',
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  background: theme === 'dark' ? 'rgba(59, 130, 246, 0.6)' : 'rgba(59, 130, 246, 0.5)',
+                  animation: 'glow-pulse 2s ease-in-out infinite 0.5s',
+                }} />
+                <span>& desktop applications</span>
+              </div>
+            </div>
           </div>
+          
+          {/* Decorative border */}
+          <div style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: '1px',
+            background: theme === 'dark'
+              ? 'linear-gradient(90deg, transparent 0%, rgba(244, 114, 182, 0.3) 20%, rgba(59, 130, 246, 0.3) 80%, transparent 100%)'
+              : 'linear-gradient(90deg, transparent 0%, rgba(236, 72, 153, 0.2) 20%, rgba(59, 130, 246, 0.2) 80%, transparent 100%)',
+          }} />
         </div>
 
         {/* Floating + button at bottom-right */}
