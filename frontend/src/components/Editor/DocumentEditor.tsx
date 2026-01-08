@@ -216,22 +216,31 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       requestAnimationFrame(() => {
         if (!scrollContainerRef.current || !editor || editor.isDestroyed || !editor.view) return
         
-        // Try DOM selection first
+        // Get ProseMirror coordinates first (more reliable for text selections)
+        const startCoords = editor.view.coordsAtPos(from)
+        const endCoords = editor.view.coordsAtPos(to)
+        
+        // Try DOM selection, but validate it's not suspiciously wide (drag selection edge case)
         const domSelection = window.getSelection()
         if (domSelection && domSelection.rangeCount > 0) {
           const domRange = domSelection.getRangeAt(0)
           const rect = domRange.getBoundingClientRect()
           
-          if (rect.width > 0 || rect.height > 0) {
+          // Check if DOM selection rect is valid and not suspiciously wide
+          // If rect.right is too close to screen edge (within 50px), it's likely a drag selection
+          // spanning full width, so prefer ProseMirror coordinates instead
+          const screenWidth = window.innerWidth
+          const isNearRightEdge = rect.right >= screenWidth - 50
+          const isSuspiciouslyWide = rect.width > screenWidth * 0.8 // More than 80% of screen width
+          
+          if ((rect.width > 0 || rect.height > 0) && !isNearRightEdge && !isSuspiciouslyWide) {
+            // DOM selection looks good, use it
             setPopupPosition({ x: rect.right + 8, y: rect.top - 4 })
             return
           }
         }
         
-        // Fallback to ProseMirror coordinates
-        const startCoords = editor.view.coordsAtPos(from)
-        const endCoords = editor.view.coordsAtPos(to)
-        
+        // Use ProseMirror coordinates (more reliable, especially for drag selections)
         if (startCoords && endCoords) {
           setPopupPosition({ x: endCoords.right + 8, y: startCoords.top - 4 })
         }

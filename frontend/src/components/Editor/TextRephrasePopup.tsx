@@ -45,14 +45,15 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
   const activeButtonBg = theme === 'dark' ? '#2a2a2a' : '#e8f0fe'
   const activeButtonColor = theme === 'dark' ? '#4a9eff' : '#1a73e8'
 
-  // Adjust position only once when popup first opens (compact state)
+  // Adjust position when popup opens and update Y coordinate during drag selection
   useEffect(() => {
+    const screenWidth = window.innerWidth
+    const rightMargin = 25
+    const popupWidth = 120 // compact button width
+    const maxX = screenWidth - popupWidth - rightMargin
+    
     if (!positionLockedRef.current) {
-      const screenWidth = window.innerWidth
-      const rightMargin = 25
-      const popupWidth = 120 // compact button width
-      const maxX = screenWidth - popupWidth - rightMargin
-      
+      // First time: lock X position (right side) and set Y
       const adjustedX = Math.min(position.x, maxX)
       
       setAdjustedPosition({
@@ -60,8 +61,14 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
         y: position.y
       })
       
-      // Lock position after first calculation
+      // Lock X position after first calculation
       positionLockedRef.current = true
+    } else {
+      // After locked: keep X position but update Y to follow selection during drag
+      setAdjustedPosition(prev => ({
+        x: prev.x, // Keep X locked to right side
+        y: position.y // Update Y to follow selection
+      }))
     }
   }, [position])
 
