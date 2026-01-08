@@ -8,6 +8,20 @@ import { searchLibraryWithMentions } from './semanticSearchService.js'
 // Store API key instances per API key to allow multiple users
 const genAICache: Map<string, GoogleGenerativeAI> = new Map()
 
+// Get max output tokens for a model (20K for all models)
+function getMaxOutputTokens(modelName?: string): number {
+  return 20000 // 20K tokens for all models
+}
+
+// Get max context window for a model
+function getMaxContextWindow(modelName?: string): number {
+  const contextWindows: { [key: string]: number } = {
+    'gemini-3-flash-preview': 1048576,  // 1,048,576 tokens
+    'gemini-2.5-pro': 1048576,          // 1,048,576 tokens
+  }
+  return contextWindows[modelName || 'gemini-3-flash-preview'] || 1048576
+}
+
 function getModel(apiKey: string, modelName: string = 'gemini-3-flash-preview'): GenerativeModel {
   if (!apiKey) {
     throw new Error('Google API key is not configured. Please set it in Settings > API Keys.')
@@ -19,7 +33,12 @@ function getModel(apiKey: string, modelName: string = 'gemini-3-flash-preview'):
   }
   
   const genAI = genAICache.get(apiKey)!
-  return genAI.getGenerativeModel({ model: modelName })
+  return genAI.getGenerativeModel({ 
+    model: modelName,
+    generationConfig: {
+      maxOutputTokens: getMaxOutputTokens(modelName)
+    }
+  })
 }
 
 const SYSTEM_PROMPT = `You are Lemona's AI writing companion.
@@ -321,7 +340,17 @@ async function summarizeChatHistory(history: AIChatMessage[], targetTokens: numb
   // If API key is available, use AI to generate summary
   if (apiKey) {
     try {
-      const aiModel = getModel(apiKey, 'gemini-3-flash-preview')
+      // Create a model instance with 4K max output tokens for summarization
+      if (!genAICache.has(apiKey)) {
+        genAICache.set(apiKey, new GoogleGenerativeAI(apiKey))
+      }
+      const genAI = genAICache.get(apiKey)!
+      const aiModel = genAI.getGenerativeModel({ 
+        model: 'gemini-3-flash-preview',
+        generationConfig: {
+          maxOutputTokens: 4000 // 4K tokens for summarization
+        }
+      })
       const summaryPrompt = `You are a helpful assistant that summarizes conversation history concisely while preserving important context.
 
 Please provide a concise summary of the following conversation history. Focus on:
@@ -386,7 +415,10 @@ export const geminiService = {
         history: conversationHistory.slice(0, -1).map(msg => ({
           role: msg.role === 'user' ? 'user' : 'model',
           parts: [{ text: msg.content }]
-        }))
+        })),
+        generationConfig: {
+          maxOutputTokens: getMaxOutputTokens(modelName)
+        }
       })
       const result = await chat.sendMessage(message)
       const text = result.response.text()
@@ -515,7 +547,17 @@ export const geminiService = {
   },
 
   async batchQuestions(apiKey: string, questions: string[], documentContent?: string, projectId?: string, modelName?: string): Promise<AIQuestion[]> {
-    const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview')
+    // Create model with max output tokens configured
+    if (!genAICache.has(apiKey)) {
+      genAICache.set(apiKey, new GoogleGenerativeAI(apiKey))
+    }
+    const genAI = genAICache.get(apiKey)!
+    const aiModel = genAI.getGenerativeModel({ 
+      model: modelName || 'gemini-3-flash-preview',
+      generationConfig: {
+        maxOutputTokens: getMaxOutputTokens(modelName)
+      }
+    })
     const { systemInstruction } = await buildContext(documentContent, projectId, undefined, undefined, apiKey)
     const questionsText = questions.map((q, i) => `${i + 1}. ${q}`).join('\n')
     const prompt = `${systemInstruction}\n\nUser has the following questions. Please answer each one:\n\n${questionsText}\n\nPlease provide answers in a numbered list format.`
@@ -543,7 +585,17 @@ export const geminiService = {
     projectId?: string,
     modelName?: string
   ): Promise<AutocompleteSuggestion> {
-    const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview')
+    // Create model with max output tokens configured
+    if (!genAICache.has(apiKey)) {
+      genAICache.set(apiKey, new GoogleGenerativeAI(apiKey))
+    }
+    const genAI = genAICache.get(apiKey)!
+    const aiModel = genAI.getGenerativeModel({ 
+      model: modelName || 'gemini-3-flash-preview',
+      generationConfig: {
+        maxOutputTokens: getMaxOutputTokens(modelName)
+      }
+    })
     const { systemInstruction } = await buildContext(documentContent, projectId, undefined, undefined, apiKey)
     const beforeCursor = text.slice(0, cursorPosition)
     const afterCursor = text.slice(cursorPosition)

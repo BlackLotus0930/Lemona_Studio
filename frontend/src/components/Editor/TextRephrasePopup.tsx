@@ -438,6 +438,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
           : '0 8px 32px rgba(0, 0, 0, 0.12), 0 4px 16px rgba(0, 0, 0, 0.08)',
         zIndex: 10000,
         width: '360px',
+        maxHeight: '500px',
         fontFamily: 'system-ui, -apple-system, sans-serif',
         display: 'flex',
         flexDirection: 'column',
@@ -453,6 +454,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
         flexDirection: 'column',
         gap: '10px',
         backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fafafa',
+        flexShrink: 0,
       }}>
         {/* Four action buttons in a row */}
         <div style={{
@@ -618,7 +620,12 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
       </div>
 
       {/* Results */}
-      <div style={{ padding: '14px 12px' }}>
+      <div style={{ 
+        padding: '14px 12px 14px 18px',
+        overflowY: 'auto',
+        flex: 1,
+        minHeight: 0,
+      }}>
         {isLoading ? (
           <div
             style={{
@@ -649,16 +656,11 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
           <div>
             <div
               style={{
-                padding: '14px',
                 marginBottom: '14px',
                 fontSize: '13px',
                 color: textColor,
                 lineHeight: '1.7',
-                minHeight: '50px',
                 whiteSpace: 'pre-wrap',
-                backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa',
-                borderRadius: '8px',
-                border: `1px solid ${theme === 'dark' ? '#333' : '#e8eaed'}`,
               }}
             >
               {improvedText}

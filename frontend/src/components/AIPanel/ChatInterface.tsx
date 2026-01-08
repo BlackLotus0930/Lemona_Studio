@@ -78,11 +78,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [isInputFocused, setIsInputFocused] = useState(false)
   const [useWebSearch, setUseWebSearch] = useState(false)
   // Load saved model from localStorage, or use default
-  const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-2.5-pro' | 'gpt-5-nano' | 'gpt-5-mini' | 'gpt-5.2'>(() => {
+  const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-2.5-pro' | 'gpt-4.1-nano' | 'gpt-5-mini' | 'gpt-5.2'>(() => {
     try {
       const savedModel = localStorage.getItem('aiChatSelectedModel')
-      if (savedModel && ['gemini-3-flash-preview', 'gemini-2.5-pro', 'gpt-5-nano', 'gpt-5-mini', 'gpt-5.2'].includes(savedModel)) {
-        return savedModel as 'gemini-3-flash-preview' | 'gemini-2.5-pro' | 'gpt-5-nano' | 'gpt-5-mini' | 'gpt-5.2'
+      if (savedModel && ['gemini-3-flash-preview', 'gemini-2.5-pro', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2'].includes(savedModel)) {
+        return savedModel as 'gemini-3-flash-preview' | 'gemini-2.5-pro' | 'gpt-4.1-nano' | 'gpt-5-mini' | 'gpt-5.2'
       }
     } catch (error) {
       console.error('Failed to load saved model:', error)
@@ -201,12 +201,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     // If user has Gemini model selected but no Google key, switch to GPT
     else if ((selectedModel === 'gemini-3-flash-preview' || selectedModel === 'gemini-2.5-pro') && !hasGoogleKey) {
       if (hasOpenaiKey) {
-        setSelectedModel('gpt-5-nano')
+        setSelectedModel('gpt-4.1-nano')
       }
     }
     // If both keys are available and current model is invalid, default to Gemini 2.5 Flash
     else if (hasGoogleKey && hasOpenaiKey) {
-      if (!['gemini-3-flash-preview', 'gemini-2.5-pro', 'gpt-5-nano', 'gpt-5-mini', 'gpt-5.2'].includes(selectedModel)) {
+      if (!['gemini-3-flash-preview', 'gemini-2.5-pro', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2'].includes(selectedModel)) {
         setSelectedModel('gemini-3-flash-preview')
       }
     }
@@ -3233,7 +3233,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   title={
                     selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash Preview - Faster responses' :
                     selectedModel === 'gemini-2.5-pro' ? 'Gemini 3 Pro - More capable' :
-                    selectedModel === 'gpt-5-nano' ? 'GPT-5 Nano - Fast and efficient' :
+                    selectedModel === 'gpt-4.1-nano' ? 'GPT-4.1 Nano - Fast and efficient' :
                     selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini - Balanced performance' :
                     selectedModel === 'gpt-5.2' ? 'GPT-5.2 - Most capable' : ''
                   }
@@ -3241,7 +3241,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   <span>{
                     selectedModel === 'gemini-3-flash-preview' ? 'Flash 3' :
                     selectedModel === 'gemini-2.5-pro' ? 'Pro 3' :
-                    selectedModel === 'gpt-5-nano' ? 'GPT-5 Nano' :
+                    selectedModel === 'gpt-4.1-nano' ? 'GPT-4.1 Nano' :
                     selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini' :
                     selectedModel === 'gpt-5.2' ? 'GPT-5.2' : 'Flash 2.5'
                   }</span>
@@ -3372,16 +3372,16 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                           )}
                           <button
                             onClick={() => {
-                              setSelectedModel('gpt-5-nano')
+                              setSelectedModel('gpt-4.1-nano')
                               setShowModelDropdown(false)
                             }}
                             disabled={isLoading}
                             style={{
                               padding: '10px 14px',
-                              backgroundColor: selectedModel === 'gpt-5-nano' 
+                              backgroundColor: selectedModel === 'gpt-4.1-nano' 
                                 ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
                                 : 'transparent',
-                              color: selectedModel === 'gpt-5-nano'
+                              color: selectedModel === 'gpt-4.1-nano'
                                 ? (theme === 'dark' ? '#ffffff' : '#202124')
                                 : (theme === 'dark' ? '#d6d6d6' : '#202124'),
                               border: 'none',
@@ -3396,17 +3396,17 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               width: '100%'
                             }}
                             onMouseEnter={(e) => {
-                              if (!isLoading && selectedModel !== 'gpt-5-nano') {
+                              if (!isLoading && selectedModel !== 'gpt-4.1-nano') {
                                 e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
                               }
                             }}
                             onMouseLeave={(e) => {
-                              if (!isLoading && selectedModel !== 'gpt-5-nano') {
+                              if (!isLoading && selectedModel !== 'gpt-4.1-nano') {
                                 e.currentTarget.style.backgroundColor = 'transparent'
                               }
                             }}
                           >
-                            GPT-5 Nano
+                            GPT-4.1 Nano
                           </button>
                           
                           <button

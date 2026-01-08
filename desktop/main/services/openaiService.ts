@@ -92,11 +92,26 @@ function getClient(apiKey: string): OpenAI {
 // Map model names to OpenAI model identifiers
 function getModelName(modelName: string, hasAttachments?: boolean): string {
   const modelMap: { [key: string]: string } = {
-    'gpt-5-nano': 'gpt-5-nano',
+    'gpt-4.1-nano': 'gpt-4.1-nano',
     'gpt-5-mini': 'gpt-5-mini',
     'gpt-5.2': 'gpt-5.2',
   }
-  return modelMap[modelName] || 'gpt-5-nano'
+  return modelMap[modelName] || 'gpt-4.1-nano'
+}
+
+// Get max output tokens for a model (20K for all models)
+function getMaxOutputTokens(modelName?: string): number {
+  return 20000 // 20K tokens for all models
+}
+
+// Get max context window for a model (used for web search)
+function getMaxContextWindow(modelName?: string): number {
+  const contextWindows: { [key: string]: number } = {
+    'gpt-4.1-nano': 1000000,      // 1M tokens
+    'gpt-5-mini': 400000,         // 400K tokens
+    'gpt-5.2': 400000,            // 400K tokens
+  }
+  return contextWindows[modelName || 'gpt-4.1-nano'] || 1000000
 }
 
 // Check if model is a gpt-5 model (which has different API constraints)
@@ -436,7 +451,7 @@ ${historyText}
 Summary:`
 
       const completion = await client.chat.completions.create({
-        model: 'gpt-5-nano', // Use a lightweight model for summarization
+        model: 'gpt-4.1-nano', // Use a lightweight model for summarization
         messages: [
           {
             role: 'system',
@@ -447,7 +462,7 @@ Summary:`
             content: summaryPrompt
           }
         ],
-        max_tokens: targetTokens,
+        max_tokens: 4000, // 4K tokens for summarization
         temperature: 0.3 // Lower temperature for more focused summaries
       })
 
@@ -473,7 +488,7 @@ Summary:`
 export const openaiService = {
   async chat(apiKey: string, message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string, style?: string, attachments?: ChatAttachment[], geminiApiKey?: string): Promise<AIChatMessage> {
     const client = getClient(apiKey)
-    const model = getModelName(modelName || 'gpt-5-nano', attachments && attachments.length > 0)
+    const model = getModelName(modelName || 'gpt-4.1-nano', attachments && attachments.length > 0)
     const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey)
     
     try {
@@ -608,6 +623,7 @@ export const openaiService = {
       const completionParams: any = {
         model,
         messages,
+        max_tokens: getMaxOutputTokens(modelName),
       }
       if (!isGpt5Model(model)) {
         completionParams.temperature = 0.7
@@ -641,7 +657,7 @@ export const openaiService = {
     geminiApiKey?: string
   ): AsyncGenerator<string> {
     const client = getClient(apiKey)
-    const model = getModelName(modelName || 'gpt-5-nano', attachments && attachments.length > 0)
+    const model = getModelName(modelName || 'gpt-4.1-nano', attachments && attachments.length > 0)
     const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey)
     
     try {
@@ -848,6 +864,7 @@ export const openaiService = {
         model,
         messages,
         stream: true,
+        max_tokens: getMaxOutputTokens(modelName),
       }
       if (!isGpt5Model(model)) {
         streamParams.temperature = 0.7
@@ -879,7 +896,7 @@ export const openaiService = {
     modelName?: string
   ): Promise<AutocompleteSuggestion> {
     const client = getClient(apiKey)
-    const model = getModelName(modelName || 'gpt-5-nano', false)
+    const model = getModelName(modelName || 'gpt-4.1-nano', false)
     const { systemInstruction } = await buildContext(documentContent, projectId, undefined, undefined, undefined, apiKey)
     const beforeCursor = text.slice(0, cursorPosition)
     const afterCursor = text.slice(cursorPosition)
@@ -900,6 +917,7 @@ export const openaiService = {
       const completionParams: any = {
         model,
         messages,
+        max_tokens: getMaxOutputTokens(modelName),
       }
       if (!isGpt5Model(model)) {
         completionParams.temperature = 0.7
