@@ -78,7 +78,7 @@ const PDFViewerComponent = ({ node, selected }: ReactNodeViewProps) => {
         display: 'block',
         margin: '16px 0',
         border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
-        borderRadius: '8px',
+        borderRadius: '6px',
         overflow: 'hidden',
         backgroundColor: theme === 'dark' ? '#1e1e1e' : '#f8f9fa',
       }}

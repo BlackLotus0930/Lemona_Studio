@@ -181,7 +181,7 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
           backgroundColor: 'transparent',
           color: tabTextColor,
           cursor: showCloseButton ? 'pointer' : 'default',
-          borderRadius: '2px',
+          borderRadius: '6px',
           padding: 0,
           marginLeft: '2px', // Move button slightly to the right
           flexShrink: 0,

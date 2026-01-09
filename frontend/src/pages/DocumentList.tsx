@@ -348,7 +348,7 @@ export default function DocumentList() {
               background: 'transparent',
               cursor: 'pointer',
               padding: '2px 4px',
-              borderRadius: '4px'
+              borderRadius: '6px'
             }}
           >
             <img 
@@ -381,7 +381,7 @@ export default function DocumentList() {
               display: 'flex',
               alignItems: 'center',
               backgroundColor: brighterBg,
-              borderRadius: '8px',
+              borderRadius: '6px',
               padding: '4px 10px',
               gap: '6px',
               height: '24px',
@@ -756,7 +756,7 @@ export default function DocumentList() {
                   key={project.id}
                   style={{
                   border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'}`,
-                  borderRadius: '12px',
+                  borderRadius: '6px',
                     overflow: 'visible',
                   transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                     backgroundColor: theme === 'dark' ? '#0a0a0a' : '#ffffff',
@@ -934,7 +934,7 @@ export default function DocumentList() {
                             fontWeight: 600,
                             color: textColor,
                             border: `1px solid ${borderColor}`,
-                            borderRadius: '4px',
+                            borderRadius: '6px',
                             padding: '4px 8px',
                             backgroundColor: brighterBg,
                             outline: 'none',
@@ -1013,7 +1013,7 @@ export default function DocumentList() {
                                transform: 'translateX(-50%)',
                                backgroundColor: dropdownBg,
                                border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
-                               borderRadius: '12px',
+                               borderRadius: '6px',
                                boxShadow: theme === 'dark' 
                                  ? '0 8px 32px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05) inset' 
                                  : '0 8px 32px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05) inset',
@@ -1046,7 +1046,7 @@ export default function DocumentList() {
                               color: dropdownTextColor,
                               textAlign: 'left',
                               transition: 'all 0.2s ease',
-                              borderRadius: '8px',
+                              borderRadius: '6px',
                               fontWeight: 500,
                             }}
                             onMouseEnter={(e) => {
@@ -1085,7 +1085,7 @@ export default function DocumentList() {
                               color: '#ef4444',
                               textAlign: 'left',
                               transition: 'all 0.2s ease',
-                              borderRadius: '8px',
+                              borderRadius: '6px',
                               fontWeight: 500,
                             }}
                             onMouseEnter={(e) => {
@@ -1166,7 +1166,7 @@ export default function DocumentList() {
             style={{
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '8px',
+              borderRadius: '6px',
               padding: '24px',
               minWidth: '400px',
               maxWidth: '500px',
@@ -1207,7 +1207,7 @@ export default function DocumentList() {
                 style={{
                   padding: '8px 16px',
                   border: `1px solid ${dropdownBorder}`,
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   backgroundColor: 'transparent',
                   color: dropdownTextColor,
                   cursor: 'pointer',
@@ -1229,7 +1229,7 @@ export default function DocumentList() {
                 style={{
                   padding: '8px 16px',
                   border: 'none',
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   backgroundColor: '#d32f2f',
                   color: '#ffffff',
                   cursor: 'pointer',

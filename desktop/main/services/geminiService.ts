@@ -310,7 +310,7 @@ async function buildContext(
           projectId, // Required: Current project ID
           apiKey, // geminiApiKey
           openaiApiKey,
-          3 // top-k
+          6 // top-k
         )
 
         if (searchResult.results.length > 0 && searchResult.formattedResults) {

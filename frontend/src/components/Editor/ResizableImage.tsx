@@ -388,7 +388,7 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
               right: '-2px',
               bottom: '-2px',
               border: '2px solid #1a73e8',
-              borderRadius: '4px',
+              borderRadius: '6px',
               pointerEvents: 'none',
               zIndex: 9,
             }}

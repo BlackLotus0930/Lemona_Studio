@@ -75,7 +75,7 @@ export default function OutlineView({ editor }: OutlineViewProps) {
             padding: '4px 8px',
             marginLeft: `${(heading.level - 1) * 12}px`,
             cursor: 'pointer',
-            borderRadius: '3px',
+            borderRadius: '6px',
             fontSize: heading.level === 1 ? '13px' : heading.level === 2 ? '12px' : '11px',
             fontWeight: heading.level === 1 ? 600 : heading.level === 2 ? 500 : 400,
             color: '#202124',

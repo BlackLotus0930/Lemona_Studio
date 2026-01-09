@@ -1010,7 +1010,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               : (isLibrary ? '#e8f0fe' : isFile ? '#f3e5f5' : '#f1f3f4'),
             color: theme === 'dark' ? '#ffffff' : textColor, // White for dark theme, regular text color for light theme
             padding: '2px 6px',
-            borderRadius: '4px',
+            borderRadius: '6px',
             fontWeight: 'normal', // Same weight as regular text
             fontSize: '13px'
           }}
@@ -1669,7 +1669,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   width: inputContainerWidth ? `${inputContainerWidth}px` : '92%',
                   maxWidth: inputContainerWidth ? `${inputContainerWidth}px` : '92%',
                   padding: '8px 12px',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   backgroundColor: userMessageBg,
                   border: `1px solid ${theme === 'dark' ? '#313131' : '#dadce0'}`,
                   color: textColor,
@@ -1777,7 +1777,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     style={{
                       padding: '14px 18px',
                       backgroundColor: theme === 'dark' ? '#3a1f1f' : '#fce8e6',
-                      borderRadius: '8px',
+                      borderRadius: '6px',
                       border: `1px solid ${theme === 'dark' ? '#5a2f2f' : '#f28b82'}`,
                       color: theme === 'dark' ? '#ff6b6b' : '#c5221f',
                       fontSize: '14px',
@@ -1894,7 +1894,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         return <code style={{ 
                           backgroundColor: theme === 'dark' ? '#2d2d2d' : '#f1f3f4', 
                           padding: '3px 6px', 
-                          borderRadius: '4px', 
+                          borderRadius: '6px', 
                           fontSize: '13px',
                           fontFamily: '"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace',
                           color: theme === 'dark' ? '#ce9178' : '#c5221f',
@@ -1930,7 +1930,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                           <div style={{
                             position: 'relative',
                             backgroundColor: theme === 'dark' ? '#000000' : '#f8f9fa',
-                            borderRadius: '8px',
+                            borderRadius: '6px',
                             overflow: 'hidden'
                           }}>
                             {/* Language name overlay - top left */}
@@ -2001,7 +2001,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                                 lineHeight: '1.5',
                                 fontFamily: '"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace',
                                 backgroundColor: theme === 'dark' ? '#000000' : '#f8f9fa',
-                                borderRadius: '8px'
+                                borderRadius: '6px'
                               }}
                               PreTag="div"
                             >
@@ -2078,7 +2078,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       overflowX: 'auto', 
                       marginBottom: '16px', 
                       marginTop: '12px',
-                      borderRadius: '8px',
+                      borderRadius: '6px',
                       border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`
                     }}>
                       <table style={{ 
@@ -2291,7 +2291,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           style={{
             padding: '4px 6px',
             backgroundColor: inputBg,
-            borderRadius: '8px',
+            borderRadius: '6px',
             border: `1px solid ${isInputFocused ? (theme === 'dark' ? '#3e3e42' : '#bdc1c6') : borderColor}`,
             display: 'flex',
             flexDirection: 'column',
@@ -2591,7 +2591,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                             ? (highlight.isLibrary ? '#2d4a5c' : highlight.isFile ? '#3d2d4a' : '#3d3d3d')
                             : (highlight.isLibrary ? '#e8f0fe' : highlight.isFile ? '#f3e5f5' : '#f1f3f4'),
                           color: theme === 'dark' ? '#ffffff' : textColor, // White for dark theme, regular text color for light theme
-                          borderRadius: '4px',
+                          borderRadius: '6px',
                           fontWeight: 'normal', // Same weight as regular text
                           padding: '2px 0', // Only vertical padding to avoid covering adjacent characters
                           display: 'inline',
@@ -2710,7 +2710,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   left: `${dropdownLeft}px`,
                   backgroundColor: dropdownBg,
                   border: `1px solid ${dropdownBorder}`,
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   boxShadow: dropdownShadow,
                   minWidth: '240px',
                   maxWidth: '350px',
@@ -2876,7 +2876,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       left: 0,
                       marginBottom: '4px',
                       backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
-                      borderRadius: '8px',
+                      borderRadius: '6px',
                       padding: '6px',
                       minWidth: '180px',
                       boxShadow: theme === 'dark'
@@ -3065,7 +3065,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               bottom: 0,
                               marginLeft: '4px',
                               backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
-                              borderRadius: '8px',
+                              borderRadius: '6px',
                               padding: '6px',
                               minWidth: '160px',
                               boxShadow: theme === 'dark'
@@ -3262,7 +3262,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         right: 0,
                         marginBottom: '4px',
                         backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
-                        borderRadius: '8px',
+                        borderRadius: '6px',
                         padding: '6px',
                         minWidth: '180px',
                         boxShadow: theme === 'dark'
@@ -3615,7 +3615,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               : { left: `${modalPosition.left || 0}px` }
             ),
             backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
-            borderRadius: '8px',
+            borderRadius: '6px',
             padding: '20px',
             minWidth: '390px',
             maxWidth: '490px',
@@ -3646,7 +3646,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              borderRadius: '4px',
+              borderRadius: '6px',
               width: '24px',
               height: '24px',
             }}
@@ -3751,7 +3751,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 width: '100%',
                 padding: '8px 12px',
                 border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
-                borderRadius: '4px',
+                borderRadius: '6px',
                 backgroundColor: theme === 'dark' ? '#252525' : '#ffffff',
                 color: theme === 'dark' ? '#e0e0e0' : '#202124',
                 fontSize: '13px',
@@ -3843,7 +3843,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 width: '100%',
                 padding: '8px 12px',
                 border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
-                borderRadius: '4px',
+                borderRadius: '6px',
                 backgroundColor: theme === 'dark' ? '#252525' : '#ffffff',
                 color: theme === 'dark' ? '#e0e0e0' : '#202124',
                 fontSize: '13px',
@@ -3915,7 +3915,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     border: `2px solid ${smartIndexing 
                       ? (theme === 'dark' ? '#4a9eff' : '#1a73e8')
                       : (theme === 'dark' ? '#444' : '#dadce0')}`,
-                    borderRadius: '4px',
+                    borderRadius: '6px',
                     backgroundColor: smartIndexing
                       ? (theme === 'dark' ? '#4a9eff' : '#1a73e8')
                       : (theme === 'dark' ? '#252525' : '#ffffff'),

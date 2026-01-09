@@ -220,7 +220,7 @@ code {
 
 *::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-color-thumb);
-  border-radius: 3px;
+  border-radius: 6px;
   border: 0;
 }
 
@@ -264,7 +264,7 @@ code {
 /* Highlight mark styling - ensure it has appropriate contrast */
 .ProseMirror mark[data-color] {
   padding: 0 2px;
-  border-radius: 2px;
+  border-radius: 6px;
 }
 
 /* Placeholder styling */
@@ -468,7 +468,7 @@ code {
 
 .scrollable-container.no-gutter::-webkit-scrollbar-thumb {
   background-color: transparent;
-  border-radius: 3px;
+  border-radius: 6px;
 }
 
 .scrollable-container.no-gutter:hover::-webkit-scrollbar-thumb,
@@ -515,7 +515,7 @@ code {
 
   .scrollable-container::-webkit-scrollbar-thumb {
     background-color: transparent;
-    border-radius: 4px;
+    border-radius: 6px;
     border: 0;
     background-clip: padding-box;
     min-height: 30px;
@@ -690,7 +690,7 @@ input[type="number"] {
 
 .chat-tabs-scrollable::-webkit-scrollbar-thumb {
   background-color: transparent;
-  border-radius: 2px;
+  border-radius: 6px;
   transition: background-color 0.4s ease, opacity 0.4s ease;
   opacity: 0;
 }

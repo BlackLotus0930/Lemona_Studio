@@ -111,6 +111,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const historyButtonRef = useRef<HTMLButtonElement>(null)
+  const previousChatsLengthRef = useRef<number>(0) // Track previous chats length to detect when new tabs are added
   
   // Listen for "Add to Chat" events from editor
   useEffect(() => {
@@ -296,9 +297,26 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     loadChatHistory()
   }, [document?.id]) // Only reload when document changes, not when activeChatId changes
 
-  // Auto-scroll active tab into view when it changes
+  // Initialize previousChatsLengthRef on first render
   useEffect(() => {
-    if (!activeChatId || !chatTabsScrollRef.current) return
+    if (previousChatsLengthRef.current === 0 && chats.length > 0) {
+      previousChatsLengthRef.current = chats.length
+    }
+  }, [])
+  
+  // Auto-scroll active tab into view only when new tabs are added, not when clicking existing tabs
+  useEffect(() => {
+    // Skip on initial render (when previousChatsLengthRef is 0)
+    if (previousChatsLengthRef.current === 0) {
+      previousChatsLengthRef.current = chats.length
+      return
+    }
+    
+    // Only scroll if a new tab was added (chats.length increased)
+    const isNewTabAdded = chats.length > previousChatsLengthRef.current
+    previousChatsLengthRef.current = chats.length
+    
+    if (!isNewTabAdded || !activeChatId || !chatTabsScrollRef.current) return
     
     // Use setTimeout to ensure DOM has updated
     const timeoutId = setTimeout(() => {
@@ -351,7 +369,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     }, 50) // Small delay to ensure DOM update
     
     return () => clearTimeout(timeoutId)
-  }, [activeChatId, chats])
+  }, [chats, activeChatId])
 
   // Add scroll detection and edge detection to show scrollbar for header
   useEffect(() => {
@@ -750,14 +768,14 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                 paddingBottom: '6px',
                 paddingLeft: '8px',
                 paddingRight: '8px',
-                borderRadius: (activeChatId === chat.id || hoveredChatId === chat.id) ? '6px' : '12px',
+                borderRadius: '6px',
                 backgroundColor: activeChatId === chat.id 
                   ? activeChatBg 
                   : (hoveredChatId === chat.id ? hoverBg : 'transparent'),
                 border: 'none',
                 display: 'flex',
                 alignItems: 'center',
-                cursor: isDragging ? 'grabbing' : 'grab',
+                cursor: isDragging ? 'grabbing' : 'pointer',
                 transition: isDragging ? 'none' : 'all 0.2s ease',
                 minWidth: '60px',
                 maxWidth: '120px',
@@ -824,7 +842,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                     transform: 'translateY(-50%)',
                     padding: '2px',
                     border: 'none',
-                    borderRadius: '2px',
+                    borderRadius: '6px',
                     backgroundColor: theme === 'dark' ? 'rgba(33, 33, 33, 0.95)' : 'rgba(255, 255, 255, 0.95)',
                     color: iconColor,
                     cursor: 'pointer',
@@ -863,7 +881,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
             style={{
               padding: '4px 6px',
               border: 'none',
-              borderRadius: '4px',
+              borderRadius: '6px',
               backgroundColor: 'transparent',
               color: iconColor,
               cursor: 'pointer',
@@ -891,7 +909,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
             style={{
               padding: '4px 8px 4px 6px',
               border: 'none',
-              borderRadius: '4px',
+              borderRadius: '6px',
               backgroundColor: showHistoryDropdown ? buttonHoverBg : 'transparent',
               color: iconColor,
               cursor: 'pointer',
@@ -916,7 +934,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
             style={{
               padding: '4px 6px',
               border: 'none',
-              borderRadius: '4px',
+              borderRadius: '6px',
               backgroundColor: 'transparent',
               color: iconColor,
               cursor: 'pointer',
@@ -943,7 +961,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
               style={{
                 padding: '4px 8px',
                 border: 'none',
-                borderRadius: '4px',
+                borderRadius: '6px',
                 backgroundColor: showMenu ? hoverBg : 'transparent',
                 color: iconColor,
                 cursor: 'pointer',
@@ -968,7 +986,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                   right: rect ? `${window.innerWidth - rect.right}px` : 0,
                   backgroundColor: theme === 'dark' ? '#141414' : '#ffffff',
                   border: `1px solid ${theme === 'dark' ? '#232323' : '#dadce0'}`,
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   boxShadow: theme === 'dark' ? '0 2px 8px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.15)',
                   zIndex: 10020,
                   minWidth: '160px',

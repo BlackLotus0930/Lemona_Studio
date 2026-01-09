@@ -944,7 +944,7 @@ export const exportService = {
       // Set content with timeout
       await page.setContent(html, { 
         waitUntil: 'networkidle0',
-        timeout: 30000 // 30 seconds timeout
+        timeout: 60000 // 60 seconds timeout
       })
       
       // Wait for all images to load

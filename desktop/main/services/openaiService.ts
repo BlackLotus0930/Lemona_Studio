@@ -406,7 +406,7 @@ Your role is not to finish the work, but to help the user stay in the work.`
           projectId, // Required: Current project ID
           geminiApiKey, // Prefer Gemini
           apiKey, // Fallback to OpenAI
-          3 // top-k
+          6 // top-k
         )
 
         if (searchResult.results.length > 0 && searchResult.formattedResults) {

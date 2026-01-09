@@ -288,7 +288,7 @@ export default function WordCountModal({
         tabIndex={-1}
         style={{
           backgroundColor: dropdownBg,
-          borderRadius: '12px',
+          borderRadius: '6px',
           border: `1px solid ${dropdownBorder}`,
           boxShadow: theme === 'dark' 
             ? '0 12px 40px rgba(0,0,0,0.8)' 
@@ -343,7 +343,7 @@ export default function WordCountModal({
           {currentDocument && !currentDocument.title.toLowerCase().endsWith('.pdf') && (
             <div style={{
               backgroundColor: sectionBg,
-              borderRadius: '8px',
+              borderRadius: '6px',
               padding: '16px',
               border: `1px solid ${dropdownBorder}`
             }}>
@@ -381,7 +381,7 @@ export default function WordCountModal({
           {/* Workspace Section */}
           <div style={{
             backgroundColor: sectionBg,
-            borderRadius: '8px',
+            borderRadius: '6px',
             padding: '16px',
             border: `1px solid ${dropdownBorder}`
           }}>

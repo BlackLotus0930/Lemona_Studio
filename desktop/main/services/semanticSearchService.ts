@@ -139,7 +139,7 @@ ${chunk.text}
  * @param geminiApiKey Gemini API key for embedding generation
  * @param openaiApiKey OpenAI API key for embedding generation (fallback)
  * @param fileIds Optional: filter by specific file IDs
- * @param k Number of results to return (default: 3)
+ * @param k Number of results to return (default: 6)
  */
 export async function searchLibrary(
   query: string,
@@ -148,7 +148,7 @@ export async function searchLibrary(
   geminiApiKey?: string,
   openaiApiKey?: string,
   fileIds?: string[],
-  k: number = 3
+  k: number = 6
 ): Promise<SearchResult[]> {
   if (!query || query.trim().length === 0) {
     return []
@@ -252,7 +252,7 @@ export async function searchLibraryWithMentions(
   projectId: string, // Required: Current project ID
   geminiApiKey?: string,
   openaiApiKey?: string,
-  k: number = 3
+  k: number = 6
 ): Promise<{
   results: SearchResult[]
   mentions: ParsedMentions

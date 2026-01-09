@@ -84,7 +84,7 @@ export default function BatchQuestions({ documentContent, documentId }: BatchQue
                 flex: 1,
                 padding: '10px',
                 border: '1px solid #3e3e42',
-                borderRadius: '4px',
+                borderRadius: '6px',
                 fontSize: '13px',
                 backgroundColor: '#252526',
                 color: '#cccccc',
@@ -99,7 +99,7 @@ export default function BatchQuestions({ documentContent, documentId }: BatchQue
                   backgroundColor: '#a1260d',
                   color: 'white',
                   border: 'none',
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   fontSize: '13px',
                   transition: 'background-color 0.15s'
@@ -118,7 +118,7 @@ export default function BatchQuestions({ documentContent, documentId }: BatchQue
           style={{
             padding: '10px',
             border: '1px dashed #3e3e42',
-            borderRadius: '4px',
+            borderRadius: '6px',
             backgroundColor: 'transparent',
             cursor: 'pointer',
             color: '#858585',

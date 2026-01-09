@@ -187,7 +187,7 @@ function FileExplorer({
               backgroundColor: theme === 'dark' ? '#4a5568' : '#fde047',
               color: 'inherit',
               padding: '0 2px',
-              borderRadius: '2px'
+              borderRadius: '6px'
             }}
           >
             {part}
@@ -505,7 +505,7 @@ function FileExplorer({
     }
   }, [currentDocumentId])
 
-  const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
+  const bgColor = theme === 'dark' ? '#141414' : '#F8F8F6'
   const hoverBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
   const selectedBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
   const textColor = theme === 'dark' ? '#cccccc' : '#202124'
@@ -1164,7 +1164,7 @@ function FileExplorer({
                 minWidth: '60px',
                 maxWidth: 'calc(100% - 20px)',
                 border: `1px solid ${selectedBg}`,
-                borderRadius: '2px',
+                borderRadius: '6px',
                 padding: '2px 4px',
                 fontSize: '13px',
                 fontFamily: 'inherit',
@@ -1375,7 +1375,7 @@ function FileExplorer({
         transform: 'translateX(-50%)',
         backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
         border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
-        borderRadius: '8px',
+        borderRadius: '6px',
         padding: '12px 20px',
         boxShadow: theme === 'dark'
           ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
@@ -1525,7 +1525,7 @@ function FileExplorer({
                 minWidth: '60px',
                 maxWidth: 'calc(100% - 20px)',
                 border: `1px solid ${selectedBg}`,
-                borderRadius: '2px',
+                borderRadius: '6px',
                 padding: '2px 4px',
                 fontSize: '13px',
                 fontFamily: 'inherit',
@@ -1595,7 +1595,7 @@ function FileExplorer({
               width: '100%',
               padding: '4px 8px',
               border: `1px solid ${inputBorder}`,
-              borderRadius: '4px',
+              borderRadius: '6px',
               backgroundColor: inputBg,
               color: inputTextColor,
               fontSize: '12px',
@@ -1635,7 +1635,7 @@ function FileExplorer({
                   width: '100%',
                   padding: '4px 32px 4px 8px',
                   border: `1px solid ${inputBorder}`,
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   backgroundColor: inputBg,
                   color: inputTextColor,
                   fontSize: '12px',
@@ -1807,7 +1807,7 @@ function FileExplorer({
                         color: theme === 'dark' ? '#4fc3f7' : '#1976d2',
                         backgroundColor: theme === 'dark' ? 'rgba(79, 195, 247, 0.15)' : 'rgba(25, 118, 210, 0.1)',
                         padding: '2px 6px',
-                        borderRadius: '10px',
+                        borderRadius: '6px',
                         marginLeft: '8px',
                         flexShrink: 0,
                         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
@@ -1899,7 +1899,7 @@ function FileExplorer({
             top: contextMenuPos.y,
             backgroundColor: dropdownBg,
             border: `1px solid ${dropdownBorder}`,
-            borderRadius: '4px',
+            borderRadius: '6px',
             boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.15)',
             zIndex: 10000,
             minWidth: '140px',

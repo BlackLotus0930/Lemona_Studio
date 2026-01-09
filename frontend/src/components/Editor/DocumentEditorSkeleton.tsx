@@ -42,7 +42,7 @@ export function DocumentEditorSkeleton() {
         style={{
           height: '40px',
           width: '300px',
-          borderRadius: '4px',
+          borderRadius: '6px',
           marginBottom: '24px',
           ...shimmerAnimation,
         }}
@@ -55,7 +55,7 @@ export function DocumentEditorSkeleton() {
           style={{
             height: '20px',
             width: `${Math.random() * 40 + 60}%`,
-            borderRadius: '4px',
+            borderRadius: '6px',
             marginBottom: '16px',
             ...shimmerAnimation,
           }}
@@ -72,7 +72,7 @@ export function DocumentEditorSkeleton() {
           style={{
             height: '20px',
             width: `${Math.random() * 40 + 60}%`,
-            borderRadius: '4px',
+            borderRadius: '6px',
             marginBottom: '16px',
             ...shimmerAnimation,
           }}

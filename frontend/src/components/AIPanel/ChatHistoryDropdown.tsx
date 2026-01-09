@@ -286,7 +286,7 @@ export default function ChatHistoryDropdown({
         maxHeight: '60vh', // Approximately 3/5 of screen height
         backgroundColor: bgColor,
         border: `1px solid ${borderColor}`,
-        borderRadius: '8px',
+        borderRadius: '6px',
         boxShadow: theme === 'dark' 
           ? '0 4px 16px rgba(0,0,0,0.5)' 
           : '0 4px 16px rgba(0,0,0,0.15)',
@@ -538,7 +538,7 @@ function ChatItem({
           width: '12px',
           height: '12px',
           border: `1.5px solid ${isActive ? textColor : iconColor}`,
-          borderRadius: '2px',
+          borderRadius: '6px',
           backgroundColor: isActive ? textColor : 'transparent'
         }} />
       </div>
@@ -558,7 +558,7 @@ function ChatItem({
             padding: '2px 4px',
             backgroundColor: theme === 'dark' ? '#1d1d1d' : '#ffffff',
             border: `1px solid ${theme === 'dark' ? '#3e3e42' : '#bdc1c6'}`,
-            borderRadius: '4px',
+            borderRadius: '6px',
             color: textColor,
             fontSize: '13px',
             outline: 'none',
@@ -608,7 +608,7 @@ function ChatItem({
             style={{
               padding: '4px',
               border: 'none',
-              borderRadius: '4px',
+              borderRadius: '6px',
               backgroundColor: 'transparent',
               color: iconColor,
               cursor: 'pointer',
@@ -637,7 +637,7 @@ function ChatItem({
             style={{
               padding: '4px',
               border: 'none',
-              borderRadius: '4px',
+              borderRadius: '6px',
               backgroundColor: 'transparent',
               color: iconColor,
               cursor: 'pointer',

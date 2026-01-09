@@ -7,7 +7,7 @@ interface FileExplorerSkeletonProps {
 export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: FileExplorerSkeletonProps) {
   const { theme } = useTheme()
   
-  const bgColor = theme === 'dark' ? '#1e1e1e' : '#ffffff'
+  const bgColor = theme === 'dark' ? '#1e1e1e' : '#F8F8F6'
   const skeletonShimmer = theme === 'dark' 
     ? 'linear-gradient(90deg, #2a2a2a 0%, #333333 50%, #2a2a2a 100%)'
     : 'linear-gradient(90deg, #f5f5f5 0%, #e8e8e8 50%, #f5f5f5 100%)'
@@ -56,7 +56,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
           alignItems: 'center',
           padding: '6px 8px',
           marginBottom: '4px',
-          borderRadius: '4px',
+          borderRadius: '6px',
           cursor: 'default',
         }}
       >
@@ -65,7 +65,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
             width: '16px',
             height: '16px',
             marginRight: '8px',
-            borderRadius: '2px',
+            borderRadius: '6px',
             ...shimmerAnimation,
           }}
         />
@@ -73,7 +73,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
           style={{
             height: '14px',
             width: '90px',
-            borderRadius: '2px',
+            borderRadius: '6px',
             ...shimmerAnimation,
           }}
         />
@@ -87,7 +87,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
             display: 'flex',
             alignItems: 'center',
             padding: '6px 8px',
-            borderRadius: '4px',
+            borderRadius: '6px',
             marginBottom: '2px',
           }}
         >
@@ -96,7 +96,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
               width: '16px',
               height: '16px',
               marginRight: '6px',
-              borderRadius: '2px',
+              borderRadius: '6px',
               ...shimmerAnimation,
             }}
           />
@@ -104,7 +104,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
             style={{
               height: '14px',
               width: '70px',
-              borderRadius: '2px',
+              borderRadius: '6px',
               ...shimmerAnimation,
             }}
           />
@@ -119,7 +119,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
                 display: 'flex',
                 alignItems: 'center',
                 padding: '6px 8px',
-                borderRadius: '4px',
+                borderRadius: '6px',
                 marginBottom: '2px',
               }}
             >
@@ -128,7 +128,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
                   width: '14px',
                   height: '14px',
                   marginRight: '8px',
-                  borderRadius: '2px',
+                  borderRadius: '6px',
                   ...shimmerAnimation,
                 }}
               />
@@ -136,7 +136,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
                 style={{
                   height: '14px',
                   width: getRandomWidth(100, 80),
-                  borderRadius: '2px',
+                  borderRadius: '6px',
                   ...shimmerAnimation,
                 }}
               />
@@ -153,7 +153,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
             display: 'flex',
             alignItems: 'center',
             padding: '6px 8px',
-            borderRadius: '4px',
+            borderRadius: '6px',
             marginBottom: '2px',
           }}
         >
@@ -162,7 +162,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
               width: '16px',
               height: '16px',
               marginRight: '6px',
-              borderRadius: '2px',
+              borderRadius: '6px',
               ...shimmerAnimation,
             }}
           />
@@ -170,7 +170,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
             style={{
               height: '14px',
               width: '85px',
-              borderRadius: '2px',
+              borderRadius: '6px',
               ...shimmerAnimation,
             }}
           />
@@ -185,7 +185,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
                 display: 'flex',
                 alignItems: 'center',
                 padding: '6px 8px',
-                borderRadius: '4px',
+                borderRadius: '6px',
                 marginBottom: '2px',
               }}
             >
@@ -194,7 +194,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
                   width: '14px',
                   height: '14px',
                   marginRight: '8px',
-                  borderRadius: '2px',
+                  borderRadius: '6px',
                   ...shimmerAnimation,
                 }}
               />
@@ -202,7 +202,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
                 style={{
                   height: '14px',
                   width: getRandomWidth(90, 70),
-                  borderRadius: '2px',
+                  borderRadius: '6px',
                   ...shimmerAnimation,
                 }}
               />

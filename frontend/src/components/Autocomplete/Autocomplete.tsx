@@ -162,7 +162,7 @@ export default function Autocomplete({ editor, documentContent, documentId, enab
         lineHeight: '1.5',
         padding: '8px',
         backgroundColor: '#f8f9fa',
-        borderRadius: '4px',
+        borderRadius: '6px',
         fontSize: '13px'
       }}>
         {suggestion.text}
@@ -173,7 +173,7 @@ export default function Autocomplete({ editor, documentContent, documentId, enab
           style={{
             padding: '6px 12px',
             border: '1px solid #dadce0',
-            borderRadius: '4px',
+            borderRadius: '6px',
             backgroundColor: 'transparent',
             color: '#202124',
             cursor: 'pointer',
@@ -190,7 +190,7 @@ export default function Autocomplete({ editor, documentContent, documentId, enab
           style={{
             padding: '6px 12px',
             border: 'none',
-            borderRadius: '4px',
+            borderRadius: '6px',
             backgroundColor: '#1a73e8',
             color: 'white',
             cursor: 'pointer',

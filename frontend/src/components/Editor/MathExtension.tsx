@@ -88,7 +88,7 @@ const MathComponent = ({ node, updateAttributes, selected, editor }: ReactNodeVi
         padding: isEditing ? '4px 8px' : '2px 4px',
         backgroundColor: isEditing ? '#f5f5f5' : 'transparent',
         border: selected ? '2px solid #1a73e8' : '1px solid transparent',
-        borderRadius: '4px',
+        borderRadius: '6px',
         cursor: 'pointer',
         minWidth: display ? '100%' : 'auto',
         textAlign: display ? 'center' : 'left',

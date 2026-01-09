@@ -268,13 +268,29 @@ export function setupIPC() {
     // Rephrase text uses GPT-5 Nano if only OpenAI key is available, otherwise Gemini 2.5 Flash Lite
     ipcMain.handle('ai:rephraseText', async (_, googleApiKey, openaiApiKey, text, instruction) => {
         try {
+            // Check if the text contains markdown structure
+            const hasMarkdownStructure = /^#+\s|^[-*+]\s|^\d+\.\s|^>\s|^```/m.test(text);
             // Explicitly instruct to only return the rephrased text with no follow-up questions or suggestions
+            const markdownInstruction = hasMarkdownStructure
+                ? `\n\nCRITICAL FORMATTING: The original text is in Markdown format. You MUST return the result in the EXACT SAME Markdown format, preserving all structure:
+- Headings (use #, ##, ###, etc.)
+- Bullet lists (use - or *)
+- Numbered lists (use 1., 2., 3., etc.)
+- Paragraphs (separate with blank lines)
+- Line breaks (preserve empty lines)
+- Code blocks (use \`\`\`)
+- Blockquotes (use >)
+- Bold (**text**) and italic (*text*)
+
+DO NOT convert Markdown to plain text. Return Markdown format.`
+                : '';
             const prompt = `Rephrase this text according to the instruction. 
 
 CRITICAL: Return ONLY the rephrased text. Do NOT include any follow-up questions, suggestions, "Next step" messages, or any other text. Just the rephrased text.
-IMPORTANT: Use the same language as the original text. If it's in English, respond in English. Match the language exactly. If the original text is in Chinese, respond in Chinese.
+IMPORTANT: Use the same language as the original text. If it's in English, respond in English. Match the language exactly. If the original text is in Chinese, respond in Chinese.${markdownInstruction}
 
-Original text: "${text}"
+Original text:
+${text}
 
 Instruction: ${instruction}
 

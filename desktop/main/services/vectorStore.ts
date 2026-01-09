@@ -1310,7 +1310,7 @@ class VectorStore {
    */
   async searchUnsafe(
     queryEmbedding: number[],
-    k: number = 3,
+    k: number = 6,
     fileIds?: string[] // Optional: Filter results by file IDs
   ): Promise<SearchResult[]> {
     // Check if index needs to be loaded first

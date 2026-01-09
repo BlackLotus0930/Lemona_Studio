@@ -402,7 +402,7 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
             right: '-16px',
             bottom: '-16px',
             border: `1px solid ${borderColor}`,
-            borderRadius: '8px',
+            borderRadius: '6px',
             backgroundColor: bgColor,
             zIndex: -1,
             pointerEvents: 'none',
@@ -427,7 +427,7 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
                   padding: '6px',
                   backgroundColor: buttonBg,
                   border: `1px solid ${borderColor}`,
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -445,7 +445,7 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
                   padding: '6px',
                   backgroundColor: buttonBg,
                   border: `1px solid ${borderColor}`,
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -478,7 +478,7 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
                   padding: '8px',
                   backgroundColor: inputBg,
                   border: `1px solid ${borderColor}`,
-                  borderRadius: '4px',
+                  borderRadius: '6px',
                   color: textColor,
                   fontSize: '14px',
                   outline: 'none',
@@ -498,7 +498,7 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
                       padding: '4px 8px',
                       backgroundColor: buttonBg,
                       border: `1px solid ${borderColor}`,
-                      borderRadius: '4px',
+                      borderRadius: '6px',
                       cursor: 'pointer',
                       color: textColor,
                       fontSize: '12px',
@@ -514,7 +514,7 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
                       padding: '4px 8px',
                       backgroundColor: theme === 'dark' ? '#4fc3f7' : '#1a73e8',
                       border: 'none',
-                      borderRadius: '4px',
+                      borderRadius: '6px',
                       cursor: 'pointer',
                       color: '#ffffff',
                       fontSize: '12px',
@@ -532,7 +532,7 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
               </div>
               <div style={{
                 border: `1px solid ${borderColor}`,
-                borderRadius: '4px',
+                      borderRadius: '6px',
                 overflow: 'hidden',
               }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -652,7 +652,7 @@ const ChartComponent = ({ node, updateAttributes, editor, selected, getPos }: Re
             </div>
 
             {/* Preview */}
-            <div style={{ marginBottom: '16px', padding: '16px', backgroundColor: previewBg, borderRadius: '4px', overflowX: 'hidden', overflowY: 'auto' }}>
+            <div style={{ marginBottom: '16px', padding: '16px', backgroundColor: previewBg, borderRadius: '6px', overflowX: 'hidden', overflowY: 'auto' }}>
               <div style={{ fontSize: '14px', color: theme === 'dark' ? '#b0b0b0' : '#666', marginBottom: '8px' }}>
                 Preview:
               </div>

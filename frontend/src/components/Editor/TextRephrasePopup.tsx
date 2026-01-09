@@ -176,22 +176,25 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
     setImprovedText(null)
 
     try {
+      const languageInstruction = 'Use the same language as the original text.'
+      const structureInstruction = 'CRITICAL: Preserve the original structure including titles, headings, bullet points, numbered lists, line breaks, paragraphs, and formatting. Do not change the structure or convert lists to paragraphs.'
+      
       let instruction = ''
       switch (action) {
         case 'improve':
-          instruction = 'Improve clarity and flow. Use the same language as the original text.'
+          instruction = `Improve the clarity, grammar, and flow of this text while maintaining its original meaning and tone. ${languageInstruction} ${structureInstruction}`
           break
         case 'rephrase':
-          instruction = 'Rephrase this text while keeping the same meaning. Use the same language as the original text.'
+          instruction = `Rephrase this text using different words while keeping the exact same meaning. ${languageInstruction} ${structureInstruction}`
           break
         case 'lengthen':
-          instruction = 'Make this text longer and more detailed while keeping the same meaning. Use the same language as the original text.'
+          instruction = `Expand this text with more details and examples while keeping the original meaning. ${languageInstruction} ${structureInstruction}`
           break
         case 'shorten':
-          instruction = 'Make this text shorter and more concise while keeping the same meaning. Use the same language as the original text.'
+          instruction = `Make this text shorter and more concise while preserving the key points. ${languageInstruction} ${structureInstruction}`
           break
         case 'custom':
-          instruction = prompt ? `${prompt} Use the same language as the original text.` : ''
+          instruction = prompt ? `${prompt} ${languageInstruction} ${structureInstruction}` : ''
           break
       }
 
@@ -432,7 +435,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
         top: `${adjustedPosition.y}px`,
         backgroundColor: bgColor,
         border: `1px solid ${borderColor}`,
-        borderRadius: '12px',
+        borderRadius: '6px',
         boxShadow: theme === 'dark' 
           ? '0 8px 32px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3)' 
           : '0 8px 32px rgba(0, 0, 0, 0.12), 0 4px 16px rgba(0, 0, 0, 0.08)',
@@ -667,10 +670,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
             </div>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button
-                onClick={() => {
-                  setImprovedText(null)
-                  setCustomPrompt('')
-                }}
+                onClick={onClose}
                 style={{
                   padding: '7px 18px',
                   backgroundColor: 'transparent',
