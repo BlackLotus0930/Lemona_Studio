@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 're
 import { Document } from '@shared/types'
 import Autocomplete from '../Autocomplete/Autocomplete'
 import TextRephrasePopup from './TextRephrasePopup'
+import SlashCommandMenu from './SlashCommandMenu'
 import { documentApi } from '../../services/api'
 import { useTheme } from '../../contexts/ThemeContext'
 import './EditorStyles.css'
@@ -66,10 +67,221 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   const editorRef = useRef<Editor | null>(null) // Store editor in ref for reliable access in event handlers
   const [rightOffset, setRightOffset] = useState(20)
   
+  // Slash command menu state
+  const [showSlashMenu, setShowSlashMenu] = useState(false)
+  const [slashMenuPosition, setSlashMenuPosition] = useState({ x: 0, y: 0 })
+  const [slashFilterText, setSlashFilterText] = useState('')
+  const slashCommandStartPosRef = useRef<number | null>(null)
+  
   // Keep editor ref in sync with prop
   useEffect(() => {
     editorRef.current = editor
   }, [editor])
+
+  // Handle slash command menu
+  useEffect(() => {
+    if (!editor) return
+
+    const handleUpdate = () => {
+      if (editor.isDestroyed || !editor.view) return
+
+      const { from, to } = editor.state.selection
+      
+      // Don't show menu if there's a selection
+      if (from !== to) {
+        setShowSlashMenu(false)
+        slashCommandStartPosRef.current = null
+        setSlashFilterText('')
+        return
+      }
+
+      // Don't show menu if other popups are open
+      if (showRephrasePopup || showInlineSearch || 
+          isSearchInputFocusedRef.current || isReplaceInputFocusedRef.current ||
+          isRephrasePopupInputFocusedRef.current) {
+        setShowSlashMenu(false)
+        slashCommandStartPosRef.current = null
+        setSlashFilterText('')
+        return
+      }
+
+      try {
+        // Use ProseMirror's API to check if we're at the start of a block
+        const $from = editor.state.selection.$from
+        
+        // Find the block node (paragraph, heading, etc.)
+        // Use $from to navigate up the tree to find the block-level node
+        let blockStart = $from.start($from.depth)
+        let blockNode = $from.parent
+        
+        // If we're inside a list item, we need to find the actual paragraph/heading inside it
+        if (blockNode.type.name === 'listItem') {
+          // Navigate deeper to find the paragraph
+          for (let d = $from.depth; d > 0; d--) {
+            const nodeAtDepth = $from.node(d)
+            if (nodeAtDepth.type.name === 'paragraph' || nodeAtDepth.type.name.startsWith('heading')) {
+              blockStart = $from.start(d)
+              blockNode = nodeAtDepth
+              break
+            }
+          }
+        }
+        
+        // Check if cursor is at the start of the block
+        // $from.parentOffset === 0 means we're at the start of the parent node
+        const isAtBlockStart = $from.parentOffset === 0 || from === blockStart
+        
+        // Get text from block start to cursor
+        const textFromBlockStart = editor.state.doc.textBetween(blockStart, from)
+        
+        // Check if "/" exists and is at the start (or only whitespace before it)
+        const slashIndex = textFromBlockStart.indexOf('/')
+        const hasSlash = slashIndex >= 0
+        const onlyWhitespaceBeforeSlash = hasSlash && textFromBlockStart.substring(0, slashIndex).trim() === ''
+        
+        // Also check the character right before cursor (in case "/" was just typed at block start)
+        const charBeforeCursor = from > blockStart ? editor.state.doc.textBetween(Math.max(blockStart, from - 1), from) : ''
+        const isSlashAtCursor = charBeforeCursor === '/'
+        
+        // Show menu if:
+        // 1. Cursor is at block start and "/" is right before cursor, OR
+        // 2. "/" exists at the start of the block (or after whitespace only) and cursor is after it
+        const shouldShowMenu = (
+          (isAtBlockStart && isSlashAtCursor) ||
+          (hasSlash && onlyWhitespaceBeforeSlash && from > blockStart + slashIndex)
+        )
+        
+        if (shouldShowMenu) {
+          // Find the exact position of "/"
+          const slashPos = isSlashAtCursor && isAtBlockStart 
+            ? from - 1 
+            : blockStart + slashIndex
+          
+          // Get filter text (everything after "/")
+          const textAfterSlash = isSlashAtCursor && isAtBlockStart
+            ? ''
+            : textFromBlockStart.substring(slashIndex + 1)
+          const filterText = textAfterSlash.trim()
+          
+          // Show or update menu
+          if (!showSlashMenu) {
+            slashCommandStartPosRef.current = slashPos
+            setSlashFilterText('')
+            
+            // Calculate position for menu
+            try {
+              const coords = editor.view.coordsAtPos(from)
+              if (coords) {
+                setSlashMenuPosition({ x: coords.left, y: coords.bottom + 4 })
+              }
+            } catch (error) {
+              console.warn('Error calculating slash menu position:', error)
+            }
+            
+            setShowSlashMenu(true)
+          } else {
+            // Update filter text
+            setSlashFilterText(filterText)
+            
+            // Update menu position
+            try {
+              const coords = editor.view.coordsAtPos(from)
+              if (coords) {
+                setSlashMenuPosition({ x: coords.left, y: coords.bottom + 4 })
+              }
+            } catch (error) {
+              // Ignore position errors
+            }
+          }
+        } else {
+          // Hide menu if "/" is not at the start of block
+          if (showSlashMenu) {
+            setShowSlashMenu(false)
+            slashCommandStartPosRef.current = null
+            setSlashFilterText('')
+          }
+        }
+      } catch (error) {
+        // If there's an error, hide the menu and clean up
+        console.warn('Error in slash command menu handler:', error)
+        if (showSlashMenu) {
+          setShowSlashMenu(false)
+          slashCommandStartPosRef.current = null
+          setSlashFilterText('')
+        }
+      }
+    }
+
+    editor.on('update', handleUpdate)
+    editor.on('selectionUpdate', handleUpdate)
+
+    return () => {
+      editor.off('update', handleUpdate)
+      editor.off('selectionUpdate', handleUpdate)
+    }
+  }, [editor, showSlashMenu, showRephrasePopup, showInlineSearch])
+
+  // Handle keyboard events for slash menu
+  useEffect(() => {
+    if (!showSlashMenu || !editor) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent Enter key from being handled by editor when menu is open
+      if (e.key === 'Enter' || e.key === 'Return') {
+        // Let SlashCommandMenu handle it, but prevent editor from processing it
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+      
+      // Don't interfere with arrow keys, escape - let SlashCommandMenu handle them
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Escape') {
+        return
+      }
+      
+      // If backspace and we're deleting the "/", close the menu
+      if (e.key === 'Backspace' && slashCommandStartPosRef.current !== null) {
+        const { from } = editor.state.selection
+        if (from <= slashCommandStartPosRef.current) {
+          setShowSlashMenu(false)
+          slashCommandStartPosRef.current = null
+          setSlashFilterText('')
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true })
+    }
+  }, [showSlashMenu, editor])
+
+  // Close slash menu when clicking outside
+  useEffect(() => {
+    if (!showSlashMenu || !editor) return
+
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      // Don't close if clicking on the menu itself
+      if (target.closest('.slash-command-menu')) {
+        return
+      }
+      // Close the menu but keep "/" as normal text (don't delete it)
+      setShowSlashMenu(false)
+      slashCommandStartPosRef.current = null
+      setSlashFilterText('')
+    }
+
+    // Use a small delay to avoid closing immediately when menu opens
+    const timeout = setTimeout(() => {
+      window.addEventListener('mousedown', handleClickOutside)
+    }, 100)
+
+    return () => {
+      clearTimeout(timeout)
+      window.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showSlashMenu, editor])
   
   // Expose search API to parent (Layout)
   useImperativeHandle(ref, () => ({
@@ -1013,7 +1225,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           flex: 1, 
           overflow: 'auto', 
           paddingTop: '72px',
-          paddingBottom: '72px',
+          paddingBottom: '400px',
           paddingLeft: '120px',
           paddingRight: '120px',
           position: 'relative',
@@ -2203,6 +2415,63 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
               return { text: '', range: null }
             }
             return { text: selected, range: { from, to } }
+          }}
+        />
+      )}
+
+      {/* Slash Command Menu */}
+      {showSlashMenu && editor && (
+        <SlashCommandMenu
+          editor={editor}
+          position={slashMenuPosition}
+          filterText={slashFilterText}
+          commandStartPos={slashCommandStartPosRef.current}
+          onClose={(shouldDelete = false) => {
+            setShowSlashMenu(false)
+            // Only delete the "/" and filter text when Escape is pressed or command is executed
+            // When clicking outside, keep "/" as normal text
+            if (shouldDelete && slashCommandStartPosRef.current !== null) {
+              const { from } = editor.state.selection
+              try {
+                // Helper to adjust position for inline content
+                const adjustPosition = (pos: number): number | null => {
+                  try {
+                    const $pos = editor.state.doc.resolve(pos)
+                    if ($pos.parent.inlineContent) return pos
+                    
+                    // If in listItem, find paragraph inside
+                    for (let d = $pos.depth; d > 0; d--) {
+                      const node = $pos.node(d)
+                      if (node.type.name === 'listItem') {
+                        const listItemPos = $pos.before(d)
+                        const resolvedPos = editor.state.doc.resolve(listItemPos + 1)
+                        for (let childD = resolvedPos.depth; childD <= resolvedPos.depth + 2; childD++) {
+                          const childNode = resolvedPos.node(childD)
+                          if (childNode.type.name === 'paragraph' || childNode.type.name.startsWith('heading')) {
+                            return resolvedPos.before(childD) + 1
+                          }
+                        }
+                      }
+                    }
+                    return null
+                  } catch (e) {
+                    return null
+                  }
+                }
+                
+                const adjustedStart = adjustPosition(slashCommandStartPosRef.current) ?? slashCommandStartPosRef.current
+                const adjustedEnd = adjustPosition(from) ?? from
+                
+                editor.chain()
+                  .focus()
+                  .deleteRange({ from: adjustedStart, to: adjustedEnd })
+                  .run()
+              } catch (error) {
+                console.warn('Error cleaning up slash command:', error)
+              }
+            }
+            slashCommandStartPosRef.current = null
+            setSlashFilterText('')
           }}
         />
       )}

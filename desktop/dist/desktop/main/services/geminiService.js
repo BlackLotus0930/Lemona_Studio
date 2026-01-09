@@ -269,7 +269,7 @@ async function buildContext(documentContent, projectId, chatHistory, cursorPosit
             else {
                 const searchResult = await searchLibraryWithMentions(userMessage, projectId, // Required: Current project ID
                 apiKey, // geminiApiKey
-                openaiApiKey, 3 // top-k
+                openaiApiKey, 6 // top-k
                 );
                 if (searchResult.results.length > 0 && searchResult.formattedResults) {
                     systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`;
