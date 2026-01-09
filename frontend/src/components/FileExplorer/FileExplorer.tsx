@@ -1267,84 +1267,105 @@ function FileExplorer({
             {item.children.map(child => renderFileItem(child, indentLevel + 1))}
             
             {/* End drop zone for project folder only - allows dropping at the end */}
-            {item.id === 'project' && (
-              <div
-                onDragOver={(e) => {
-                  if (draggedItemId) {
-                    // Check if dragged item is from project folder
-                    const projectFolder = fileTree.find(f => f.id === 'project')
-                    const isFromProjectFolder = projectFolder?.children?.some(child => child.id === draggedItemId)
-                    
-                    if (isFromProjectFolder) {
+            {item.id === 'project' && (() => {
+              // Calculate file count to determine drop zone height
+              const fileCount = item.children?.length || 0
+              // Increase height when there are fewer files (minimum 300px, decreases as files increase)
+              const dropZoneHeight = Math.max(300 - (fileCount * 10), 80)
+              
+              return (
+                <div
+                  onDragOver={(e) => {
+                    // Handle both internal file drag and external file drag
+                    if (draggedItemId) {
+                      // Check if dragged item is from project folder
+                      const projectFolder = fileTree.find(f => f.id === 'project')
+                      const isFromProjectFolder = projectFolder?.children?.some(child => child.id === draggedItemId)
+                      
+                      if (isFromProjectFolder) {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        e.dataTransfer.dropEffect = 'move'
+                        setDragOverEndZone(true)
+                      }
+                    } else if (e.dataTransfer.types.includes('Files')) {
+                      // External files being dragged
                       e.preventDefault()
                       e.stopPropagation()
-                      e.dataTransfer.dropEffect = 'move'
+                      e.dataTransfer.dropEffect = 'copy'
                       setDragOverEndZone(true)
                     }
-                  }
-                }}
-                onDragLeave={(e) => {
-                  const relatedTarget = e.relatedTarget as Node | null
-                  if (!e.currentTarget.contains(relatedTarget)) {
+                  }}
+                  onDragLeave={(e) => {
+                    const relatedTarget = e.relatedTarget as Node | null
+                    if (!e.currentTarget.contains(relatedTarget)) {
+                      setDragOverEndZone(false)
+                    }
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
                     setDragOverEndZone(false)
-                  }
-                }}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  setDragOverEndZone(false)
-                  
-                  if (draggedItemId && onReorderDocuments) {
+                    
+                    // Handle external file drop
+                    if (e.dataTransfer.types.includes('Files')) {
+                      handleFolderDrop(e, 'project')
+                      return
+                    }
+                    
                     // Handle internal item reorder - move to end
-                    // Get all files from the project folder
-                    const projectFolder = fileTree.find(f => f.id === 'project')
-                    if (projectFolder && projectFolder.children) {
-                      const projectFiles = [...projectFolder.children]
-                      const draggedIndex = projectFiles.findIndex(f => f.id === draggedItemId)
-                      
-                      if (draggedIndex !== -1) {
-                        // Remove from current position and add to end
-                        const newOrder = [...projectFiles]
-                        const [draggedItem] = newOrder.splice(draggedIndex, 1)
-                        newOrder.push(draggedItem)
+                    if (draggedItemId && onReorderDocuments) {
+                      // Get all files from the project folder
+                      const projectFolder = fileTree.find(f => f.id === 'project')
+                      if (projectFolder && projectFolder.children) {
+                        const projectFiles = [...projectFolder.children]
+                        const draggedIndex = projectFiles.findIndex(f => f.id === draggedItemId)
                         
-                        const documentIds = newOrder.map(f => f.id).filter(id => {
-                          const fileItem = projectFiles.find(f => f.id === id)
-                          return fileItem?.document
-                        })
-                        
-                        onReorderDocuments(documentIds)
+                        if (draggedIndex !== -1) {
+                          // Remove from current position and add to end
+                          const newOrder = [...projectFiles]
+                          const [draggedItem] = newOrder.splice(draggedIndex, 1)
+                          newOrder.push(draggedItem)
+                          
+                          const documentIds = newOrder.map(f => f.id).filter(id => {
+                            const fileItem = projectFiles.find(f => f.id === id)
+                            return fileItem?.document
+                          })
+                          
+                          onReorderDocuments(documentIds)
+                        }
                       }
                     }
-                  }
-                  
-                  setDraggedItemId(null)
-                }}
-                style={{
-                  position: 'relative',
-                  minHeight: '40px',
-                  paddingLeft: '32px',
-                  backgroundColor: dragOverEndZone ? hoverBg : 'transparent',
-                  transition: 'background-color 0.15s',
-                }}
-              >
-                {/* Drop indicator line at the top of end zone */}
-                {dragOverEndZone && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      height: '2px',
-                      backgroundColor: indicatorColor,
-                      zIndex: 1000,
-                      pointerEvents: 'none',
-                    }}
-                  />
-                )}
-              </div>
-            )}
+                    
+                    setDraggedItemId(null)
+                  }}
+                  style={{
+                    position: 'relative',
+                    minHeight: `${dropZoneHeight}px`,
+                    paddingLeft: '32px',
+                    backgroundColor: dragOverEndZone ? hoverBg : 'transparent',
+                    transition: 'background-color 0.15s',
+                    borderTop: dragOverEndZone ? `2px solid ${indicatorColor}` : 'none',
+                  }}
+                >
+                  {/* Drop indicator line at the top of end zone */}
+                  {dragOverEndZone && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: '2px',
+                        backgroundColor: indicatorColor,
+                        zIndex: 1000,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )}
       </div>

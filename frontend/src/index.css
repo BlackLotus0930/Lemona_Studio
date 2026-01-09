@@ -243,6 +243,7 @@ code {
   color: #202124;
   caret-color: #202124;
   white-space: pre-wrap;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
   /* Remove all transitions to prevent text appearing animation */
   transition: none !important;
 }

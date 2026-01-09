@@ -112,20 +112,67 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
       const naturalWidth = img.naturalWidth
       const naturalHeight = img.naturalHeight
       if (naturalWidth > 0 && naturalHeight > 0) {
-        setAspectRatio(naturalWidth / naturalHeight)
-        // Set initial dimensions if not set
+        const ratio = naturalWidth / naturalHeight
+        setAspectRatio(ratio)
+        // Set initial dimensions if not set, maintaining aspect ratio
         if (!node.attrs.width && !node.attrs.height) {
+          const maxWidth = 600
+          const calculatedWidth = Math.min(naturalWidth, maxWidth)
+          const calculatedHeight = Math.round(calculatedWidth / ratio)
           updateAttributes({
-            width: Math.min(naturalWidth, 600),
-            height: Math.min(naturalHeight, (naturalHeight / naturalWidth) * 600),
+            width: calculatedWidth,
+            height: calculatedHeight,
+          })
+        } else if (node.attrs.width && !node.attrs.height) {
+          // If only width is set, calculate height from aspect ratio
+          const calculatedHeight = Math.round(node.attrs.width / ratio)
+          updateAttributes({
+            height: calculatedHeight,
+          })
+        } else if (!node.attrs.width && node.attrs.height) {
+          // If only height is set, calculate width from aspect ratio
+          const calculatedWidth = Math.round(node.attrs.height * ratio)
+          updateAttributes({
+            width: calculatedWidth,
           })
         }
       }
     }
   }
 
-  const currentWidth = node.attrs.width || (imgRef.current?.naturalWidth || 400)
-  const currentHeight = node.attrs.height || (imgRef.current?.naturalHeight || 300)
+  // Calculate dimensions maintaining aspect ratio
+  const getDimensions = () => {
+    const naturalWidth = imgRef.current?.naturalWidth
+    const naturalHeight = imgRef.current?.naturalHeight
+    const attrWidth = node.attrs.width
+    const attrHeight = node.attrs.height
+    
+    // If both width and height are set, use them
+    if (attrWidth && attrHeight) {
+      return { width: attrWidth, height: attrHeight }
+    }
+    
+    // If only width is set, calculate height from aspect ratio
+    if (attrWidth && naturalWidth && naturalHeight && naturalWidth > 0) {
+      const ratio = naturalHeight / naturalWidth
+      return { width: attrWidth, height: Math.round(attrWidth * ratio) }
+    }
+    
+    // If only height is set, calculate width from aspect ratio
+    if (attrHeight && naturalWidth && naturalHeight && naturalHeight > 0) {
+      const ratio = naturalWidth / naturalHeight
+      return { width: Math.round(attrHeight * ratio), height: attrHeight }
+    }
+    
+    // If neither is set, use natural dimensions or defaults
+    if (naturalWidth && naturalHeight) {
+      return { width: naturalWidth, height: naturalHeight }
+    }
+    
+    return { width: 400, height: 300 }
+  }
+  
+  const { width: currentWidth, height: currentHeight } = getDimensions()
 
   const handleMouseDown = (e: React.MouseEvent, handle: string) => {
     e.preventDefault()
@@ -283,9 +330,10 @@ const ResizableImageComponent = ({ node, updateAttributes, selected, editor, get
           alt=""
           onLoad={handleImageLoad}
           style={{
-            width: currentWidth ? `${currentWidth}px` : 'auto',
-            height: currentHeight ? `${currentHeight}px` : 'auto',
+            width: `${currentWidth}px`,
+            height: `${currentHeight}px`,
             maxWidth: '100%',
+            objectFit: 'contain',
             display: 'block',
             cursor: selected ? 'move' : 'pointer',
             userSelect: 'none',
@@ -406,8 +454,24 @@ export const ResizableImage = Image.extend({
       width: {
         default: null,
         parseHTML: (element) => {
-          const width = element.getAttribute('width')
-          return width ? parseInt(width, 10) : null
+          // Try width attribute first
+          const widthAttr = element.getAttribute('width')
+          if (widthAttr) {
+            const parsed = parseInt(widthAttr, 10)
+            if (!isNaN(parsed)) return parsed
+          }
+          
+          // Try style attribute (e.g., style="width: 200px")
+          const styleAttr = element.getAttribute('style')
+          if (styleAttr) {
+            const widthMatch = styleAttr.match(/width\s*:\s*(\d+)px/i)
+            if (widthMatch) {
+              const parsed = parseInt(widthMatch[1], 10)
+              if (!isNaN(parsed)) return parsed
+            }
+          }
+          
+          return null
         },
         renderHTML: (attributes) => {
           if (!attributes.width) {
@@ -421,8 +485,24 @@ export const ResizableImage = Image.extend({
       height: {
         default: null,
         parseHTML: (element) => {
-          const height = element.getAttribute('height')
-          return height ? parseInt(height, 10) : null
+          // Try height attribute first
+          const heightAttr = element.getAttribute('height')
+          if (heightAttr) {
+            const parsed = parseInt(heightAttr, 10)
+            if (!isNaN(parsed)) return parsed
+          }
+          
+          // Try style attribute (e.g., style="height: 200px")
+          const styleAttr = element.getAttribute('style')
+          if (styleAttr) {
+            const heightMatch = styleAttr.match(/height\s*:\s*(\d+)px/i)
+            if (heightMatch) {
+              const parsed = parseInt(heightMatch[1], 10)
+              if (!isNaN(parsed)) return parsed
+            }
+          }
+          
+          return null
         },
         renderHTML: (attributes) => {
           if (!attributes.height) {

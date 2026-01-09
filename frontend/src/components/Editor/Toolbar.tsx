@@ -610,7 +610,7 @@ export default function Toolbar({
     padding: '6px 8px 6px 12px',
     minWidth: 'auto',
     fontSize: '13px',
-    fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif"
+    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif"
   }
 
   const styleDropdownStyle: React.CSSProperties = {
@@ -1013,7 +1013,7 @@ export default function Toolbar({
     { label: 'Heading 3', value: 'h3', fontSize: '16px', fontWeight: 600 },
   ]
 
-  const fonts = ['Noto Sans SC', 'Inter', 'Open Sans', 'Roboto', 'Montserrat', 'Poppins']
+  const fonts = ['Inter', 'Noto Sans SC', 'Open Sans', 'Roboto', 'Montserrat', 'Poppins']
 
   // Get current style label
   const getCurrentStyle = () => {
@@ -1028,9 +1028,9 @@ export default function Toolbar({
 
   // Get current font family
   const getCurrentFontFamily = () => {
-    if (!stableEditor || stableEditor.isDestroyed) return 'Noto Sans SC'
+    if (!stableEditor || stableEditor.isDestroyed) return 'Inter'
     const attrs = stableEditor.getAttributes('textStyle')
-    return attrs.fontFamily || 'Noto Sans SC'
+    return attrs.fontFamily || 'Inter'
   }
 
   // Normalize color for comparison (handles different formats)
@@ -1298,7 +1298,7 @@ export default function Toolbar({
                   <span style={{
                     fontSize: style.fontSize,
                     fontWeight: style.fontWeight,
-                    fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
+                    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
                     lineHeight: '1.3'
                   }}>{style.label}</span>
                 </div>
@@ -1431,7 +1431,7 @@ export default function Toolbar({
             padding: '6px 12px',
             minWidth: 'auto',
             fontSize: '13px',
-            fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
+            fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
             justifyContent: 'center'
           }}
           title="Font size"
@@ -1811,7 +1811,7 @@ export default function Toolbar({
                     cursor: 'pointer',
                     fontSize: '13px',
                     textAlign: 'left',
-                    fontFamily: "'Noto Sans SC', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
+                    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
                     transition: 'background-color 0.15s'
                   }}
                   onMouseEnter={(e) => {
