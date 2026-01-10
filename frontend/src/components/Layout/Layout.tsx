@@ -4872,7 +4872,7 @@ export default function Layout(): JSX.Element {
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
-            backgroundColor: theme === 'dark' ? '#141414' : '#F8F8F6'
+            backgroundColor: bgColor
           }}>
             {/* File Explorer Header */}
             <div style={{
@@ -4918,7 +4918,7 @@ export default function Layout(): JSX.Element {
                     color: theme === 'dark' ? '#D6D6DD' : '#202124',
                     backgroundColor: theme === 'dark' ? '#181818' : '#f1f3f4',
                     border: `1px solid ${borderColor}`,
-                    borderRadius: '6px',
+                    borderRadius: '4px',
                     padding: '2px 6px',
                     outline: 'none',
                     textTransform: 'uppercase',
@@ -4954,7 +4954,7 @@ export default function Layout(): JSX.Element {
                     background: 'transparent',
                     cursor: 'pointer',
                     padding: '2px 4px',
-                    borderRadius: '6px',
+                    borderRadius: '2px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -5237,7 +5237,7 @@ export default function Layout(): JSX.Element {
             transform: 'translateX(-50%)',
             backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
             border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
-            borderRadius: '6px',
+            borderRadius: '12px',
             padding: '14px 24px',
             boxShadow: theme === 'dark'
               ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
