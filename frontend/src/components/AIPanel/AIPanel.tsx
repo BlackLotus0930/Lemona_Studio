@@ -123,8 +123,8 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     return () => window.removeEventListener('addToChat' as any, handleAddToChat as EventListener)
   }, [])
   
-  const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
-  const brighterBg = theme === 'dark' ? '#141414' : '#ffffff'
+  const bgColor = theme === 'dark' ? '#141414' : '#fafafa'
+  const brighterBg = theme === 'dark' ? '#141414' : '#fafafa'
   const borderColor = theme === 'dark' ? '#232323' : '#dadce0'
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const activeChatBg = theme === 'dark' ? '#212121' : '#f0f0f0'
@@ -984,7 +984,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                   position: 'fixed',
                   top: rect ? `${rect.bottom + 4}px` : '100%',
                   right: rect ? `${window.innerWidth - rect.right}px` : 0,
-                  backgroundColor: theme === 'dark' ? '#141414' : '#ffffff',
+                  backgroundColor: theme === 'dark' ? '#141414' : '#f5f5f5',
                   border: `1px solid ${theme === 'dark' ? '#232323' : '#dadce0'}`,
                   borderRadius: '6px',
                   boxShadow: theme === 'dark' ? '0 2px 8px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.15)',

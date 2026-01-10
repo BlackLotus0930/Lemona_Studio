@@ -104,3 +104,18 @@ export interface LibrarySearchResult {
   score: number;
 }
 
+export interface Commit {
+  id: string;
+  projectId: string;
+  parentId: string | null; // Parent commit ID (null for first commit)
+  timestamp: string; // ISO string, used as display name
+  documentSnapshots: DocumentSnapshot[];
+  createdAt: string;
+}
+
+export interface DocumentSnapshot {
+  documentId: string;
+  title: string;
+  content: string; // Full TipTap JSON content
+}
+

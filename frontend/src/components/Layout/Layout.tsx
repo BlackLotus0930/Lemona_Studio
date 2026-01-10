@@ -22,9 +22,9 @@ import FileExplorer from '../FileExplorer/FileExplorer'
 import { FileExplorerSkeleton } from '../FileExplorer/FileExplorerSkeleton'
 import { DocumentEditorSkeleton } from '../Editor/DocumentEditorSkeleton'
 import FullScreenPDFViewer, { PDFViewerSearchHandle } from '../PDFViewer/FullScreenPDFViewer'
-import { Document, IndexingStatus } from '@shared/types'
+import { Document, IndexingStatus, DocumentSnapshot } from '@shared/types'
 import { documentApi, exportApi, projectApi } from '../../services/api'
-import { indexingApi } from '../../services/desktop-api'
+import { indexingApi, versionApi } from '../../services/desktop-api'
 import { settingsApi } from '../../services/desktop-api'
 import { FontSize } from '../Editor/FontSize'
 import { FontFamily } from '../Editor/FontFamily'
@@ -337,6 +337,8 @@ export default function Layout(): JSX.Element {
   const [showWordCountModal, setShowWordCountModal] = useState(false) // Track word count modal visibility
   const [isExporting, setIsExporting] = useState(false) // Track export loading state
   const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | null>(null) // Track export format
+  const [showCommitSuccessNotification, setShowCommitSuccessNotification] = useState<{ fileCount: number } | null>(null) // Track commit success notification
+  const [restoredCommitParentId, setRestoredCommitParentId] = useState<string | null>(null) // Track restored commit ID for branch creation
   const lastContentRef = useRef<string>('') // Track last set content to avoid unnecessary updates
   const currentDocIdRef = useRef<string | null>(null) // Track current document ID
   const currentDocTitleRef = useRef<string | null>(null) // Track current document title for placeholder
@@ -983,6 +985,143 @@ export default function Layout(): JSX.Element {
           setShowWordCountModal(true)
           }
         }
+        return
+      }
+      
+      // Check if Ctrl+S (or Cmd+S on Mac) - create commit
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S') && !e.shiftKey) {
+        // Don't create commit if typing in an input field or textarea (unless it's contentEditable)
+        const target = e.target as HTMLElement
+        const isContentEditable = target.isContentEditable || target.closest('[contenteditable="true"]') !== null
+        const isRegularInput = (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) && !isContentEditable
+        
+        if (isRegularInput) {
+          return // Allow default browser save for regular inputs
+        }
+        
+        e.preventDefault()
+        e.stopPropagation()
+        
+        // Only create commit if we have a project
+        const currentProjectId = document?.projectId
+        if (!currentProjectId) {
+          return // No project, skip commit creation
+        }
+        
+        // Get all workspace documents (exclude library files)
+        // Workspace files are those with folder === 'project' or folder === undefined/null
+        const workspaceDocs = documents.filter(doc => 
+          doc.projectId === currentProjectId && 
+          doc.folder !== 'library'
+        )
+        
+        if (workspaceDocs.length === 0) {
+          return // No workspace documents to commit
+        }
+        
+        // Capture current content for all workspace documents
+        const documentSnapshots: DocumentSnapshot[] = []
+        
+        for (const doc of workspaceDocs) {
+          // Try to get content from editor first (most up-to-date)
+          const editor = getEditor(doc.id)
+          let content: string
+          
+          if (editor && !editor.isDestroyed) {
+            // Get content from editor
+            const editorContent = editor.getJSON()
+            content = JSON.stringify(editorContent)
+          } else {
+            // Fallback to document content from state
+            content = doc.content || JSON.stringify({ type: 'doc', content: [] })
+          }
+          
+          documentSnapshots.push({
+            documentId: doc.id,
+            title: doc.title,
+            content: content,
+          })
+        }
+        
+        // Create commit asynchronously
+        ;(async () => {
+          try {
+            // Determine parent commit ID
+            let parentId: string | null = null
+            
+            if (restoredCommitParentId) {
+              // Use restored commit as parent (branch creation)
+              parentId = restoredCommitParentId
+            } else {
+              // Get HEAD commit as parent
+              const headCommit = await versionApi.getHeadCommit(currentProjectId)
+              parentId = headCommit?.id ?? null
+            }
+            
+            // Filter out documents that haven't changed compared to parent commit
+            let filteredSnapshots: DocumentSnapshot[] = documentSnapshots
+            
+            if (parentId) {
+              try {
+                const parentCommit = await versionApi.getCommit(currentProjectId, parentId)
+                
+                if (parentCommit && parentCommit.documentSnapshots.length > 0) {
+                  // Create a map of parent commit snapshots by document ID
+                  const parentSnapshotsMap = new Map<string, DocumentSnapshot>()
+                  parentCommit.documentSnapshots.forEach((snapshot: DocumentSnapshot) => {
+                    parentSnapshotsMap.set(snapshot.documentId, snapshot)
+                  })
+                  
+                  // Filter out snapshots that are identical to parent commit
+                  filteredSnapshots = documentSnapshots.filter(snapshot => {
+                    const parentSnapshot = parentSnapshotsMap.get(snapshot.documentId)
+                    
+                    if (!parentSnapshot) {
+                      // Document not in parent commit, include it
+                      return true
+                    }
+                    
+                    // Compare content
+                    const currentContent = snapshot.content || ''
+                    const parentContent = parentSnapshot.content || ''
+                    
+                    if (currentContent === parentContent) {
+                      // Content unchanged, exclude from commit
+                      return false
+                    } else {
+                      // Content changed, include in commit
+                      return true
+                    }
+                  })
+                }
+              } catch (error) {
+                // If we can't load parent commit, include all documents to be safe
+              }
+            }
+            
+            // Only create commit if there are changed documents
+            if (filteredSnapshots.length === 0) {
+              return
+            }
+            
+            // Create commit with filtered snapshots
+            await versionApi.createCommit(currentProjectId, filteredSnapshots, parentId)
+            
+            // Clear restored commit parent after successful commit
+            setRestoredCommitParentId(null)
+            
+            // Show success notification
+            setShowCommitSuccessNotification({ fileCount: filteredSnapshots.length })
+            
+            // Auto-hide notification after 3 seconds
+            setTimeout(() => {
+              setShowCommitSuccessNotification(null)
+            }, 3000)
+          } catch (error) {
+            // Could show error notification here
+          }
+        })()
+        
         return
       }
       
@@ -4707,6 +4846,61 @@ export default function Layout(): JSX.Element {
           documents={documents}
           projectName={projectName}
           documentTitle={document?.title}
+          onRestoreCommit={(commitId: string) => {
+            setRestoredCommitParentId(commitId)
+          }}
+          onDocumentsReload={async () => {
+            // Reload documents to refresh editor content after restore
+            const currentProjectId = document?.projectId
+            const currentDocId = document?.id
+            
+            await loadDocuments(currentProjectId)
+            
+            // Also reload current document if it exists and update editor content
+            if (currentDocId) {
+              try {
+                const updatedDoc = await documentApi.get(currentDocId)
+                
+                if (!updatedDoc) {
+                  return
+                }
+                
+                // Parse content for editor
+                let parsedContent: any = ''
+                try {
+                  if (updatedDoc.content) {
+                    parsedContent = JSON.parse(updatedDoc.content)
+                  }
+                } catch (parseError: any) {
+                  return
+                }
+                
+                // Update document state to trigger editor refresh
+                setDocument(updatedDoc)
+                
+                // Also update in documents array
+                setDocuments(prevDocs => {
+                  return prevDocs.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc)
+                })
+                
+                // Update in open tabs
+                setOpenTabs(prevTabs => {
+                  return prevTabs.map(tab => tab.id === updatedDoc.id ? updatedDoc : tab)
+                })
+                
+                // Manually update editor content
+                const editor = getEditor(currentDocId)
+                
+                if (!editor || editor.isDestroyed) {
+                  return
+                }
+                
+                editor.commands.setContent(parsedContent, { emitUpdate: false })
+              } catch (error: any) {
+                // Silent error handling
+              }
+            }
+          }}
           onToggleSearch={() => {
             setIsSearchMode((prev) => {
               const newValue = !prev
@@ -4812,7 +5006,7 @@ export default function Layout(): JSX.Element {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              backgroundColor: theme === 'dark' ? '#141414' : '#F8F8F6'
+              backgroundColor: theme === 'dark' ? '#141414' : '#fafafa'
             }}>
               {isSearchMode ? (
                 <span>SEARCH</span>
@@ -5234,6 +5428,81 @@ export default function Layout(): JSX.Element {
               to {
                 opacity: 1;
                 transform: translateX(-50%) translateY(0);
+              }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* Commit Success Notification */}
+      {showCommitSuccessNotification && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+            border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+            borderRadius: '6px',
+            padding: '12px 20px',
+            boxShadow: theme === 'dark'
+              ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
+              : '0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1)',
+            zIndex: 10030,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            minWidth: '300px',
+            animation: 'slideUp 0.3s ease-out'
+          }}
+        >
+          <div
+            style={{
+              width: '20px',
+              height: '20px',
+              borderRadius: '50%',
+              backgroundColor: theme === 'dark' ? '#4caf50' : '#34a853',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                fontSize: '13px',
+                fontWeight: '500',
+                color: theme === 'dark' ? '#ffffff' : '#202124',
+                marginBottom: '2px',
+              }}
+            >
+              Commit created successfully
+            </div>
+            <div
+              style={{
+                fontSize: '11px',
+                color: theme === 'dark' ? '#999' : '#666',
+              }}
+            >
+              {showCommitSuccessNotification.fileCount} file{showCommitSuccessNotification.fileCount !== 1 ? 's' : ''} committed
+            </div>
+          </div>
+          <style>{`
+            @keyframes slideUp {
+              from {
+                transform: translateX(-50%) translateY(20px);
+                opacity: 0;
+              }
+              to {
+                transform: translateX(-50%) translateY(0);
+                opacity: 1;
               }
             }
           `}</style>

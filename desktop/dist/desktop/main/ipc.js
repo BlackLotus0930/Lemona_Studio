@@ -8,6 +8,7 @@ import { projectService } from './services/projectService.js';
 import { indexingService } from './services/indexingService.js';
 import { semanticSearchService } from './services/semanticSearchService.js';
 import { exportService } from './services/export.js';
+import { versionService } from './services/versionService.js';
 import { extractPDFTextAsync } from './services/pdfTextExtractor.js';
 import { parseDocx, splitDocxIntoChapters } from './services/docxParser.js';
 import { saveApiKeys, getApiKeys } from './services/apiKeyStore.js';
@@ -895,6 +896,58 @@ Rephrased text:`;
         }
         catch (error) {
             console.error('IPC settings:getSmartIndexing error:', error);
+            throw error;
+        }
+    });
+    // Version control operations
+    ipcMain.handle('version:createCommit', async (_, projectId, documentSnapshots, parentId) => {
+        try {
+            return await versionService.createCommit(projectId, documentSnapshots, parentId);
+        }
+        catch (error) {
+            console.error('IPC version:createCommit error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('version:getCommits', async (_, projectId) => {
+        try {
+            if (!projectId || typeof projectId !== 'string') {
+                throw new Error('Invalid projectId provided');
+            }
+            return await versionService.getCommits(projectId);
+        }
+        catch (error) {
+            console.error('IPC version:getCommits error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('version:getCommit', async (_, projectId, commitId) => {
+        try {
+            return await versionService.getCommit(projectId, commitId);
+        }
+        catch (error) {
+            console.error('IPC version:getCommit error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('version:getHeadCommit', async (_, projectId) => {
+        try {
+            if (!projectId || typeof projectId !== 'string') {
+                throw new Error('Invalid projectId provided');
+            }
+            return await versionService.getHeadCommit(projectId);
+        }
+        catch (error) {
+            console.error('IPC version:getHeadCommit error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('version:restoreCommit', async (_, projectId, commitId) => {
+        try {
+            return await versionService.restoreCommit(projectId, commitId);
+        }
+        catch (error) {
+            console.error('IPC version:restoreCommit error:', error);
             throw error;
         }
     });

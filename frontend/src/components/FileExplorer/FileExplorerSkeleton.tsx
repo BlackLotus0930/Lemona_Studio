@@ -7,7 +7,7 @@ interface FileExplorerSkeletonProps {
 export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: FileExplorerSkeletonProps) {
   const { theme } = useTheme()
   
-  const bgColor = theme === 'dark' ? '#1e1e1e' : '#F8F8F6'
+  const bgColor = theme === 'dark' ? '#1e1e1e' : '#fafafa'
   const skeletonShimmer = theme === 'dark' 
     ? 'linear-gradient(90deg, #2a2a2a 0%, #333333 50%, #2a2a2a 100%)'
     : 'linear-gradient(90deg, #f5f5f5 0%, #e8e8e8 50%, #f5f5f5 100%)'

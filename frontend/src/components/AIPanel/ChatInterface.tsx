@@ -474,15 +474,15 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
   }, [showSettingsModal, showModelDropdown, showPlusMenu, showStyleMenu])
   
-  const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
+  const bgColor = theme === 'dark' ? '#141414' : '#FBFBFB'
+  const brighterBg = theme === 'dark' ? '#141414' : '#FAFAFA'
 
   // Removed scroll position saving/loading - AI panel should maintain consistent state across files
-  const brighterBg = theme === 'dark' ? '#141414' : '#ffffff'
-  const inputBg = theme === 'dark' ? '#1d1d1d' : '#ffffff'
-  const borderColor = theme === 'dark' ? '#313131' : '#dadce0'
+  const inputBg = theme === 'dark' ? '#1d1d1d' : '#FEFEFE'
+  const borderColor = theme === 'dark' ? '#313131' : '#DADCE0'
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#9aa0a6'
-  const userMessageBg = theme === 'dark' ? '#1C1C1C' : '#f8f8f8'
+  const userMessageBg = theme === 'dark' ? '#1C1C1C' : '#F3F3F3'
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1627,6 +1627,22 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             transform: scale(1);
           }
         }
+        textarea::placeholder {
+          color: ${theme === 'dark' ? '#666666' : '#B8B8B8'};
+          opacity: 1;
+        }
+        textarea::-webkit-input-placeholder {
+          color: ${theme === 'dark' ? '#666666' : '#B8B8B8'};
+          opacity: 1;
+        }
+        textarea::-moz-placeholder {
+          color: ${theme === 'dark' ? '#666666' : '#B8B8B8'};
+          opacity: 1;
+        }
+        textarea:-ms-input-placeholder {
+          color: ${theme === 'dark' ? '#666666' : '#B8B8B8'};
+          opacity: 1;
+        }
       `}</style>
       <div style={{
         height: '100%',
@@ -2292,7 +2308,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             padding: '4px 6px',
             backgroundColor: inputBg,
             borderRadius: '6px',
-            border: `1px solid ${isInputFocused ? (theme === 'dark' ? '#3e3e42' : '#bdc1c6') : borderColor}`,
+            border: `1px solid ${isInputFocused ? (theme === 'dark' ? '#3e3e42' : '#DADCE0') : borderColor}`,
             display: 'flex',
             flexDirection: 'column',
             gap: '8px',

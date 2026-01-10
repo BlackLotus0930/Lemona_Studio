@@ -5,6 +5,7 @@ import { useTheme } from '../../contexts/ThemeContext'
 import { useEditorContext } from '../../contexts/EditorContext'
 import ExportModal from '../Layout/ExportModal'
 import KeyboardShortcutsModal from '../Layout/KeyboardShortcutsModal'
+import CommitHistoryModal from '../Layout/CommitHistoryModal'
 import { Document } from '@shared/types'
 // @ts-ignore
 import ShareIcon from '@mui/icons-material/Share'
@@ -74,6 +75,8 @@ import ShowChartIcon from '@mui/icons-material/ShowChart'
 import PieChartIcon from '@mui/icons-material/PieChart'
 // @ts-ignore
 import TimelineIcon from '@mui/icons-material/Timeline'
+// @ts-ignore
+import TurnedInNotOutlinedIcon from '@mui/icons-material/TurnedInNotOutlined'
 
 interface ToolbarProps {
   editor: Editor | null
@@ -83,6 +86,8 @@ interface ToolbarProps {
   documents?: Document[]
   projectName?: string
   documentTitle?: string
+  onRestoreCommit?: (commitId: string) => void // Callback to set restored commit parent
+  onDocumentsReload?: () => void // Callback to reload documents after restore
 }
 
 export default function Toolbar({ 
@@ -92,7 +97,9 @@ export default function Toolbar({
   onExport,
   documents = [],
   projectName = 'LEMONA',
-  documentTitle
+  documentTitle,
+  onRestoreCommit,
+  onDocumentsReload
 }: ToolbarProps) {
   const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
@@ -348,7 +355,9 @@ export default function Toolbar({
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [showExportModal, setShowExportModal] = useState(false)
   const [showKeyboardShortcutsModal, setShowKeyboardShortcutsModal] = useState(false)
+  const [showCommitHistoryModal, setShowCommitHistoryModal] = useState(false)
   const keyboardShortcutsButtonRef = useRef<HTMLButtonElement>(null)
+  const commitHistoryButtonRef = useRef<HTMLButtonElement>(null)
   const [showMathMenu, setShowMathMenu] = useState(false)
   const [showLinkDialog, setShowLinkDialog] = useState(false)
   const [mathFormula, setMathFormula] = useState('E=mc^2')
@@ -2324,6 +2333,51 @@ export default function Toolbar({
       </button>
 
       <div style={{ flex: 1 }} />
+
+      {/* Commit History Button */}
+      {(() => {
+        // Get projectId from documents (use first document's projectId)
+        // Find first document with a valid projectId
+        const docWithProject = documents.find(doc => doc.projectId && typeof doc.projectId === 'string' && doc.projectId.trim() !== '')
+        const projectId = docWithProject?.projectId || null
+        
+        if (!projectId || projectId.trim() === '') return null // Don't show button if no valid project
+        
+        return (
+          <>
+            <button
+              ref={commitHistoryButtonRef}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setShowCommitHistoryModal((prev: boolean) => !prev)
+              }}
+              style={showCommitHistoryModal ? activeButtonStyle : buttonStyle}
+              title="Commit history"
+              onMouseEnter={(e) => {
+                if (!showCommitHistoryModal) {
+                  e.currentTarget.style.backgroundColor = toolbarHoverBg
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!showCommitHistoryModal) {
+                  e.currentTarget.style.backgroundColor = 'transparent'
+                }
+              }}
+            >
+              <TurnedInNotOutlinedIcon style={{ fontSize: '20px' }} />
+            </button>
+            <CommitHistoryModal
+              projectId={projectId}
+              isOpen={showCommitHistoryModal}
+              onClose={() => setShowCommitHistoryModal(false)}
+              triggerRef={commitHistoryButtonRef}
+              onRestore={onRestoreCommit}
+              onDocumentsReload={onDocumentsReload}
+            />
+          </>
+        )
+      })()}
 
       {/* Share Button */}
       {onExport && (

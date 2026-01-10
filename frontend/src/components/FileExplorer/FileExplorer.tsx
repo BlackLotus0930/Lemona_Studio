@@ -505,7 +505,7 @@ function FileExplorer({
     }
   }, [currentDocumentId])
 
-  const bgColor = theme === 'dark' ? '#141414' : '#F8F8F6'
+  const bgColor = theme === 'dark' ? '#141414' : '#FBFBFB'
   const hoverBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
   const selectedBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
   const textColor = theme === 'dark' ? '#cccccc' : '#202124'

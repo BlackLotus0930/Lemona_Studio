@@ -1,5 +1,5 @@
 // Desktop API - Uses Electron IPC instead of HTTP
-import { Project, AIChatMessage } from '@shared/types'
+import { Project, AIChatMessage, DocumentSnapshot } from '@shared/types'
 
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electron !== undefined
@@ -258,5 +258,18 @@ export const indexingApi = {
   getIndexingStatus: (documentId: string) => invokeOrFetch('library:getIndexingStatus', documentId),
   indexProjectLibraryFiles: (projectId: string, geminiApiKey?: string, openaiApiKey?: string, onlyUnindexed?: boolean) =>
     invokeOrFetch('library:indexProject', projectId, geminiApiKey, openaiApiKey, onlyUnindexed),
+}
+
+export const versionApi = {
+  createCommit: (projectId: string, documentSnapshots: DocumentSnapshot[], parentId?: string | null) =>
+    invokeOrFetch('version:createCommit', projectId, documentSnapshots, parentId),
+  getCommits: (projectId: string) =>
+    invokeOrFetch('version:getCommits', projectId),
+  getCommit: (projectId: string, commitId: string) =>
+    invokeOrFetch('version:getCommit', projectId, commitId),
+  getHeadCommit: (projectId: string) =>
+    invokeOrFetch('version:getHeadCommit', projectId),
+  restoreCommit: (projectId: string, commitId: string) =>
+    invokeOrFetch('version:restoreCommit', projectId, commitId),
 }
 

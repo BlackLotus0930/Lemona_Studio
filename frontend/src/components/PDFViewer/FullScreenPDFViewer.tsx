@@ -822,7 +822,6 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     const searchCloseHoverBg = theme === 'dark' ? '#2a2a2a' : '#f1f3f4'
     const searchCloseHoverColor = theme === 'dark' ? '#fff' : '#202124'
     const searchMatchCountColor = theme === 'dark' ? '#999' : '#5f6368'
-    const searchButtonBg = theme === 'dark' ? '#2a2a2a' : '#f1f3f4'
     const searchButtonBorder = theme === 'dark' ? '#333' : '#dadce0'
     const searchButtonHoverBg = theme === 'dark' ? '#333' : '#e8eaed'
     const searchButtonHoverBorder = theme === 'dark' ? '#444' : '#c4c7c5'
