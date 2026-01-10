@@ -121,7 +121,7 @@ body {
 body:not(.dark-theme) {
   background-color: #ffffff;
   color: #202124;
-  font-weight: 450; /* Make text bolder in light mode */
+  font-weight: 400; /* Lighter text stroke in light mode */
 }
 
 body.dark-theme {
@@ -142,23 +142,23 @@ body:not(.dark-theme) #root {
   background-color: #ffffff;
 }
 
-/* Headings should be even bolder in light mode */
+/* Headings in light mode */
 body:not(.dark-theme) h1,
 body:not(.dark-theme) h2,
 body:not(.dark-theme) h3,
 body:not(.dark-theme) h4,
 body:not(.dark-theme) h5,
 body:not(.dark-theme) h6 {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 /* Editor content in light mode */
 body:not(.dark-theme) .ProseMirror {
-  font-weight: 450;
+  font-weight: 400;
 }
 
 body:not(.dark-theme) .ProseMirror p {
-  font-weight: 450;
+  font-weight: 400;
 }
 
 body:not(.dark-theme) .ProseMirror h1,
@@ -167,15 +167,15 @@ body:not(.dark-theme) .ProseMirror h3,
 body:not(.dark-theme) .ProseMirror h4,
 body:not(.dark-theme) .ProseMirror h5,
 body:not(.dark-theme) .ProseMirror h6 {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 body:not(.dark-theme) .ProseMirror p[data-type="title"] {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 body:not(.dark-theme) .ProseMirror p[data-type="subtitle"] {
-  font-weight: 550;
+  font-weight: 500;
 }
 
 #root.dark-theme,
@@ -265,7 +265,7 @@ code {
 /* Highlight mark styling - ensure it has appropriate contrast */
 .ProseMirror mark[data-color] {
   padding: 0 2px;
-  border-radius: 6px;
+  border-radius: 2px;
 }
 
 /* Placeholder styling */

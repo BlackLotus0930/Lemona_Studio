@@ -331,6 +331,29 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   
   const bgColor = theme === 'dark' ? '#181818' : '#ffffff'
   const textColor = theme === 'dark' ? '#FFFFFF' : '#202124'
+  
+  // Inline search UI colors
+  const searchBgColor = theme === 'dark' ? '#1e1e1e' : '#ffffff'
+  const searchInputBg = theme === 'dark' ? '#252525' : '#f8f9fa'
+  const searchInputBorder = theme === 'dark' ? '#333' : '#dadce0'
+  const searchInputBorderFocus = theme === 'dark' ? '#555' : '#4285f4'
+  const searchTextColor = theme === 'dark' ? '#e0e0e0' : '#202124'
+  const searchLabelColor = theme === 'dark' ? '#e0e0e0' : '#5f6368'
+  const searchCloseColor = theme === 'dark' ? '#999' : '#5f6368'
+  const searchCloseHoverBg = theme === 'dark' ? '#2a2a2a' : '#f1f3f4'
+  const searchCloseHoverColor = theme === 'dark' ? '#fff' : '#202124'
+  const searchMatchCountColor = theme === 'dark' ? '#999' : '#5f6368'
+  const searchButtonBg = theme === 'dark' ? '#2a2a2a' : '#f1f3f4'
+  const searchButtonBorder = theme === 'dark' ? '#333' : '#dadce0'
+  const searchButtonHoverBg = theme === 'dark' ? '#333' : '#e8eaed'
+  const searchButtonHoverBorder = theme === 'dark' ? '#444' : '#c4c7c5'
+  const searchButtonDisabledColor = theme === 'dark' ? '#666' : '#9aa0a6'
+  const searchButtonDisabledBg = theme === 'dark' ? '#2a2a2a' : '#f1f3f4'
+  const searchReplaceButtonBg = theme === 'dark' ? '#6366f1' : '#1a73e8'
+  const searchReplaceButtonHoverBg = theme === 'dark' ? '#4f46e5' : '#1557b0'
+  const searchBoxShadow = theme === 'dark' 
+    ? '0 8px 24px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)'
+    : '0 8px 24px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.1)'
 
   // Save scroll position to localStorage
   const saveScrollPosition = (documentId: string, scrollTop: number) => {
@@ -2021,19 +2044,20 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                 position: 'fixed',
                 top: '92px', // TopBar (32px) + Toolbar container padding (8px top) + Toolbar content (~32px) + margin (20px) = 92px to match right margin
                 right: `${rightOffset}px`,
-                backgroundColor: '#1e1e1e',
+                backgroundColor: searchBgColor,
                 borderRadius: '6px',
                 padding: '12px',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)',
+                boxShadow: searchBoxShadow,
                 zIndex: 1000,
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '12px', // Increased from 10px for more spacing
                 minWidth: '280px',
                 maxWidth: '300px',
-                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                fontWeight: '300', // Apply to whole modal
-                transition: 'right 0.3s ease',
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+              fontWeight: '400', // Apply to whole modal
+              transition: 'right 0.3s ease',
+                border: theme === 'light' ? '1px solid #dadce0' : 'none',
               }}
               onMouseDown={(e) => {
                 // Prevent editor from intercepting clicks on the search dialog
@@ -2060,7 +2084,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   padding: '2px',
                   backgroundColor: 'transparent',
                   border: 'none',
-                  color: '#999',
+                  color: searchCloseColor,
                   cursor: 'pointer',
                   fontSize: '14px',
                   display: 'flex',
@@ -2069,15 +2093,15 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   borderRadius: '6px',
                   width: '18px',
                   height: '18px',
-                  fontWeight: '300',
+                  fontWeight: '400',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#2a2a2a'
-                  e.currentTarget.style.color = '#fff'
+                  e.currentTarget.style.backgroundColor = searchCloseHoverBg
+                  e.currentTarget.style.color = searchCloseHoverColor
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.backgroundColor = 'transparent'
-                  e.currentTarget.style.color = '#999'
+                  e.currentTarget.style.color = searchCloseColor
                 }}
                 title="Close (Esc)"
               >
@@ -2085,11 +2109,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
               </button>
 
               {/* Find section */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: '300', width: '100%' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: '400', width: '100%' }}>
                 <label style={{
                   fontSize: '11px',
-                  fontWeight: '300',
-                  color: '#e0e0e0',
+                  fontWeight: '400',
+                  color: searchLabelColor,
                   margin: 0,
                 }}>
                   Find
@@ -2106,14 +2130,14 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                       flex: 1,
                       minWidth: 0, // Allow flex item to shrink below content size
                       padding: '6px 10px',
-                      border: '1px solid #333',
+                      border: `1px solid ${searchInputBorder}`,
                       borderRadius: '6px',
-                      backgroundColor: '#252525',
-                      color: '#e0e0e0',
+                      backgroundColor: searchInputBg,
+                      color: searchTextColor,
                       fontSize: '13px',
                       outline: 'none',
                       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                      fontWeight: '300',
+                      fontWeight: '400',
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -2137,11 +2161,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                       }
                     }}
                     onFocus={(e) => {
-                      e.target.style.borderColor = '#555' // Darker gray on focus
+                      e.target.style.borderColor = searchInputBorderFocus
                       isSearchInputFocusedRef.current = true
                     }}
                     onBlur={(e) => {
-                      e.target.style.borderColor = '#333'
+                      e.target.style.borderColor = searchInputBorder
                       // Use setTimeout to check if focus moved to replace input
                       setTimeout(() => {
                         if (window.document.activeElement !== inlineReplaceInputRef.current) {
@@ -2159,11 +2183,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                     <>
                       <div style={{
                         fontSize: '11px',
-                        color: '#999',
+                        color: searchMatchCountColor,
                         minWidth: '35px',
                         textAlign: 'center',
                         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                        fontWeight: '300',
+                        fontWeight: '400',
                       }}>
                         {currentMatchIndex + 1}/{matches.length}
                       </div>
@@ -2173,9 +2197,9 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                         style={{
                           padding: '4px 6px',
                           backgroundColor: 'transparent',
-                          border: '1px solid #333',
+                          border: `1px solid ${searchButtonBorder}`,
                           borderRadius: '6px',
-                          color: matches.length > 0 ? '#e0e0e0' : '#666',
+                          color: matches.length > 0 ? searchTextColor : searchButtonDisabledColor,
                           cursor: matches.length > 0 ? 'pointer' : 'not-allowed',
                           fontSize: '12px',
                           display: 'flex',
@@ -2186,14 +2210,14 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                         }}
                         onMouseEnter={(e) => {
                           if (matches.length > 0) {
-                            e.currentTarget.style.backgroundColor = '#333'
-                            e.currentTarget.style.borderColor = '#444'
+                            e.currentTarget.style.backgroundColor = searchButtonHoverBg
+                            e.currentTarget.style.borderColor = searchButtonHoverBorder
                           }
                         }}
                         onMouseLeave={(e) => {
                           if (matches.length > 0) {
                             e.currentTarget.style.backgroundColor = 'transparent'
-                            e.currentTarget.style.borderColor = '#333'
+                            e.currentTarget.style.borderColor = searchButtonBorder
                           }
                         }}
                         title="Previous match"
@@ -2206,9 +2230,9 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                         style={{
                           padding: '4px 6px',
                           backgroundColor: 'transparent',
-                          border: '1px solid #333',
+                          border: `1px solid ${searchButtonBorder}`,
                           borderRadius: '6px',
-                          color: matches.length > 0 ? '#e0e0e0' : '#666',
+                          color: matches.length > 0 ? searchTextColor : searchButtonDisabledColor,
                           cursor: matches.length > 0 ? 'pointer' : 'not-allowed',
                           fontSize: '12px',
                           display: 'flex',
@@ -2219,14 +2243,14 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                         }}
                         onMouseEnter={(e) => {
                           if (matches.length > 0) {
-                            e.currentTarget.style.backgroundColor = '#333'
-                            e.currentTarget.style.borderColor = '#444'
+                            e.currentTarget.style.backgroundColor = searchButtonHoverBg
+                            e.currentTarget.style.borderColor = searchButtonHoverBorder
                           }
                         }}
                         onMouseLeave={(e) => {
                           if (matches.length > 0) {
                             e.currentTarget.style.backgroundColor = 'transparent'
-                            e.currentTarget.style.borderColor = '#333'
+                            e.currentTarget.style.borderColor = searchButtonBorder
                           }
                         }}
                         title="Next match"
@@ -2239,11 +2263,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
               </div>
               
               {/* Replace with section */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: '300', width: '100%' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontWeight: '400', width: '100%' }}>
                 <label style={{
                   fontSize: '11px',
-                  fontWeight: '300',
-                  color: '#e0e0e0',
+                  fontWeight: '400',
+                  color: searchLabelColor,
                   margin: 0,
                 }}>
                   Replace with
@@ -2257,14 +2281,14 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   style={{
                     width: '100%',
                     padding: '6px 10px',
-                    border: '1px solid #333',
+                    border: `1px solid ${searchInputBorder}`,
                     borderRadius: '6px',
-                    backgroundColor: '#252525',
-                    color: '#e0e0e0',
+                    backgroundColor: searchInputBg,
+                    color: searchTextColor,
                     fontSize: '13px',
                     outline: 'none',
                     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                    fontWeight: '300',
+                    fontWeight: '400',
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Escape') {
@@ -2277,11 +2301,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                     }
                   }}
                   onFocus={(e) => {
-                    e.target.style.borderColor = '#555' // Darker gray on focus
+                    e.target.style.borderColor = searchInputBorderFocus
                     isReplaceInputFocusedRef.current = true
                   }}
                   onBlur={(e) => {
-                    e.target.style.borderColor = '#333'
+                    e.target.style.borderColor = searchInputBorder
                     // Use setTimeout to check if focus moved to search input
                     setTimeout(() => {
                       if (window.document.activeElement !== inlineSearchInputRef.current) {
@@ -2305,26 +2329,26 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   style={{
                     flex: 1,
                     padding: '6px 12px',
-                    backgroundColor: '#2a2a2a',
-                    border: '1px solid #333',
+                    backgroundColor: searchButtonBg,
+                    border: `1px solid ${searchButtonBorder}`,
                     borderRadius: '6px',
-                    color: matches.length > 0 && replaceQuery.trim() ? '#e0e0e0' : '#666',
+                    color: matches.length > 0 && replaceQuery.trim() ? searchTextColor : searchButtonDisabledColor,
                     cursor: matches.length > 0 && replaceQuery.trim() ? 'pointer' : 'not-allowed',
                     fontSize: '12px',
                     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                    fontWeight: '300',
+                    fontWeight: '400',
                     transition: 'all 0.2s',
                   }}
                   onMouseEnter={(e) => {
                     if (matches.length > 0 && replaceQuery.trim()) {
-                      e.currentTarget.style.backgroundColor = '#333'
-                      e.currentTarget.style.borderColor = '#444'
+                      e.currentTarget.style.backgroundColor = searchButtonHoverBg
+                      e.currentTarget.style.borderColor = searchButtonHoverBorder
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (matches.length > 0 && replaceQuery.trim()) {
-                      e.currentTarget.style.backgroundColor = '#2a2a2a'
-                      e.currentTarget.style.borderColor = '#333'
+                      e.currentTarget.style.backgroundColor = searchButtonBg
+                      e.currentTarget.style.borderColor = searchButtonBorder
                     }
                   }}
                   title="Replace All"
@@ -2337,24 +2361,24 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   style={{
                     flex: 1,
                     padding: '6px 12px',
-                    backgroundColor: currentMatchIndex >= 0 && replaceQuery.trim() ? '#6366f1' : '#333',
+                    backgroundColor: currentMatchIndex >= 0 && replaceQuery.trim() ? searchReplaceButtonBg : searchButtonDisabledBg,
                     border: 'none',
                     borderRadius: '6px',
-                    color: currentMatchIndex >= 0 && replaceQuery.trim() ? '#ffffff' : '#666',
+                    color: currentMatchIndex >= 0 && replaceQuery.trim() ? '#ffffff' : searchButtonDisabledColor,
                     cursor: currentMatchIndex >= 0 && replaceQuery.trim() ? 'pointer' : 'not-allowed',
                     fontSize: '12px',
                     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                    fontWeight: '300',
+                    fontWeight: '400',
                     transition: 'background-color 0.2s',
                   }}
                   onMouseEnter={(e) => {
                     if (currentMatchIndex >= 0 && replaceQuery.trim()) {
-                      e.currentTarget.style.backgroundColor = '#4f46e5'
+                      e.currentTarget.style.backgroundColor = searchReplaceButtonHoverBg
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (currentMatchIndex >= 0 && replaceQuery.trim()) {
-                      e.currentTarget.style.backgroundColor = '#6366f1'
+                      e.currentTarget.style.backgroundColor = searchReplaceButtonBg
                     }
                   }}
                   title="Replace"

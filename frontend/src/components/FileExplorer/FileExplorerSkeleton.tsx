@@ -54,7 +54,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
         style={{
           display: 'flex',
           alignItems: 'center',
-          padding: '6px 8px',
+          padding: '6px 16px 6px 8px',
           marginBottom: '4px',
           borderRadius: '6px',
           cursor: 'default',
@@ -86,7 +86,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
           style={{
             display: 'flex',
             alignItems: 'center',
-            padding: '6px 8px',
+            padding: '6px 16px 6px 8px',
             borderRadius: '6px',
             marginBottom: '2px',
           }}
@@ -112,13 +112,13 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
         
         {/* Library files skeleton - show multiple items with varied widths */}
         <div style={{ paddingLeft: '24px' }}>
-          {[1, 2, 3, 4, 5, 6].map((i) => (
+          {[1, 2].map((i) => (
             <div
               key={i}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                padding: '6px 8px',
+                padding: '6px 16px 6px 8px',
                 borderRadius: '6px',
                 marginBottom: '2px',
               }}
@@ -152,7 +152,7 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
           style={{
             display: 'flex',
             alignItems: 'center',
-            padding: '6px 8px',
+            padding: '6px 16px 6px 8px',
             borderRadius: '6px',
             marginBottom: '2px',
           }}
@@ -178,13 +178,13 @@ export function FileExplorerSkeleton({ projectName: _projectName = 'LEMONA' }: F
         
         {/* Project files skeleton - show fewer items initially */}
         <div style={{ paddingLeft: '24px' }}>
-          {[1, 2, 3, 4].map((i) => (
+          {[1, 2].map((i) => (
             <div
               key={i}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                padding: '6px 8px',
+                padding: '6px 16px 6px 8px',
                 borderRadius: '6px',
                 marginBottom: '2px',
               }}

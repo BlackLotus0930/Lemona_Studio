@@ -1233,7 +1233,7 @@ export default function Toolbar({
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
               borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
               zIndex: 10010,
               minWidth: '200px',
               maxWidth: '200px',
@@ -1340,7 +1340,7 @@ export default function Toolbar({
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
               borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
               zIndex: 10010,
               minWidth: '170px',
               maxWidth: '170px',
@@ -1453,7 +1453,7 @@ export default function Toolbar({
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
               borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
               zIndex: 10010,
               minWidth: '70px',
               maxHeight: '300px',
@@ -1632,14 +1632,14 @@ export default function Toolbar({
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
               borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
               zIndex: 10010,
               padding: '8px',
               display: 'grid',
-              gridTemplateColumns: 'repeat(6, 1fr)',
+              gridTemplateColumns: 'repeat(5, 1fr)',
               gap: '4px'
             }}>
-            {['#000000', '#434343', '#666666', '#999999', '#b7b7b7', '#cccccc', '#d9d9d9', '#efefef', '#f3f3f3', '#ffffff', '#980000', '#ff0000', '#ff9900', '#ffff00', '#00ff00', '#00ffff', '#4a86e8', '#0000ff', '#9900ff', '#ff00ff'].map((color) => {
+            {['#2C2C2B', '#7D7A75', '#A57F64', '#D27B2D', '#CB9434', '#50946E', '#387DC9', '#9A6BB4', '#C14C8A', '#CF5148'].map((color) => {
               const currentColor = getCurrentColor()
               // Check if this is "default" color (black or white) - should unset color instead
               const isDefaultColor = color === '#000000' || color === '#ffffff'
@@ -1746,7 +1746,7 @@ export default function Toolbar({
                 gridTemplateColumns: 'repeat(6, 1fr)',
                 gap: '4px'
               }}>
-                {['#ffff00', '#00ff00', '#00ffff', '#ff00ff', '#ff0000', '#0000ff', '#ffffff', '#000000'].map((color) => {
+                {['#FCE9E7', '#FAE9F1', '#F3EBF9', '#E5F2FC', '#E8F1EC', '#F9F3DC', '#233850', '#502C29', '#4E2B3C', '#3C2D47', '#263D30', '#504425'].map((color) => {
                   const isActive = getCurrentHighlightColor() === color.toLowerCase()
                   return (
                     <div
