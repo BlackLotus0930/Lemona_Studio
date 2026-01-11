@@ -482,7 +482,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const borderColor = theme === 'dark' ? '#313131' : '#DADCE0'
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#9aa0a6'
-  const userMessageBg = theme === 'dark' ? '#1C1C1C' : '#F3F3F3'
+  const userMessageBg = theme === 'dark' ? '#1C1C1C' : '#f0f0ed'
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1687,7 +1687,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   padding: '8px 12px',
                   borderRadius: '6px',
                   backgroundColor: userMessageBg,
-                  border: `1px solid ${theme === 'dark' ? '#313131' : '#dadce0'}`,
                   color: textColor,
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
@@ -1713,7 +1712,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       <div key={att.id} style={{
                         borderRadius: '6px',
                         overflow: 'hidden',
-                        border: `1px solid ${theme === 'dark' ? '#313131' : '#dadce0'}`,
+                        border: `1px solid ${theme === 'dark' ? '#313131' : '#DADCE0'}`,
                         width: '60px',
                         height: '60px',
                         flexShrink: 0
