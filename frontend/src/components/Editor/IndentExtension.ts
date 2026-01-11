@@ -28,7 +28,9 @@ declare module '@tiptap/core' {
 }
 
 const INDENT_LEVELS = 10 // Maximum indent levels
-const INDENT_SIZE = 40 // Pixels per indent level
+// Use 1.75em (28px at 16px font size) to match CSS list indentation
+// This is the professional standard distance for list indentation
+const INDENT_SIZE = 28 // Pixels per indent level (matches 1.75em)
 
 export const IndentExtension = Extension.create({
   name: 'indent',
