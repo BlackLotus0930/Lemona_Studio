@@ -150,10 +150,27 @@ export const IndentExtension = Extension.create({
         const { selection } = state
         const { $from, $to } = selection
 
-        // Get all selected paragraphs/headings/titles/subtitles
+        // Get all selected paragraphs/headings/listItems/titles/subtitles
+        // But skip paragraphs that are inside listItems to avoid double indentation
         const nodes: Array<{ pos: number; node: any; currentIndent: number }> = []
         state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
-          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'title' || node.type.name === 'subtitle') {
+          // Skip paragraphs that are inside a listItem
+          if (node.type.name === 'paragraph') {
+            // Check if parent is a listItem by resolving position and checking parent chain
+            try {
+              const $pos = state.doc.resolve(pos)
+              for (let d = $pos.depth; d > 0; d--) {
+                const parentNode = $pos.node(d)
+                if (parentNode.type.name === 'listItem') {
+                  return // Skip this paragraph, it's inside a listItem
+                }
+              }
+            } catch (e) {
+              // If resolution fails, continue
+            }
+          }
+          
+          if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem' || node.type.name === 'title' || node.type.name === 'subtitle') {
             const currentIndent = node.attrs.indent || 0
             nodes.push({ pos, node, currentIndent })
           }
@@ -397,26 +414,15 @@ export const IndentExtension = Extension.create({
         const { $from, $to } = state.selection
         const hasSelection = $from.pos !== $to.pos
 
-        // Handle list items
+        // Don't handle Tab in list items - let ListItem extension handle it
+        // This ensures proper nested list structure instead of text indentation
         if (this.editor.isActive('listItem')) {
-          // Try to sink the list item (works for nested lists)
-          const sinkResult = this.editor.commands.sinkListItem('listItem')
-          if (sinkResult) {
-            return true
-          }
-          // If sinkListItem failed (e.g., first item in list), indent the paragraph inside the list item
-          // List items contain paragraphs, so we can indent the list item's content
-          // by using the paragraph indent mechanism
-          if (hasSelection) {
-            return this.editor.commands.increaseIndent()
-          } else {
-            return this.editor.commands.increaseFirstLineIndent()
-          }
+          return false
         }
 
-        // Check if we're in a paragraph, heading, title, subtitle, or list item
+        // Check if we're in a paragraph, heading, title, or subtitle
         const node = $from.parent
-        if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem' || node.type.name === 'title' || node.type.name === 'subtitle') {
+        if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'title' || node.type.name === 'subtitle') {
           if (hasSelection) {
             // With selection: indent whole paragraph(s)
             return this.editor.commands.increaseIndent()
@@ -434,30 +440,52 @@ export const IndentExtension = Extension.create({
         const { $from, $to } = state.selection
         const hasSelection = $from.pos !== $to.pos
 
-        // Handle list items
+        // Don't handle Shift-Tab in list items - let ListItem extension handle it
+        // This ensures proper nested list structure instead of text outdentation
         if (this.editor.isActive('listItem')) {
-          // Try to lift the list item
-          const liftResult = this.editor.commands.liftListItem('listItem')
-          if (liftResult) {
-            return true
-          }
-          // If liftListItem failed, outdent the paragraph inside the list item
-          if (hasSelection) {
-            return this.editor.commands.decreaseIndent()
-          } else {
-            return this.editor.commands.decreaseFirstLineIndent()
-          }
+          return false
         }
 
-        // Check if we're in a paragraph, heading, title, subtitle, or list item
+        // Check if we're in a paragraph, heading, title, or subtitle
         const node = $from.parent
-        if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'listItem' || node.type.name === 'title' || node.type.name === 'subtitle') {
+        if (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'title' || node.type.name === 'subtitle') {
           if (hasSelection) {
             // With selection: outdent whole paragraph(s)
             return this.editor.commands.decreaseIndent()
           } else {
             // Without selection: outdent only first line
             return this.editor.commands.decreaseFirstLineIndent()
+          }
+        }
+
+        return false
+      },
+
+      Backspace: () => {
+        const { state } = this.editor
+        const { $from } = state.selection
+
+        // Don't handle Backspace in list items - let ListItem extension handle it
+        if (this.editor.isActive('listItem')) {
+          return false
+        }
+
+        // Check if cursor is at the start of a paragraph/heading/title/subtitle
+        const node = $from.parent
+        const isAtStart = $from.parentOffset === 0
+
+        if (isAtStart && (node.type.name === 'paragraph' || node.type.name.startsWith('heading') || node.type.name === 'title' || node.type.name === 'subtitle')) {
+          // Check if the node has indent
+          const hasIndent = (node.attrs.indent || 0) > 0
+          const hasFirstLineIndent = (node.attrs.firstLineIndent || 0) > 0
+
+          if (hasIndent || hasFirstLineIndent) {
+            // Outdent instead of deleting or joining with previous line
+            if (hasIndent) {
+              return this.editor.commands.decreaseIndent()
+            } else if (hasFirstLineIndent) {
+              return this.editor.commands.decreaseFirstLineIndent()
+            }
           }
         }
 

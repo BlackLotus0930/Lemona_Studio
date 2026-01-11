@@ -2353,7 +2353,7 @@ export default function Toolbar({
                 setShowCommitHistoryModal((prev: boolean) => !prev)
               }}
               style={showCommitHistoryModal ? activeButtonStyle : buttonStyle}
-              title="Commit history"
+              title="Version History"
               onMouseEnter={(e) => {
                 if (!showCommitHistoryModal) {
                   e.currentTarget.style.backgroundColor = toolbarHoverBg

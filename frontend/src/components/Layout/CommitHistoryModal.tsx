@@ -146,7 +146,7 @@ export default function CommitHistoryModal({
       
       // Show success notification BEFORE closing modal
       setShowSuccessNotification({
-        message: 'Commit restored successfully',
+        message: 'Version restored successfully',
         fileCount: restoredCommit.documentSnapshots.length
       })
       
@@ -290,7 +290,7 @@ export default function CommitHistoryModal({
             color: dropdownTextColor,
             fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
           }}>
-            Commit History
+            Version History
           </h3>
         </div>
 

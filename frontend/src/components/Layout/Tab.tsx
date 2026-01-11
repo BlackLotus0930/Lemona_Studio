@@ -22,20 +22,20 @@ interface TabProps {
   indicatorColor?: string
 }
 
-export default function Tab({ documentId, title, isActive, onClick, onClose, isLast = false, canClose = true, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd, showDropIndicator = false, dropPosition = null, indicatorColor = '#1976d2' }: TabProps) {
+export default function Tab({ documentId, title, isActive, onClick, onClose, isLast: _isLast = false, canClose = true, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd, showDropIndicator = false, dropPosition = null, indicatorColor = '#1976d2' }: TabProps) {
   const { theme } = useTheme()
   const [isHovered, setIsHovered] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
 
   const tabBg = isActive 
-    ? (theme === 'dark' ? '#1e1e1e' : '#ffffff')
-    : (theme === 'dark' ? '#141414' : '#f5f5f5')
+    ? (theme === 'dark' ? '#1e1e1e' : '#f5f5f5')
+    : (theme === 'dark' ? '#141414' : '#ffffff')
   const tabTextColor = isActive
     ? (theme === 'dark' ? '#D6D6DD' : '#5f6368')
     : (theme === 'dark' ? '#858585' : '#5f6368')
   // Hover color same as selection color
-  const tabHoverBg = theme === 'dark' ? '#1e1e1e' : '#ffffff'
+  const tabHoverBg = theme === 'dark' ? '#1e1e1e' : '#f5f5f5'
   const separatorColor = theme === 'dark' ? '#1E1E1E' : '#e0e0e0' // Theme-aware separator color
   const showCloseButton = canClose && (isActive || isHovered)
 
@@ -221,8 +221,8 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
         />
       )}
       
-      {/* Right separator line - height 20px (not shown for last tab) */}
-      {!isLast && !(showDropIndicator && dropPosition === 'right') && (
+      {/* Right separator line - height 20px (shown for all tabs including last) */}
+      {!(showDropIndicator && dropPosition === 'right') && (
         <div style={{
           position: 'absolute',
           right: 0,

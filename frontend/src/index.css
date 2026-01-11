@@ -397,7 +397,7 @@ code {
 
 .ProseMirror li {
   margin: 0.25em 0;
-  padding-left: 0.25em;
+  padding-left: 0;
   position: relative;
 }
 

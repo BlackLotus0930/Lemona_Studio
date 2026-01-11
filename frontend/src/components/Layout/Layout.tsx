@@ -2118,16 +2118,111 @@ export default function Layout(): JSX.Element {
               // Tab to indent
               Tab: () => {
                 if (this.editor.isActive('listItem')) {
+                  const { state } = this.editor
+                  const { $from, $to } = state.selection
+                  const { listItem } = state.schema.nodes
+                  
                   // Try to sink the list item (works for nested lists)
-                  const result = this.editor.commands.sinkListItem('listItem')
-                  // If sinkListItem fails (e.g., first item in list), return false
-                  // so IndentExtension can handle it with paragraph indent
-                  return result
+                  // sinkListItem can handle multiple selected items
+                  const sinkResult = this.editor.commands.sinkListItem('listItem')
+                  if (sinkResult) {
+                    return true
+                  }
+                  
+                  // If sinkListItem fails (e.g., first item in list), indent all selected listItems
+                  // Find all listItem nodes in the selection
+                  const listItemNodes: Array<{ pos: number; node: any }> = []
+                  
+                  state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+                    if (node.type === listItem || node.type.name === 'listItem') {
+                      listItemNodes.push({ pos, node })
+                    }
+                  })
+                  
+                  // If no listItems found in selection, try to find the current one
+                  if (listItemNodes.length === 0) {
+                    for (let d = $from.depth; d > 0; d--) {
+                      const node = $from.node(d)
+                      if (node.type === listItem || node.type.name === 'listItem') {
+                        listItemNodes.push({ pos: $from.before(d), node })
+                        break
+                      }
+                    }
+                  }
+                  
+                  if (listItemNodes.length > 0) {
+                    const { tr } = state
+                    listItemNodes.forEach(({ pos, node }) => {
+                      const currentIndent = node.attrs.indent || 0
+                      const newIndent = Math.min(currentIndent + 1, 10) // Max 10 levels
+                      
+                      tr.setNodeMarkup(pos, undefined, {
+                        ...node.attrs,
+                        indent: newIndent,
+                      })
+                    })
+                    this.editor.view.dispatch(tr)
+                    return true
+                  }
+                  
+                  return false
                 }
                 return false
               },
               // Shift+Tab to outdent
               'Shift-Tab': () => {
+                if (this.editor.isActive('listItem')) {
+                  const { state } = this.editor
+                  const { $from, $to } = state.selection
+                  const { listItem } = state.schema.nodes
+                  
+                  // Try liftListItem first (can handle multiple selected items)
+                  const liftResult = this.editor.commands.liftListItem('listItem')
+                  if (liftResult) {
+                    return true
+                  }
+                  
+                  // If liftListItem fails, manually outdent all selected listItems
+                  const listItemNodes: Array<{ pos: number; node: any }> = []
+                  
+                  state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+                    if (node.type === listItem || node.type.name === 'listItem') {
+                      listItemNodes.push({ pos, node })
+                    }
+                  })
+                  
+                  // If no listItems found in selection, try to find the current one
+                  if (listItemNodes.length === 0) {
+                    for (let d = $from.depth; d > 0; d--) {
+                      const node = $from.node(d)
+                      if (node.type === listItem || node.type.name === 'listItem') {
+                        listItemNodes.push({ pos: $from.before(d), node })
+                        break
+                      }
+                    }
+                  }
+                  
+                  if (listItemNodes.length > 0) {
+                    const { tr } = state
+                    listItemNodes.forEach(({ pos, node }) => {
+                      const currentIndent = node.attrs.indent || 0
+                      const newIndent = Math.max(currentIndent - 1, 0)
+                      
+                      tr.setNodeMarkup(pos, undefined, {
+                        ...node.attrs,
+                        indent: newIndent,
+                      })
+                    })
+                    this.editor.view.dispatch(tr)
+                    return true
+                  }
+                  
+                  return false
+                }
+                return false
+              },
+              // Ctrl+Tab (or Cmd+Tab on Mac) to outdent
+              'Mod-Tab': () => {
                 if (this.editor.isActive('listItem')) {
                   return this.editor.commands.liftListItem('listItem')
                 }
@@ -5483,7 +5578,7 @@ export default function Layout(): JSX.Element {
                 marginBottom: '2px',
               }}
             >
-              Commit created successfully
+              Version created successfully
             </div>
             <div
               style={{
@@ -5491,7 +5586,7 @@ export default function Layout(): JSX.Element {
                 color: theme === 'dark' ? '#999' : '#666',
               }}
             >
-              {showCommitSuccessNotification.fileCount} file{showCommitSuccessNotification.fileCount !== 1 ? 's' : ''} committed
+              {showCommitSuccessNotification.fileCount} file{showCommitSuccessNotification.fileCount !== 1 ? 's' : ''} versioned
             </div>
           </div>
           <style>{`

@@ -2879,7 +2879,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   }}
                   title="More options"
                 >
-                  <AddIcon style={{ fontSize: '20px', transform: 'translateY(-1px)' }} />
+                  <AddIcon style={{ fontSize: '21px', transform: 'translateY(-1px)' }} />
                 </button>
                 
                 {/* Plus Menu Dropup */}
