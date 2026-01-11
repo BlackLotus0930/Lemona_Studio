@@ -48,6 +48,7 @@ import WordCountModal from './WordCountModal'
 
 const AI_PANEL_STORAGE_KEY = 'aiPanelState'
 const FILE_EXPLORER_SIZE_STORAGE_KEY = 'fileExplorerSize'
+const FILE_EXPLORER_LAST_OPEN_SIZE_KEY = 'fileExplorerLastOpenSize'
 
 interface AIPanelState {
   isOpen: boolean
@@ -98,6 +99,29 @@ function saveFileExplorerSize(size: number) {
     localStorage.setItem(FILE_EXPLORER_SIZE_STORAGE_KEY, size.toString())
   } catch (error) {
     console.error('Failed to save FileExplorer size:', error)
+  }
+}
+
+function loadFileExplorerLastOpenSize(): number {
+  try {
+    const stored = localStorage.getItem(FILE_EXPLORER_LAST_OPEN_SIZE_KEY)
+    if (stored) {
+      const parsed = parseFloat(stored)
+      if (!isNaN(parsed) && parsed > 0 && parsed <= 30) {
+        return parsed
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load FileExplorer last open size:', error)
+  }
+  return 14 // Default size
+}
+
+function saveFileExplorerLastOpenSize(size: number) {
+  try {
+    localStorage.setItem(FILE_EXPLORER_LAST_OPEN_SIZE_KEY, size.toString())
+  } catch (error) {
+    console.error('Failed to save FileExplorer last open size:', error)
   }
 }
 
@@ -914,10 +938,16 @@ export default function Layout(): JSX.Element {
         e.preventDefault()
         e.stopPropagation()
         if (fileExplorerPanelRef.current) {
-          // Toggle between visible (14%) and hidden (0%)
           const currentSize = fileExplorerPanelRef.current.getSize()
-          const newSize = currentSize > 0 ? 0 : 14
-          fileExplorerPanelRef.current.resize(newSize)
+          if (currentSize > 0) {
+            // Closing: save current size for next time
+            saveFileExplorerLastOpenSize(currentSize)
+            fileExplorerPanelRef.current.resize(0)
+          } else {
+            // Opening: restore last open size
+            const lastOpenSize = loadFileExplorerLastOpenSize()
+            fileExplorerPanelRef.current.resize(lastOpenSize)
+          }
         }
         return
       }
@@ -961,7 +991,9 @@ export default function Layout(): JSX.Element {
           if (newValue && fileExplorerPanelRef.current) {
             const currentSize = fileExplorerPanelRef.current.getSize()
             if (currentSize === 0) {
-              fileExplorerPanelRef.current.resize(14)
+              // Restore last open size when opening for search mode
+              const lastOpenSize = loadFileExplorerLastOpenSize()
+              fileExplorerPanelRef.current.resize(lastOpenSize)
             }
           }
           return newValue
@@ -4901,8 +4933,15 @@ export default function Layout(): JSX.Element {
         onToggleFileExplorer={() => {
           if (fileExplorerPanelRef.current) {
             const currentSize = fileExplorerPanelRef.current.getSize()
-            const newSize = currentSize > 0 ? 0 : 14
-            fileExplorerPanelRef.current.resize(newSize)
+            if (currentSize > 0) {
+              // Closing: save current size for next time
+              saveFileExplorerLastOpenSize(currentSize)
+              fileExplorerPanelRef.current.resize(0)
+            } else {
+              // Opening: restore last open size
+              const lastOpenSize = loadFileExplorerLastOpenSize()
+              fileExplorerPanelRef.current.resize(lastOpenSize)
+            }
           }
         }}
         onToggleAIPanel={() => {
@@ -5071,6 +5110,11 @@ export default function Layout(): JSX.Element {
             
             // Save to localStorage
             saveFileExplorerSize(size)
+            
+            // If size > 0, also save as last open size for restoration
+            if (size > 0) {
+              saveFileExplorerLastOpenSize(size)
+            }
             
             // Debounce clearing the resizing flag
             if (fileExplorerResizeTimeoutRef.current) {
@@ -5315,8 +5359,9 @@ export default function Layout(): JSX.Element {
         
         {/* Editor Panel */}
         <Panel 
-          ref={editorPanelRef}
+          id="editor"
           order={2}
+          ref={editorPanelRef}
           defaultSize={isAIPanelOpen 
             ? ((100 - fileExplorerSize) - ((aiPanelWidth / 100) * (100 - fileExplorerSize))) 
             : (100 - fileExplorerSize)
