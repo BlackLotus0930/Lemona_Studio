@@ -1016,7 +1016,7 @@ export default function Toolbar({
   const styles = [
     { label: 'Title', value: 'title', fontSize: '24px', fontWeight: 600 },
     { label: 'Subtitle', value: 'subtitle', fontSize: '18px', fontWeight: 500 },
-    { label: 'Normal text', value: 'normal', fontSize: '14px', fontWeight: 400 },
+    { label: 'Normal text', value: 'normal', fontSize: '16px', fontWeight: 400 },
     { label: 'Heading 1', value: 'h1', fontSize: '20px', fontWeight: 600 },
     { label: 'Heading 2', value: 'h2', fontSize: '18px', fontWeight: 600 },
     { label: 'Heading 3', value: 'h3', fontSize: '16px', fontWeight: 600 },
@@ -1256,6 +1256,34 @@ export default function Toolbar({
                   onMouseDown={(e) => {
                     e.preventDefault()
                     if (!canUseEditor()) return
+                    
+                    // Extract font size from style (e.g., '24px' -> 24 as string)
+                    const fontSizeMatch = style.fontSize.match(/(\d+)/)
+                    const fontSize = fontSizeMatch ? fontSizeMatch[1] : null
+                    
+                    // Get current selection
+                    const { from } = stableEditor!.state.selection
+                    const $from = stableEditor!.state.doc.resolve(from)
+                    
+                    // Find the current block node (paragraph, heading, title, subtitle)
+                    let blockNode: any = null
+                    let blockStart = from
+                    let blockEnd = from
+                    for (let depth = $from.depth; depth > 0; depth--) {
+                      const node = $from.node(depth)
+                      if (node.type.name === 'paragraph' || 
+                          node.type.name === 'heading' || 
+                          node.type.name === 'title' || 
+                          node.type.name === 'subtitle') {
+                        blockNode = node
+                        blockStart = $from.start(depth)
+                        // Use content size to get correct end position (excluding closing token)
+                        blockEnd = blockStart + node.content.size
+                        break
+                      }
+                    }
+                    
+                    // Apply paragraph style
                     if (style.value === 'title') {
                       // @ts-ignore - Title extension command
                       stableEditor!.chain().focus().setTitle().run()
@@ -1264,11 +1292,32 @@ export default function Toolbar({
                       stableEditor!.chain().focus().setSubtitle().run()
                     } else if (style.value.startsWith('h')) {
                       const level = parseInt(style.value.slice(1)) as 1 | 2 | 3
-                      stableEditor!.chain().focus().toggleHeading({ level }).run()
+                      // Check if already the target heading level - if so, don't toggle
+                      const isCurrentHeading = blockNode && 
+                        blockNode.type.name === 'heading' && 
+                        blockNode.attrs?.level === level
+                      if (!isCurrentHeading) {
+                        stableEditor!.chain().focus().toggleHeading({ level }).run()
+                      }
                     } else {
                       // Normal text
                       stableEditor!.chain().focus().setParagraph().run()
                     }
+                    
+                    // Apply font size to all text in the paragraph after setting the style
+                    if (fontSize) {
+                      // Get the textStyle mark type from editor schema
+                      const textStyleMark = stableEditor!.schema.marks.textStyle
+                      if (textStyleMark) {
+                        // Select all text in the current block and apply font size
+                        stableEditor!.chain()
+                          .focus()
+                          .setTextSelection({ from: blockStart, to: blockEnd })
+                          .setMark('textStyle', { fontSize })
+                          .run()
+                      }
+                    }
+                    
                     setShowStyleMenu(false)
                   }}
                   style={{
@@ -2365,7 +2414,7 @@ export default function Toolbar({
                 }
               }}
             >
-              <TurnedInNotOutlinedIcon style={{ fontSize: '20px' }} />
+              <TurnedInNotOutlinedIcon style={{ fontSize: '19px' }} />
             </button>
             <CommitHistoryModal
               projectId={projectId}
@@ -2389,12 +2438,20 @@ export default function Toolbar({
               e.stopPropagation()
               setShowExportModal((prev: boolean) => !prev)
             }}
-            style={buttonStyle}
+            style={showExportModal ? activeButtonStyle : buttonStyle}
             title="Export"
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            onMouseEnter={(e) => {
+              if (!showExportModal) {
+                e.currentTarget.style.backgroundColor = toolbarHoverBg
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!showExportModal) {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
+            }}
           >
-            <ShareIcon style={{ fontSize: '20px', color: theme === 'dark' ? '#B5B5B5' : '#5a5a5a' }} />
+            <ShareIcon style={{ fontSize: '19px' }} />
           </button>
           <ExportModal
             isOpen={showExportModal}

@@ -326,16 +326,17 @@ export default function CommitHistoryModal({
               No commits yet. Press Ctrl+S to create your first commit.
             </div>
           ) : (
-            commits.map((commit) => {
+            commits.map((commit, index) => {
               const isHead = commit.id === headCommitId
               const isRestoring = restoringCommitId === commit.id
+              const isLast = index === commits.length - 1
               
               return (
                 <div
                   key={commit.id}
                   style={{
                     padding: '12px 16px',
-                    borderBottom: `1px solid ${theme === 'dark' ? '#252525' : '#e8eaed'}`,
+                    borderBottom: isLast ? 'none' : `1px solid ${theme === 'dark' ? '#252525' : '#e8eaed'}`,
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '8px',

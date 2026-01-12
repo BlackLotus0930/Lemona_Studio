@@ -69,8 +69,45 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
     }
   }
 
+  // Helper function to apply font size to current block after style change
+  const applyFontSizeToBlock = (editor: Editor, fontSize: string) => {
+    try {
+      const { from } = editor.state.selection
+      const $from = editor.state.doc.resolve(from)
+      
+      // Find the current block node (paragraph, heading, title, subtitle)
+      let blockStart = from
+      let blockEnd = from
+      for (let depth = $from.depth; depth > 0; depth--) {
+        const node = $from.node(depth)
+        if (node.type.name === 'paragraph' || 
+            node.type.name === 'heading' || 
+            node.type.name === 'title' || 
+            node.type.name === 'subtitle') {
+          blockStart = $from.start(depth)
+          // Use content size to get correct end position (excluding closing token)
+          blockEnd = blockStart + node.content.size
+          break
+        }
+      }
+      
+      // Get the textStyle mark type from editor schema
+      const textStyleMark = editor.schema.marks.textStyle
+      if (textStyleMark && blockStart !== blockEnd) {
+        // Select all text in the current block and apply font size
+        editor.chain()
+          .focus()
+          .setTextSelection({ from: blockStart, to: blockEnd })
+          .setMark('textStyle', { fontSize })
+          .run()
+      }
+    } catch (error) {
+      console.warn('Error applying font size:', error)
+    }
+  }
+
   // Helper function to delete the command text and execute action
-  const executeCommand = (action: (editor: Editor) => void) => {
+  const executeCommand = (action: (editor: Editor) => void, fontSize?: string) => {
     if (commandStartPos !== null) {
       const { from } = editor.state.selection
       try {
@@ -97,6 +134,14 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
         
         // Execute the command action
         action(editor)
+        
+        // Apply font size if provided
+        if (fontSize) {
+          // Use setTimeout to ensure the style change is applied first
+          setTimeout(() => {
+            applyFontSizeToBlock(editor, fontSize)
+          }, 0)
+        }
       } catch (error) {
         console.warn('Error executing slash command:', error)
         // Fallback: try to delete using deleteRange
@@ -107,18 +152,43 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
             .deleteRange({ from: commandStartPos, to: from })
             .run()
           action(editor)
+          if (fontSize) {
+            setTimeout(() => {
+              applyFontSizeToBlock(editor, fontSize)
+            }, 0)
+          }
         } catch (fallbackError) {
           console.warn('Fallback delete also failed:', fallbackError)
           // Last resort: just execute the action without deleting
           action(editor)
+          if (fontSize) {
+            setTimeout(() => {
+              applyFontSizeToBlock(editor, fontSize)
+            }, 0)
+          }
         }
       }
     } else {
       // Fallback: just execute the action
       action(editor)
+      if (fontSize) {
+        setTimeout(() => {
+          applyFontSizeToBlock(editor, fontSize)
+        }, 0)
+      }
     }
     // Call onClose without deleting (we already deleted above)
     onClose(false)
+  }
+
+  // Style definitions matching Toolbar
+  const styleFontSizes: Record<string, string> = {
+    'title': '24',
+    'subtitle': '18',
+    'normal': '16',
+    'h1': '20',
+    'h2': '18',
+    'h3': '16',
   }
 
   const commands: CommandItem[] = [
@@ -129,8 +199,23 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
       keywords: ['heading', 'h1', 'heading1'],
       action: (editor: Editor) => {
         executeCommand(() => {
-          editor.chain().focus().toggleHeading({ level: 1 }).run()
-        })
+          const { from } = editor.state.selection
+          const $from = editor.state.doc.resolve(from)
+          
+          // Check if already the target heading level - if so, don't toggle
+          let isCurrentHeading = false
+          for (let depth = $from.depth; depth > 0; depth--) {
+            const node = $from.node(depth)
+            if (node.type.name === 'heading' && node.attrs?.level === 1) {
+              isCurrentHeading = true
+              break
+            }
+          }
+          
+          if (!isCurrentHeading) {
+            editor.chain().focus().toggleHeading({ level: 1 }).run()
+          }
+        }, styleFontSizes['h1'])
       },
     },
     {
@@ -140,8 +225,23 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
       keywords: ['heading', 'h2', 'heading2'],
       action: (editor: Editor) => {
         executeCommand(() => {
-          editor.chain().focus().toggleHeading({ level: 2 }).run()
-        })
+          const { from } = editor.state.selection
+          const $from = editor.state.doc.resolve(from)
+          
+          // Check if already the target heading level - if so, don't toggle
+          let isCurrentHeading = false
+          for (let depth = $from.depth; depth > 0; depth--) {
+            const node = $from.node(depth)
+            if (node.type.name === 'heading' && node.attrs?.level === 2) {
+              isCurrentHeading = true
+              break
+            }
+          }
+          
+          if (!isCurrentHeading) {
+            editor.chain().focus().toggleHeading({ level: 2 }).run()
+          }
+        }, styleFontSizes['h2'])
       },
     },
     {
@@ -151,8 +251,23 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
       keywords: ['heading', 'h3', 'heading3'],
       action: (editor: Editor) => {
         executeCommand(() => {
-          editor.chain().focus().toggleHeading({ level: 3 }).run()
-        })
+          const { from } = editor.state.selection
+          const $from = editor.state.doc.resolve(from)
+          
+          // Check if already the target heading level - if so, don't toggle
+          let isCurrentHeading = false
+          for (let depth = $from.depth; depth > 0; depth--) {
+            const node = $from.node(depth)
+            if (node.type.name === 'heading' && node.attrs?.level === 3) {
+              isCurrentHeading = true
+              break
+            }
+          }
+          
+          if (!isCurrentHeading) {
+            editor.chain().focus().toggleHeading({ level: 3 }).run()
+          }
+        }, styleFontSizes['h3'])
       },
     },
     {
@@ -163,7 +278,7 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
       action: (editor: Editor) => {
         executeCommand(() => {
           editor.chain().focus().setParagraph().run()
-        })
+        }, styleFontSizes['normal'])
       },
     },
     {
@@ -175,7 +290,7 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
         executeCommand(() => {
           // @ts-ignore - Title extension command
           editor.chain().focus().setTitle().run()
-        })
+        }, styleFontSizes['title'])
       },
     },
   ]
