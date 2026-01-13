@@ -293,6 +293,30 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
         }, styleFontSizes['title'])
       },
     },
+    {
+      id: 'callout',
+      label: 'Callout',
+      icon: '📝',
+      keywords: ['callout', 'note', 'tip', 'info'],
+      action: (editor: Editor) => {
+        executeCommand(() => {
+          // @ts-ignore - Callout extension command
+          editor.chain().focus().setCallout().run()
+        })
+      },
+    },
+    {
+      id: 'quote',
+      label: 'Quote',
+      icon: '❝',
+      keywords: ['quote', 'citation', 'blockquote'],
+      action: (editor: Editor) => {
+        executeCommand(() => {
+          // @ts-ignore - Quote extension command
+          editor.chain().focus().setQuote().run()
+        })
+      },
+    },
   ]
 
   // Filter commands based on filterText

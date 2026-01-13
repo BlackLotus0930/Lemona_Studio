@@ -379,20 +379,47 @@ code {
   padding-left: 1.75em;
   margin: 0.5em 0;
   margin-left: 0;
+  list-style-position: outside; /* Ensure consistent marker positioning */
 }
 
 .ProseMirror ul {
   list-style-type: disc;
 }
 
+/* Ordered list styling with multi-level numbering - same indent as bullet list */
 .ProseMirror ol {
-  list-style-type: decimal;
+  list-style-type: decimal; /* Level 1: 1, 2, 3 */
+  padding-left: 1.75em; /* Same indent as bullet list */
 }
 
-.ProseMirror ol li::marker,
-.ProseMirror ol ol li::marker,
+.ProseMirror ol li::marker {
+  font-size: 0.92em;
+}
+
+/* Level 2: a, b, c */
+.ProseMirror ol ol {
+  list-style-type: lower-alpha; /* Level 2: a, b, c */
+  padding-left: 1.75em; /* Same indent as bullet list */
+}
+
+.ProseMirror ol ol li::marker {
+  font-size: 0.92em;
+}
+
+/* Level 3: i, ii, iii */
+.ProseMirror ol ol ol {
+  list-style-type: lower-roman; /* Level 3: i, ii, iii */
+  padding-left: 1.75em; /* Same indent as bullet list */
+}
+
 .ProseMirror ol ol ol li::marker {
-  font-size: 0.90em;
+  font-size: 0.92em;
+}
+
+/* Reset to decimal for level 4+ */
+.ProseMirror ol ol ol ol {
+  list-style-type: decimal;
+  padding-left: 1.75em; /* Same indent as bullet list */
 }
 
 .ProseMirror li {

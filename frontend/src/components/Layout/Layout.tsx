@@ -31,6 +31,8 @@ import { FontFamily } from '../Editor/FontFamily'
 import { LineHeight } from '../Editor/LineHeight'
 import { Title } from '../Editor/Title'
 import { Subtitle } from '../Editor/Subtitle'
+import { Callout } from '../Editor/Callout'
+import { Quote } from '../Editor/Quote'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useEditorContext } from '../../contexts/EditorContext'
 import { BulletList, OrderedList, ListItem } from '@tiptap/extension-list'
@@ -2263,9 +2265,15 @@ export default function Layout(): JSX.Element {
               // Backspace at the start of a list item - lift it out
               Backspace: () => {
                 const { state } = this.editor
-                const { $from } = state.selection
+                const { $from, $to } = state.selection
                 
-                // Check if we're at the start of a list item
+                // If there's a selection, let default delete behavior handle it
+                // Don't lift the list item when content is selected
+                if ($from.pos !== $to.pos) {
+                  return false
+                }
+                
+                // Check if we're at the start of a list item (no selection, cursor only)
                 if ($from.parentOffset === 0 && this.editor.isActive('listItem')) {
                   // If the list item is empty, lift it out
                   const listItemNode = $from.node($from.depth)
@@ -2338,6 +2346,8 @@ export default function Layout(): JSX.Element {
         LineHeight,
         Title,
         Subtitle,
+        Callout,
+        Quote,
         Highlight.configure({
           multicolor: true,
         }),
@@ -2537,92 +2547,123 @@ export default function Layout(): JSX.Element {
           // Return the processed HTML
           return body.innerHTML || html
         },
-        // Fix cursor jumping to beginning of nested list items when clicking
+        // Fix cursor jumping to beginning of list items when clicking on right side
         // This is a known issue with ProseMirror's hit testing on complex nested DOM structures
         handleClick: (view: any, pos: number, event: MouseEvent) => {
           const { state } = view
           const $pos = state.doc.resolve(pos)
-          const { listItem } = state.schema.nodes
+          const { listItem, paragraph } = state.schema.nodes
           
-          // Check if we're inside a list item
+          // Find paragraph node (could be inside list item or standalone)
+          let paragraphNode = null
+          let paragraphDepth = -1
           let inListItem = false
           let listItemDepth = -1
+          
           for (let d = $pos.depth; d > 0; d--) {
-            if ($pos.node(d).type === listItem) {
+            const node = $pos.node(d)
+            if (node.type === listItem) {
               inListItem = true
               listItemDepth = d
-              break
+            }
+            // Check for paragraph, heading, title, subtitle
+            if (node.type === paragraph || 
+                node.type.name === 'paragraph' ||
+                node.type.name.startsWith('heading') ||
+                node.type.name === 'title' ||
+                node.type.name === 'subtitle') {
+              paragraphNode = node
+              paragraphDepth = d
+              // Don't break here - we want the innermost paragraph
             }
           }
           
-          if (!inListItem || listItemDepth < 0) return false
-          
-          // Check if this list item has nested lists (sub-bullets)
-          const listItemNode = $pos.node(listItemDepth)
-          let hasNestedList = false
-          listItemNode.forEach((child: any) => {
-            if (child.type.name === 'bulletList' || child.type.name === 'orderedList') {
-              hasNestedList = true
-            }
-          })
-          
-          if (!hasNestedList) return false
-          
-          // Check if cursor ended up at the beginning of a paragraph (position 0)
-          // This is the buggy behavior we want to fix
-          if ($pos.parentOffset !== 0) return false
-          
-          // Get click X coordinate
-          const clickX = event.clientX
-          
-          // Get the coordinates of the cursor position
-          const posCoords = view.coordsAtPos(pos)
-          if (!posCoords) return false
-          
-          // If click X is significantly to the right of where cursor landed, 
-          // the user probably intended to click at the end of the line
-          const clickDistanceFromCursor = clickX - posCoords.left
-          
-          if (clickDistanceFromCursor > 30) {
-            // Find the end of the current line
-            const parent = $pos.parent
-            const endOfParent = pos + parent.content.size
-            
-            // Binary search for end of line (same Y coordinate)
-            const lineYThreshold = 5
-            let left = pos
-            let right = endOfParent
-            let bestPos = pos
-            
-            while (left <= right) {
-              const mid = Math.floor((left + right) / 2)
-              const midCoords = view.coordsAtPos(mid)
-              
-              if (midCoords && Math.abs(midCoords.top - posCoords.top) < lineYThreshold) {
-                bestPos = mid
-                left = mid + 1
-              } else {
-                right = mid - 1
+          // Handle list items without paragraphs
+          if (inListItem && listItemDepth >= 0) {
+            const listItemNode = $pos.node(listItemDepth)
+            let hasParagraph = false
+            listItemNode.forEach((child: any) => {
+              if (child.type === paragraph || child.type.name === 'paragraph') {
+                hasParagraph = true
               }
-            }
+            })
             
-            // Set cursor to the correct position
-            if (bestPos !== pos) {
-              const tr = state.tr.setSelection(TextSelection.create(state.doc, bestPos))
+            // If no paragraph found, create one and place cursor at end
+            if (!hasParagraph) {
+              const listItemStart = $pos.start(listItemDepth)
+              const tr = state.tr
+              const newParagraph = state.schema.nodes.paragraph.create()
+              tr.insert(listItemStart + 1, newParagraph)
+              // Place cursor at the end of the new paragraph
+              const paragraphEnd = listItemStart + 1 + newParagraph.nodeSize - 1
+              tr.setSelection(TextSelection.create(tr.doc, paragraphEnd))
               view.dispatch(tr)
-              return true // We handled the click
+              return true
+            }
+          }
+          
+          // Handle clicking on right side (blank area) for any paragraph
+          if (paragraphNode && paragraphDepth >= 0) {
+            // Get click X coordinate and cursor position coordinates
+            const clickX = event.clientX
+            const posCoords = view.coordsAtPos(pos)
+            if (!posCoords) return false
+            
+            // Calculate distance from click to cursor position
+            const clickDistanceFromCursor = clickX - posCoords.left
+            
+            // If click is significantly to the right of where cursor landed,
+            // user intended to click at the end of the line/paragraph
+            if (clickDistanceFromCursor > 20) {
+              // Force cursor to the absolute end of the paragraph (ignoring mark boundaries)
+              const paragraphStart = $pos.start(paragraphDepth)
+              const paragraphEnd = paragraphStart + paragraphNode.content.size
+              
+              // Check if paragraph end is on the same line as the click
+              const endCoords = view.coordsAtPos(paragraphEnd)
+              if (endCoords && Math.abs(endCoords.top - posCoords.top) < 10) {
+                // Same line: force move cursor to paragraph end (ignoring marks)
+                const tr = state.tr.setSelection(TextSelection.create(state.doc, paragraphEnd))
+                view.dispatch(tr)
+                return true // We handled the click
+              } else {
+                // Different line: find end of current line using binary search
+                const lineYThreshold = 5
+                let left = pos
+                let right = paragraphEnd
+                let bestPos = pos
+                
+                while (left <= right) {
+                  const mid = Math.floor((left + right) / 2)
+                  const midCoords = view.coordsAtPos(mid)
+                  
+                  if (midCoords && Math.abs(midCoords.top - posCoords.top) < lineYThreshold) {
+                    bestPos = mid
+                    left = mid + 1
+                  } else {
+                    right = mid - 1
+                  }
+                }
+                
+                // Force cursor to end of line (ignoring mark boundaries)
+                if (bestPos !== pos) {
+                  const tr = state.tr.setSelection(TextSelection.create(state.doc, bestPos))
+                  view.dispatch(tr)
+                  return true // We handled the click
+                }
+              }
             }
           }
           
           return false // Let default handling proceed
         },
         handleKeyDown: (view: any, event: KeyboardEvent) => {
-          // Handle Backspace on empty paragraph after a list
+          // Handle Backspace on empty paragraph after a list or horizontal rule
           // Based on: https://discuss.prosemirror.net/t/backspace-inside-empty-paragraph-creates-a-new-list-node/3784
           if (event.key === 'Backspace') {
             const { state, dispatch } = view
             const { $from } = state.selection
-            const { paragraph, bulletList, orderedList } = state.schema.nodes
+            const { paragraph, bulletList, orderedList, horizontalRule } = state.schema.nodes
             
             // Check if we're at the start of an empty paragraph
             if ($from.parent.type === paragraph && 
@@ -2636,6 +2677,64 @@ export default function Layout(): JSX.Element {
               // Resolve position before paragraph to see what's there
               const $before = state.doc.resolve(beforePos)
               const nodeBefore = $before.nodeBefore
+              
+              // Check if node before is a horizontal rule
+              if (nodeBefore && nodeBefore.type === horizontalRule) {
+                // Delete the horizontal rule and the empty paragraph, place cursor after the hr's previous sibling
+                const tr = state.tr
+                const hrStart = beforePos - nodeBefore.nodeSize
+                const paragraphEnd = $from.after($from.depth)
+                
+                // Delete both the hr and the empty paragraph
+                tr.delete(hrStart, paragraphEnd)
+                
+                // Place cursor at the end of the node before the hr (if exists)
+                if (hrStart > 0) {
+                  const $beforeHR = state.doc.resolve(hrStart)
+                  const nodeBeforeHR = $beforeHR.nodeBefore
+                  
+                  if (nodeBeforeHR) {
+                    // Find the end position of the node before hr
+                    let cursorPos = hrStart - 1
+                    
+                    // If it's a paragraph or heading, place cursor at its end
+                    if (nodeBeforeHR.type === paragraph || 
+                        nodeBeforeHR.type.name?.startsWith('heading') ||
+                        nodeBeforeHR.type.name === 'title' ||
+                        nodeBeforeHR.type.name === 'subtitle') {
+                      cursorPos = hrStart - nodeBeforeHR.nodeSize
+                      // Find the actual end of content in this node
+                      const $nodePos = state.doc.resolve(cursorPos)
+                      for (let d = $nodePos.depth; d > 0; d--) {
+                        const nodeAtDepth = $nodePos.node(d)
+                        if (nodeAtDepth.type === paragraph || 
+                            nodeAtDepth.type.name?.startsWith('heading') ||
+                            nodeAtDepth.type.name === 'title' ||
+                            nodeAtDepth.type.name === 'subtitle') {
+                          cursorPos = $nodePos.start(d) + nodeAtDepth.content.size
+                          break
+                        }
+                      }
+                    } else {
+                      // For other node types, place cursor right after the node
+                      cursorPos = hrStart
+                    }
+                    
+                    // Adjust cursor position after deletion
+                    const adjustedCursorPos = Math.max(0, cursorPos - nodeBefore.nodeSize)
+                    tr.setSelection(TextSelection.create(tr.doc, adjustedCursorPos))
+                  } else {
+                    // No node before hr, place cursor at document start
+                    tr.setSelection(TextSelection.create(tr.doc, 1))
+                  }
+                } else {
+                  // hr is at document start, place cursor at start
+                  tr.setSelection(TextSelection.create(tr.doc, 1))
+                }
+                
+                dispatch(tr.scrollIntoView())
+                return true
+              }
               
               // Check if node before is a list
               if (nodeBefore && 

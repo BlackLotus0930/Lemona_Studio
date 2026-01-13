@@ -465,14 +465,20 @@ export const IndentExtension = Extension.create({
 
       Backspace: () => {
         const { state } = this.editor
-        const { $from } = state.selection
+        const { $from, $to } = state.selection
 
         // Don't handle Backspace in list items - let ListItem extension handle it
         if (this.editor.isActive('listItem')) {
           return false
         }
 
-        // Check if cursor is at the start of a paragraph/heading/title/subtitle
+        // If there's a selection, let default delete behavior handle it
+        // Don't outdent when content is selected
+        if ($from.pos !== $to.pos) {
+          return false
+        }
+
+        // Check if cursor is at the start of a paragraph/heading/title/subtitle (no selection, cursor only)
         const node = $from.parent
         const isAtStart = $from.parentOffset === 0
 

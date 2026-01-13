@@ -1287,6 +1287,36 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           const isLeftPadding = clickX < editorRect.left
           const isRightPadding = clickX > editorRect.right
           
+          // Helper function to find horizontal rule at a Y position
+          const findHorizontalRule = (yPos: number): { hr: HTMLElement; isBelow: boolean } | null => {
+            const horizontalRules = editorElement.querySelectorAll('hr')
+            let closest: HTMLElement | null = null
+            let minDistance = Infinity
+            let isBelow = false
+            
+            horizontalRules.forEach((hr) => {
+              const hrElement = hr as HTMLElement
+              const hrRect = hrElement.getBoundingClientRect()
+              const hrTop = hrRect.top
+              const hrBottom = hrRect.bottom
+              
+              // Check if click is near the horizontal rule (within 20px)
+              if (yPos >= hrTop - 20 && yPos <= hrBottom + 20) {
+                const distance = Math.min(Math.abs(yPos - hrTop), Math.abs(yPos - hrBottom))
+                if (distance < minDistance) {
+                  minDistance = distance
+                  closest = hrElement
+                  isBelow = yPos > hrBottom
+                }
+              }
+            })
+            
+            if (closest) {
+              return { hr: closest, isBelow }
+            }
+            return null
+          }
+          
           // Helper function to find closest paragraph to a Y position
           const findClosestParagraph = (yPos: number): HTMLElement | null => {
             // First try to find paragraphs (p elements) - these are the actual text containers
@@ -1337,6 +1367,68 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
             }
             
             return closest
+          }
+          
+          // Helper function to find paragraph after a horizontal rule
+          const findParagraphAfterHR = (hrElement: HTMLElement): HTMLElement | null => {
+            // Get all block elements (paragraphs, headings, etc.)
+            const allBlocks = editorElement.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, hr')
+            
+            for (let i = 0; i < allBlocks.length; i++) {
+              const block = allBlocks[i] as HTMLElement
+              if (block === hrElement) {
+                // Find the next paragraph/heading after this hr
+                for (let j = i + 1; j < allBlocks.length; j++) {
+                  const nextBlock = allBlocks[j] as HTMLElement
+                  const tagName = nextBlock.tagName.toLowerCase()
+                  
+                  if (tagName === 'p' || tagName.startsWith('h')) {
+                    return nextBlock
+                  } else if (tagName === 'li') {
+                    const innerP = nextBlock.querySelector(':scope > p')
+                    if (innerP) return innerP as HTMLElement
+                    return nextBlock
+                  } else if (tagName === 'hr') {
+                    // Another hr found, stop searching
+                    break
+                  }
+                }
+                break
+              }
+            }
+            
+            return null
+          }
+          
+          // Helper function to find paragraph before a horizontal rule
+          const findParagraphBeforeHR = (hrElement: HTMLElement): HTMLElement | null => {
+            // Get all block elements (paragraphs, headings, etc.)
+            const allBlocks = editorElement.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, hr')
+            
+            for (let i = 0; i < allBlocks.length; i++) {
+              const block = allBlocks[i] as HTMLElement
+              if (block === hrElement) {
+                // Find the previous paragraph/heading before this hr
+                for (let j = i - 1; j >= 0; j--) {
+                  const prevBlock = allBlocks[j] as HTMLElement
+                  const tagName = prevBlock.tagName.toLowerCase()
+                  
+                  if (tagName === 'p' || tagName.startsWith('h')) {
+                    return prevBlock
+                  } else if (tagName === 'li') {
+                    const innerP = prevBlock.querySelector(':scope > p')
+                    if (innerP) return innerP as HTMLElement
+                    return prevBlock
+                  } else if (tagName === 'hr') {
+                    // Another hr found, stop searching
+                    break
+                  }
+                }
+                break
+              }
+            }
+            
+            return null
           }
           
           // Find the paragraph/line closest to the click Y position
@@ -1433,6 +1525,87 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           
           // Define function to get cursor position at click coordinates
           const getCursorPosition = (): number | null => {
+            // First check if click is near a horizontal rule
+            const hrInfo = findHorizontalRule(clickY)
+            if (hrInfo) {
+              const { hr, isBelow } = hrInfo
+              
+              if (isBelow) {
+                // Click is below the horizontal rule - place cursor at start of next paragraph
+                const nextParagraph = findParagraphAfterHR(hr)
+                if (nextParagraph) {
+                  let targetElement = nextParagraph
+                  if (nextParagraph.tagName.toLowerCase() === 'li') {
+                    const innerP = nextParagraph.querySelector(':scope > p')
+                    if (innerP) targetElement = innerP as HTMLElement
+                  }
+                  
+                  const domPos = view.posAtDOM(targetElement, 0)
+                  if (domPos !== null && domPos !== undefined) {
+                    return domPos
+                  }
+                } else {
+                  // No paragraph after hr, create position after the hr
+                  const hrPos = view.posAtDOM(hr, 0)
+                  if (hrPos !== null && hrPos !== undefined) {
+                    // Get the hr node size and place cursor after it
+                    const hrNode = view.state.doc.nodeAt(hrPos)
+                    if (hrNode) {
+                      return hrPos + hrNode.nodeSize
+                    }
+                    return hrPos + 1
+                  }
+                }
+              } else {
+                // Click is above the horizontal rule - place cursor at end of previous paragraph
+                const prevParagraph = findParagraphBeforeHR(hr)
+                if (prevParagraph) {
+                  let targetElement = prevParagraph
+                  if (prevParagraph.tagName.toLowerCase() === 'li') {
+                    const innerP = prevParagraph.querySelector(':scope > p')
+                    if (innerP) targetElement = innerP as HTMLElement
+                  }
+                  
+                  const domPos = view.posAtDOM(targetElement, 0)
+                  if (domPos !== null && domPos !== undefined) {
+                    // Find the paragraph node in the document structure
+                    const $pos = view.state.doc.resolve(domPos)
+                    
+                    // Find the paragraph node depth
+                    let paragraphDepth = -1
+                    let paragraphNode = null
+                    for (let d = $pos.depth; d > 0; d--) {
+                      const node = $pos.node(d)
+                      if (node.type.name === 'paragraph' || 
+                          node.type.name.startsWith('heading') ||
+                          node.type.name === 'title' ||
+                          node.type.name === 'subtitle') {
+                        paragraphNode = node
+                        paragraphDepth = d
+                        break
+                      }
+                    }
+                    
+                    if (paragraphNode && paragraphDepth >= 0) {
+                      const paragraphStart = $pos.start(paragraphDepth)
+                      const paragraphEnd = paragraphStart + paragraphNode.content.size
+                      return paragraphEnd
+                    }
+                    
+                    // Fallback: use text content length
+                    const paragraphText = targetElement.textContent || ''
+                    return domPos + paragraphText.length
+                  }
+                } else {
+                  // No paragraph before hr, create position before the hr
+                  const hrPos = view.posAtDOM(hr, 0)
+                  if (hrPos !== null && hrPos !== undefined) {
+                    return hrPos
+                  }
+                }
+              }
+            }
+            
             if (!closestParagraph) {
               return null
             }
@@ -1462,7 +1635,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                 }
               }
               } else if (isRightPadding) {
-                // Click on right padding: place cursor at the END of the line (right side)
+                // Click on right padding: place cursor at the absolute END of the paragraph (ignoring marks)
                 // For list items, find the inner paragraph
                 let targetElement = paragraph
                 if (paragraph.tagName.toLowerCase() === 'li') {
@@ -1470,98 +1643,117 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   if (innerP) targetElement = innerP as HTMLElement
                 }
                 
-                // We need to find the end of the specific line at the click Y position, not the end of the paragraph
-                const pRect = targetElement.getBoundingClientRect()
-                const contentMaxWidth = 816 // Max width of editor content
-                const editorContainerRect = scrollContainerRef.current?.getBoundingClientRect()
-                const contentLeft = editorContainerRect ? editorContainerRect.left + 120 : pRect.left // paddingLeft is 120px
-                const contentRight = contentLeft + contentMaxWidth
-                
-                // First, find the start of the line at this Y position (left edge of element)
-                const startCoords = { left: pRect.left, top: clickY }
-                const startPos = view.posAtCoords(startCoords)
-                
-                if (startPos) {
-                  // Get the paragraph node and its actual end position (including images)
-                  const domPos = view.posAtDOM(targetElement, 0)
-                  if (domPos !== null && domPos !== undefined) {
-                    // Find the actual end of the paragraph node (not just text content)
-                    const paragraphNode = view.state.doc.nodeAt(domPos)
-                    if (paragraphNode) {
-                      const paragraphEndPos = domPos + paragraphNode.nodeSize
-                      
-                      // Check for images on the same line
-                      const lineYThreshold = 5 // pixels tolerance for same line
+                // Get the paragraph node position in the document
+                const domPos = view.posAtDOM(targetElement, 0)
+                if (domPos !== null && domPos !== undefined) {
+                  // Find the paragraph node in the document structure
+                  const $pos = view.state.doc.resolve(domPos)
+                  
+                  // Find the paragraph node depth
+                  let paragraphDepth = -1
+                  let paragraphNode = null
+                  for (let d = $pos.depth; d > 0; d--) {
+                    const node = $pos.node(d)
+                    if (node.type.name === 'paragraph' || 
+                        node.type.name.startsWith('heading') ||
+                        node.type.name === 'title' ||
+                        node.type.name === 'subtitle') {
+                      paragraphNode = node
+                      paragraphDepth = d
+                      break
+                    }
+                  }
+                  
+                  if (paragraphNode && paragraphDepth >= 0) {
+                    // Calculate the absolute end of the paragraph (ignoring all marks)
+                    // This is the position after all content in the paragraph
+                    const paragraphStart = $pos.start(paragraphDepth)
+                    const paragraphEnd = paragraphStart + paragraphNode.content.size
+                    
+                    // Check if paragraph end is on the same line as the click
+                    const startCoords = { left: targetElement.getBoundingClientRect().left, top: clickY }
+                    const startPos = view.posAtCoords(startCoords)
+                    
+                    if (startPos) {
                       const startCoordsAtPos = view.coordsAtPos(startPos.pos)
-                      const targetY = startCoordsAtPos ? startCoordsAtPos.top : clickY
+                      const endCoords = view.coordsAtPos(paragraphEnd)
+                      const lineYThreshold = 10 // pixels tolerance for same line
                       
-                      // Look for image nodes in the paragraph that are on the same line
+                      // If paragraph end is on the same line, use it directly
+                      if (endCoords && startCoordsAtPos && 
+                          Math.abs(endCoords.top - startCoordsAtPos.top) < lineYThreshold) {
+                        return paragraphEnd
+                      }
+                      
+                      // Different line: find end of current line using binary search
+                      // But still ensure we're at the absolute end of content on that line
+                      const targetY = startCoordsAtPos ? startCoordsAtPos.top : clickY
+                      let left = startPos.pos
+                      let right = paragraphEnd
+                      let bestPos = startPos.pos
+                      
+                      while (left <= right) {
+                        const mid = Math.floor((left + right) / 2)
+                        const midCoords = view.coordsAtPos(mid)
+                        
+                        if (midCoords && Math.abs(midCoords.top - targetY) < lineYThreshold) {
+                          bestPos = mid
+                          left = mid + 1
+                        } else {
+                          right = mid - 1
+                        }
+                      }
+                      
+                      // Ensure we're at the absolute end of content on this line
+                      // Check for images or other block nodes on the same line
+                      const lineYThreshold2 = 5
                       let imageAfterPos = -1
-                      view.state.doc.nodesBetween(domPos, paragraphEndPos, (node, nodePos) => {
+                      view.state.doc.nodesBetween(startPos.pos, paragraphEnd, (node, nodePos) => {
                         if (node.type.name === 'image') {
                           const imageCoords = view.coordsAtPos(nodePos)
-                          if (imageCoords && Math.abs(imageCoords.top - targetY) < lineYThreshold) {
-                            // This image is on the same line
+                          if (imageCoords && Math.abs(imageCoords.top - targetY) < lineYThreshold2) {
                             const afterImagePos = nodePos + node.nodeSize
-                            if (afterImagePos > imageAfterPos) {
+                            if (afterImagePos > imageAfterPos && afterImagePos <= paragraphEnd) {
                               imageAfterPos = afterImagePos
                             }
                           }
                         }
                       })
                       
-                      if (imageAfterPos > 0) {
-                        // There's an image on this line, place cursor after it
+                      if (imageAfterPos > 0 && imageAfterPos > bestPos) {
                         return imageAfterPos
                       }
                       
-                      // No image on this line, find the rightmost text position on the same line
-                      const paragraphText = targetElement.textContent || ''
-                      const textEndPos = domPos + paragraphText.length
-                      
-                      // Find the rightmost position on the same line (same Y coordinate)
-                      // Use binary search to find the end of the line
-                      let left = startPos.pos
-                      let right = Math.min(textEndPos, paragraphEndPos)
-                      let bestPos = startPos.pos
-                      
-                      // Binary search for the rightmost position on the same line
-                      while (left <= right) {
-                        const mid = Math.floor((left + right) / 2)
-                        const midCoords = view.coordsAtPos(mid)
-                        
-                        if (midCoords && Math.abs(midCoords.top - targetY) < lineYThreshold) {
-                          // This position is on the same line
-                          bestPos = mid
-                          left = mid + 1 // Try to go further right
-                        } else {
-                          right = mid - 1 // This position is on a different line, go left
-                        }
-                      }
-                      
                       return bestPos
+                    } else {
+                      // Fallback: use paragraph absolute end
+                      return paragraphEnd
                     }
                   }
                   
-                  return startPos.pos
-                } else {
-                  // Fallback: try coordinate at right edge
-                  const coords = { left: contentRight, top: clickY }
-                  const pos = view.posAtCoords(coords)
-                  if (pos) {
-                    return pos.pos
-                  } else {
-                    // Fallback: end of paragraph (including images)
-                    const domPos = view.posAtDOM(targetElement, 0)
-                    if (domPos !== null && domPos !== undefined) {
-                      const paragraphNode = view.state.doc.nodeAt(domPos)
-                      if (paragraphNode) {
-                        return domPos + paragraphNode.nodeSize
-                      }
-                      const paragraphText = targetElement.textContent || ''
-                      return domPos + paragraphText.length
-                    }
+                  // Fallback: try to get paragraph end using node size
+                  const paragraphNodeAtPos = view.state.doc.nodeAt(domPos)
+                  if (paragraphNodeAtPos) {
+                    return domPos + paragraphNodeAtPos.content.size
                   }
+                }
+                
+                // Final fallback: try coordinate at right edge
+                const pRect = targetElement.getBoundingClientRect()
+                const contentMaxWidth = 816
+                const editorContainerRect = scrollContainerRef.current?.getBoundingClientRect()
+                const contentRight = editorContainerRect ? editorContainerRect.left + 120 + contentMaxWidth : pRect.right
+                const coords = { left: contentRight, top: clickY }
+                const pos = view.posAtCoords(coords)
+                if (pos) {
+                  return pos.pos
+                }
+                
+                // Last resort: use text content length
+                const fallbackDomPos = view.posAtDOM(targetElement, 0)
+                if (fallbackDomPos !== null && fallbackDomPos !== undefined) {
+                  const paragraphText = targetElement.textContent || ''
+                  return fallbackDomPos + paragraphText.length
                 }
             } else {
               // Click is somewhere else (top/bottom padding), use coordinate-based positioning
@@ -1570,10 +1762,55 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
               if (pos) {
                 return pos.pos
               } else {
-                // Fallback to start of closest paragraph
-                const domPos = view.posAtDOM(paragraph, 0)
-                if (domPos !== null && domPos !== undefined) {
-                  return domPos
+                // Check if click is below the last paragraph (bottom padding)
+                const paragraphRect = paragraph.getBoundingClientRect()
+                const isBelowContent = clickY > paragraphRect.bottom
+                
+                if (isBelowContent) {
+                  // Click is below content - place cursor at the END of the last paragraph
+                  let targetElement = paragraph
+                  if (paragraph.tagName.toLowerCase() === 'li') {
+                    const innerP = paragraph.querySelector(':scope > p')
+                    if (innerP) targetElement = innerP as HTMLElement
+                  }
+                  
+                  const domPos = view.posAtDOM(targetElement, 0)
+                  if (domPos !== null && domPos !== undefined) {
+                    // Find the paragraph node in the document structure
+                    const $pos = view.state.doc.resolve(domPos)
+                    
+                    // Find the paragraph node depth
+                    let paragraphDepth = -1
+                    let paragraphNode = null
+                    for (let d = $pos.depth; d > 0; d--) {
+                      const node = $pos.node(d)
+                      if (node.type.name === 'paragraph' || 
+                          node.type.name.startsWith('heading') ||
+                          node.type.name === 'title' ||
+                          node.type.name === 'subtitle') {
+                        paragraphNode = node
+                        paragraphDepth = d
+                        break
+                      }
+                    }
+                    
+                    if (paragraphNode && paragraphDepth >= 0) {
+                      // Calculate the absolute end of the paragraph
+                      const paragraphStart = $pos.start(paragraphDepth)
+                      const paragraphEnd = paragraphStart + paragraphNode.content.size
+                      return paragraphEnd
+                    }
+                    
+                    // Fallback: use text content length
+                    const paragraphText = targetElement.textContent || ''
+                    return domPos + paragraphText.length
+                  }
+                } else {
+                  // Fallback to start of closest paragraph (for top padding)
+                  const domPos = view.posAtDOM(paragraph, 0)
+                  if (domPos !== null && domPos !== undefined) {
+                    return domPos
+                  }
                 }
               }
             }
