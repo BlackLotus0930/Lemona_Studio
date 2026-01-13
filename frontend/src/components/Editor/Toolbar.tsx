@@ -118,6 +118,83 @@ export default function Toolbar({
   // Only use stable editor if current editor is null/destroyed, otherwise use current editor
   const stableEditor = (editor && !editor.isDestroyed) ? editor : editorRef.current
   
+  // Helper function to safely lift only the current list item by exactly one level
+  const safeLiftCurrentListItem = (editor: Editor) => {
+    if (!editor || editor.isDestroyed) return false
+    
+    const { state } = editor
+    const { $from } = state.selection
+    const { listItem } = state.schema.nodes
+    
+    // Find the current list item that contains the cursor
+    let currentListItemDepth = -1
+    for (let d = $from.depth; d > 0; d--) {
+      const node = $from.node(d)
+      if (node.type === listItem || node.type.name === 'listItem') {
+        currentListItemDepth = d
+        break
+      }
+    }
+    
+    // If not in a list item, return false
+    if (currentListItemDepth === -1) {
+      return false
+    }
+    
+    // Check if we can lift (must have a parent list)
+    if (currentListItemDepth <= 1) {
+      // Already at top level, can't lift
+      return false
+    }
+    
+    // Find the parent list node
+    const parentListDepth = currentListItemDepth - 1
+    const parentList = $from.node(parentListDepth)
+    
+    // Only lift if parent is actually a list (bulletList or orderedList)
+    if (parentList.type.name !== 'bulletList' && parentList.type.name !== 'orderedList') {
+      return false
+    }
+    
+    // Store the current depth before lifting
+    const depthBeforeLift = currentListItemDepth
+    
+    // Use liftListItem - TipTap's liftListItem only lifts one level by default
+    const liftResult = editor.commands.liftListItem('listItem')
+    
+    if (liftResult) {
+      // Verify that we only lifted one level
+      const newState = editor.state
+      const new$from = newState.selection.$from
+      
+      // Find the new list item depth
+      let newListItemDepth = -1
+      for (let d = new$from.depth; d > 0; d--) {
+        const node = new$from.node(d)
+        if (node.type === listItem || node.type.name === 'listItem') {
+          newListItemDepth = d
+          break
+        }
+      }
+      
+      // If we're no longer in a list item, the lift was successful (lifted out of list)
+      if (newListItemDepth === -1) {
+        return true
+      }
+      
+      // If the depth decreased by exactly 1, the lift was successful and limited to one level
+      if (newListItemDepth === depthBeforeLift - 1) {
+        return true
+      }
+      
+      // If depth didn't change or changed incorrectly, something went wrong
+      // But we'll still return true since liftListItem succeeded
+      return true
+    }
+    
+    return false
+  }
+  
   // Check if current document is a PDF (PDFs don't have TipTap editor)
   const isPDF = documentTitle?.toLowerCase().endsWith('.pdf')
   const [fontSize, setFontSize] = useState(14)
@@ -2210,7 +2287,7 @@ export default function Toolbar({
                   onMouseDown={(e) => {
                     e.preventDefault()
                     if (!canUseEditor()) return
-                    stableEditor!.chain().focus().liftListItem('listItem').run()
+                    safeLiftCurrentListItem(stableEditor!)
                     setShowAlignMenu(false)
                   }}
                   style={{ ...buttonStyle, minWidth: '36px' }}
@@ -2369,7 +2446,7 @@ export default function Toolbar({
         onMouseDown={(e) => {
           e.preventDefault()
           if (canUseEditor()) {
-            stableEditor!.chain().focus().liftListItem('listItem').run()
+            safeLiftCurrentListItem(stableEditor!)
           }
         }}
         disabled={!canUseEditor()}

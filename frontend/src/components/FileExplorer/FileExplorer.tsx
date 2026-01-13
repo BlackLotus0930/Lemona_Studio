@@ -509,6 +509,7 @@ function FileExplorer({
   const hoverBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
   const selectedBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
   const textColor = theme === 'dark' ? '#cccccc' : '#202124'
+  const folderTextColor = theme === 'dark' ? '#b5b5b5' : '#4a4a4a' // Slightly lighter color for folder names and arrows
   const indicatorColor = theme === 'dark' ? '#999999' : '#c0c0c0' // Light grey color for drop indicator
   
   // Dropdown menu colors (matching Toolbar.tsx)
@@ -526,10 +527,15 @@ function FileExplorer({
   }
 
   // Build folder structure: Library and ProjectName folders
-  // Extract README.md separately - it will be shown as a standalone file at the top
-  const readmeDoc = documents.find(doc => doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md')
+  // Extract README.md separately ONLY if it's NOT in project folder - it will be shown as a standalone file at the top
+  // If README.md is in project folder, it should appear in Workspace folder
+  const readmeDoc = documents.find(doc => 
+    (doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md') && 
+    doc.folder !== 'project'
+  )
   const libraryDocs = documents.filter(doc => doc.folder === 'library' && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
-  const projectDocs = documents.filter(doc => (!doc.folder || doc.folder === 'project') && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
+  // Include README.md in project folder - it should appear in Workspace folder
+  const projectDocs = documents.filter(doc => (!doc.folder || doc.folder === 'project'))
   
   // Sort documents by order if available, otherwise by creation time
   const sortDocuments = (docs: Document[]) => {
@@ -1086,12 +1092,12 @@ function FileExplorer({
             >
               {isExpanded ? (
                 <ExpandMoreIcon 
-                  style={{ fontSize: '16px', color: textColor, cursor: 'pointer' }}
+                  style={{ fontSize: '16px', color: folderTextColor, cursor: 'pointer' }}
                   onClick={(e) => handleArrowClick(e, item.id)}
                 />
               ) : (
                 <ChevronRightIcon 
-                  style={{ fontSize: '16px', color: textColor, cursor: 'pointer' }}
+                  style={{ fontSize: '16px', color: folderTextColor, cursor: 'pointer' }}
                   onClick={(e) => handleArrowClick(e, item.id)}
                 />
               )}
@@ -1181,6 +1187,7 @@ function FileExplorer({
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                color: isFolder ? folderTextColor : undefined,
               }}
             >
               {formatDisplayName(item.name)}

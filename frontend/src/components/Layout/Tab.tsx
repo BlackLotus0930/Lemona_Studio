@@ -20,9 +20,10 @@ interface TabProps {
   showDropIndicator?: boolean
   dropPosition?: 'left' | 'right' | null
   indicatorColor?: string
+  nextTabIsActive?: boolean // Whether the next tab is active (to hide separator on left side of active tab)
 }
 
-export default function Tab({ documentId, title, isActive, onClick, onClose, isLast: _isLast = false, canClose = true, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd, showDropIndicator = false, dropPosition = null, indicatorColor = '#1976d2' }: TabProps) {
+export default function Tab({ documentId, title, isActive, onClick, onClose, isFirst = false, isLast = false, canClose = true, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd, showDropIndicator = false, dropPosition = null, indicatorColor = '#1976d2', nextTabIsActive = false }: TabProps) {
   const { theme } = useTheme()
   const [isHovered, setIsHovered] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -221,17 +222,21 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
         />
       )}
       
-      {/* Right separator line - height 20px (shown for all tabs including last) */}
-      {!(showDropIndicator && dropPosition === 'right') && (
-        <div style={{
-          position: 'absolute',
-          right: 0,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          height: '20px',
-          width: '1px',
-          backgroundColor: separatorColor
-        }} />
+      {/* Right separator line - height 20px (only between tabs, not after last, and hidden when current or next tab is active) */}
+      {!isLast && !isActive && !nextTabIsActive && !(showDropIndicator && dropPosition === 'right') && (
+        <div 
+          className="tab-separator"
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: '50%',
+            transform: 'translateY(-50%) translateZ(0)',
+            height: '20px',
+            width: '1px',
+            backgroundColor: separatorColor,
+            pointerEvents: 'none'
+          }} 
+        />
       )}
     </div>
   )

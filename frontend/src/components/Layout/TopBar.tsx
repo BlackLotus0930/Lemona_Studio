@@ -151,27 +151,32 @@ function TopBar({
                 }}
                 onDragOver={handleDragOver}
               >
-            {openTabs.map((tab, index) => (
-              <Tab
-                key={tab.id}
-                documentId={tab.id}
-                title={tab.title}
-                isActive={activeTabId === tab.id}
-                onClick={() => onTabClick?.(tab.id)}
-                onClose={(e) => onTabClose?.(e, tab.id)}
-                isFirst={index === 0}
-                isLast={index === openTabs.length - 1}
-                canClose={openTabs.length > 1} // Can only close if more than one tab
-                onDragStart={(e) => handleDragStart(e, tab.id)}
-                onDragOver={(e) => handleTabDragOver(e, tab.id)}
-                onDragLeave={handleTabDragLeave}
-                onDrop={(e) => handleDrop(e, tab.id)}
-                onDragEnd={handleDragEnd}
-                showDropIndicator={dropTargetId === tab.id && draggedTabId !== tab.id}
-                dropPosition={dropTargetId === tab.id ? dropPosition : null}
-                indicatorColor={indicatorColor}
-              />
-            ))}
+            {openTabs.map((tab, index) => {
+              const nextTab = openTabs[index + 1]
+              const nextTabIsActive = nextTab ? activeTabId === nextTab.id : false
+              return (
+                <Tab
+                  key={tab.id}
+                  documentId={tab.id}
+                  title={tab.title}
+                  isActive={activeTabId === tab.id}
+                  onClick={() => onTabClick?.(tab.id)}
+                  onClose={(e) => onTabClose?.(e, tab.id)}
+                  isFirst={index === 0}
+                  isLast={index === openTabs.length - 1}
+                  canClose={openTabs.length > 1} // Can only close if more than one tab
+                  onDragStart={(e) => handleDragStart(e, tab.id)}
+                  onDragOver={(e) => handleTabDragOver(e, tab.id)}
+                  onDragLeave={handleTabDragLeave}
+                  onDrop={(e) => handleDrop(e, tab.id)}
+                  onDragEnd={handleDragEnd}
+                  showDropIndicator={dropTargetId === tab.id && draggedTabId !== tab.id}
+                  dropPosition={dropTargetId === tab.id ? dropPosition : null}
+                  indicatorColor={indicatorColor}
+                  nextTabIsActive={nextTabIsActive}
+                />
+              )
+            })}
               </div>
                 </div>
 

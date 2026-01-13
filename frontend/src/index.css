@@ -275,10 +275,12 @@ code {
   float: left;
   height: 0;
   pointer-events: none;
+  font-weight: 350;
 }
 
 .dark-theme .ProseMirror p.is-editor-empty:first-child::before {
   color: #858585;
+  font-weight: 350;
 }
 
 /* Link styling */

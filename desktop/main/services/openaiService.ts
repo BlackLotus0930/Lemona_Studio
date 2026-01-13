@@ -107,11 +107,11 @@ function getMaxOutputTokens(modelName?: string): number {
 // Get max context window for a model (used for web search)
 function getMaxContextWindow(modelName?: string): number {
   const contextWindows: { [key: string]: number } = {
-    'gpt-4.1-nano': 1000000,      // 1M tokens
-    'gpt-5-mini': 400000,         // 400K tokens
-    'gpt-5.2': 400000,            // 400K tokens
+    'gpt-4.1-nano': 200000,      // 200K tokens
+    'gpt-5-mini': 200000,         // 200K tokens
+    'gpt-5.2': 200000,            // 200K tokens
   }
-  return contextWindows[modelName || 'gpt-4.1-nano'] || 1000000
+  return contextWindows[modelName || 'gpt-4.1-nano'] || 200000
 }
 
 // Check if model is a gpt-5 model (which has different API constraints)

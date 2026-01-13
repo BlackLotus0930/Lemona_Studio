@@ -16,10 +16,10 @@ function getMaxOutputTokens(modelName?: string): number {
 // Get max context window for a model
 function getMaxContextWindow(modelName?: string): number {
   const contextWindows: { [key: string]: number } = {
-    'gemini-3-flash-preview': 1048576,  // 1,048,576 tokens
-    'gemini-2.5-pro': 1048576,          // 1,048,576 tokens
+    'gemini-3-flash-preview': 200000,  // 200K tokens
+    'gemini-2.5-pro': 200000,          // 200K tokens
   }
-  return contextWindows[modelName || 'gemini-3-flash-preview'] || 1048576
+  return contextWindows[modelName || 'gemini-3-flash-preview'] || 200000
 }
 
 function getModel(apiKey: string, modelName: string = 'gemini-3-flash-preview'): GenerativeModel {

@@ -165,3 +165,11 @@
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
 }
 
+/* Tab separator styling to prevent double-width rendering */
+.tab-separator {
+  box-sizing: border-box;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
