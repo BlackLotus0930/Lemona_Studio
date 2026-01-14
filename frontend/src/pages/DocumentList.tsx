@@ -221,7 +221,9 @@ export default function DocumentList() {
           documentToOpen = documents[0]
         }
         
-        navigate(`/document/${documentToOpen.id}`)
+        if (documentToOpen) {
+          navigate(`/document/${documentToOpen.id}`)
+        }
       } else {
         // No documents, create README.md in workspace folder (project folder)
         const document = await documentApi.create('README.md', 'project')

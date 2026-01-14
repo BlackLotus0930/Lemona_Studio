@@ -1262,8 +1262,104 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         onMouseDown={(e) => {
           const target = e.target as HTMLElement
           
-          // Let ProseMirror handle all clicks inside the content area
+          // Handle clicks inside ProseMirror for list items on the right side
           if (target.closest('.ProseMirror')) {
+            if (!editor || !scrollContainerRef.current) return
+            
+            const editorElement = scrollContainerRef.current.querySelector('.ProseMirror') as HTMLElement
+            if (!editorElement) return
+            
+            const view = editor.view
+            const clickX = e.clientX
+            const clickY = e.clientY
+            
+            // Check if the click target is inside a list item
+            const clickedListItem = target.closest('li') as HTMLElement | null
+            
+            // Also find list items by position in case target is not directly on li
+            let listItemAtClick: HTMLElement | null = clickedListItem
+            if (!listItemAtClick) {
+              const listItems = editorElement.querySelectorAll('li')
+              for (const li of listItems) {
+                const liElement = li as HTMLElement
+                const liRect = liElement.getBoundingClientRect()
+                
+                // Check if click Y is within this list item's vertical bounds
+                if (clickY >= liRect.top && clickY <= liRect.bottom) {
+                  listItemAtClick = liElement
+                  break
+                }
+              }
+            }
+            
+            // If we found a list item, check if click is on the right side
+            if (listItemAtClick) {
+              // Find the paragraph inside this list item to check text bounds
+              const innerP = listItemAtClick.querySelector(':scope > p, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6')
+              
+              let isOnRightSide = false
+              if (innerP) {
+                const pRect = (innerP as HTMLElement).getBoundingClientRect()
+                // Check if click is on the right side where there's no text
+                // Use a threshold to detect clicks beyond the text content
+                if (clickX > pRect.right - 10) {
+                  isOnRightSide = true
+                }
+              } else {
+                // No paragraph found, check if click is on right side of list item
+                const liRect = listItemAtClick.getBoundingClientRect()
+                if (clickX > liRect.right - 20) {
+                  isOnRightSide = true
+                }
+              }
+              
+              if (isOnRightSide) {
+                // Find the paragraph inside the list item
+                const innerP = listItemAtClick.querySelector(':scope > p, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6')
+                const targetElement = (innerP as HTMLElement) || listItemAtClick
+                
+                // Get the DOM position of the paragraph
+                const domPos = view.posAtDOM(targetElement, 0)
+                if (domPos !== null && domPos !== undefined) {
+                  // Find the paragraph node in the document structure
+                  const $pos = view.state.doc.resolve(domPos)
+                  
+                  // Find the paragraph node depth
+                  let paragraphDepth = -1
+                  let paragraphNode = null
+                  for (let d = $pos.depth; d > 0; d--) {
+                    const node = $pos.node(d)
+                    if (node.type.name === 'paragraph' || 
+                        node.type.name.startsWith('heading') ||
+                        node.type.name === 'title' ||
+                        node.type.name === 'subtitle') {
+                      paragraphNode = node
+                      paragraphDepth = d
+                      break
+                    }
+                  }
+                  
+                  if (paragraphNode && paragraphDepth >= 0) {
+                    // Calculate the absolute end of the paragraph
+                    const paragraphStart = $pos.start(paragraphDepth)
+                    const paragraphEnd = paragraphStart + paragraphNode.content.size
+                    
+                    // Prevent default ProseMirror click handling
+                    e.preventDefault()
+                    e.stopPropagation()
+                    
+                    // Set cursor to the end of the paragraph
+                    setTimeout(() => {
+                      editor.chain().focus().setTextSelection(paragraphEnd).run()
+                    }, 0)
+                    
+                    return
+                  }
+                }
+              }
+            }
+            
+            // For other clicks inside ProseMirror, let ProseMirror handle it normally
             return
           }
           

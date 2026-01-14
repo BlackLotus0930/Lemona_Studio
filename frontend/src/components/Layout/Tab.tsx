@@ -23,7 +23,7 @@ interface TabProps {
   nextTabIsActive?: boolean // Whether the next tab is active (to hide separator on left side of active tab)
 }
 
-export default function Tab({ documentId, title, isActive, onClick, onClose, isFirst = false, isLast = false, canClose = true, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd, showDropIndicator = false, dropPosition = null, indicatorColor = '#1976d2', nextTabIsActive = false }: TabProps) {
+export default function Tab({ documentId, title, isActive, onClick, onClose, isLast = false, canClose = true, onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd, showDropIndicator = false, dropPosition = null, indicatorColor = '#1976d2', nextTabIsActive = false }: TabProps) {
   const { theme } = useTheme()
   const [isHovered, setIsHovered] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
