@@ -2727,8 +2727,10 @@ export default function Layout(): JSX.Element {
             }
           }
           
-          // Handle clicking on right side (blank area) for any paragraph
-          if (paragraphNode && paragraphDepth >= 0) {
+          // Handle clicking on right side (blank area) ONLY for list items
+          // This fixes cursor jumping in list items but should not interfere with regular paragraphs
+          // (especially for Chinese text where clicking at end of line should work normally)
+          if (paragraphNode && paragraphDepth >= 0 && inListItem && listItemDepth >= 0) {
             // Get click X coordinate and cursor position coordinates
             const clickX = event.clientX
             const posCoords = view.coordsAtPos(pos)
