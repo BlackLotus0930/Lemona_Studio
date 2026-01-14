@@ -22,10 +22,11 @@ import FileExplorer from '../FileExplorer/FileExplorer'
 import { FileExplorerSkeleton } from '../FileExplorer/FileExplorerSkeleton'
 import { DocumentEditorSkeleton } from '../Editor/DocumentEditorSkeleton'
 import FullScreenPDFViewer, { PDFViewerSearchHandle } from '../PDFViewer/FullScreenPDFViewer'
-import { Document, IndexingStatus, DocumentSnapshot } from '@shared/types'
+import { Document, IndexingStatus, DocumentSnapshot, WorldLab } from '@shared/types'
 import { documentApi, exportApi, projectApi } from '../../services/api'
-import { indexingApi, versionApi } from '../../services/desktop-api'
+import { indexingApi, versionApi, worldLabApi } from '../../services/desktop-api'
 import { settingsApi } from '../../services/desktop-api'
+import WorldLabCanvas from '../WorldLab/WorldLabCanvas'
 import { FontSize } from '../Editor/FontSize'
 import { FontFamily } from '../Editor/FontFamily'
 import { LineHeight } from '../Editor/LineHeight'
@@ -341,7 +342,7 @@ export default function Layout(): JSX.Element {
   const isFileExplorerResizingRef = useRef<boolean>(false) // Track if user is actively resizing File Explorer
   const fileExplorerResizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [fileExplorerSize, setFileExplorerSize] = useState<number>(() => loadFileExplorerSize()) // Track File Explorer size as state
-  const [selectedFolder, setSelectedFolder] = useState<'library' | 'project' | null>(null) // Track selected folder
+  const [selectedFolder, setSelectedFolder] = useState<'library' | 'project' | 'worldlab' | null>(null) // Track selected folder
   const [isSearchMode, setIsSearchMode] = useState(() => {
     // Restore search mode from sessionStorage if available (persists across navigation)
     try {
@@ -365,6 +366,12 @@ export default function Layout(): JSX.Element {
   const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | null>(null) // Track export format
   const [showCommitSuccessNotification, setShowCommitSuccessNotification] = useState<{ fileCount: number } | null>(null) // Track commit success notification
   const [restoredCommitParentId, setRestoredCommitParentId] = useState<string | null>(null) // Track restored commit ID for branch creation
+  // WorldLab state
+  const [isWorldLabMode, setIsWorldLabMode] = useState(false) // Track if current document is a WorldLab
+  const [worldLabData, setWorldLabData] = useState<WorldLab | null>(null) // WorldLab data
+  const [splitViewNodeId, setSplitViewNodeId] = useState<string | null>(null) // Node ID opened in split view
+  const [isSplitView, setIsSplitView] = useState(false) // Track if split view is active
+  const [nodeDocument, setNodeDocument] = useState<Document | null>(null) // Document for the node file in split view
   const lastContentRef = useRef<string>('') // Track last set content to avoid unnecessary updates
   const currentDocIdRef = useRef<string | null>(null) // Track current document ID
   const currentDocTitleRef = useRef<string | null>(null) // Track current document title for placeholder
@@ -412,6 +419,41 @@ export default function Layout(): JSX.Element {
     }
     return null
   }
+
+  // Check if a document is a WorldLab file
+  const isWorldLabFile = useCallback((doc: Document | null): boolean => {
+    if (!doc) {
+      console.log('[WorldLab] isWorldLabFile: doc is null')
+      return false
+    }
+    
+    // Check if folder is 'worldlab'
+    if (doc.folder === 'worldlab') {
+      console.log(`[WorldLab] isWorldLabFile: detected by folder=${doc.folder}, title=${doc.title}`)
+      return true
+    }
+    
+    // Check if title ends with .worldlab extension
+    if (doc.title.toLowerCase().endsWith('.worldlab')) {
+      console.log(`[WorldLab] isWorldLabFile: detected by title ending with .worldlab, title=${doc.title}`)
+      return true
+    }
+    
+    console.log(`[WorldLab] isWorldLabFile: NOT a WorldLab file, folder=${doc.folder}, title=${doc.title}`)
+    return false
+  }, [])
+
+  // Extract lab name from document title
+  const extractLabName = useCallback((doc: Document): string => {
+    if (doc.title.toLowerCase().endsWith('.worldlab')) {
+      const labName = doc.title.slice(0, -10) // Remove .worldlab extension
+      console.log(`[WorldLab] extractLabName: removed .worldlab extension, labName=${labName}`)
+      return labName
+    }
+    // If no extension, use title as-is (for folder-based detection)
+    console.log(`[WorldLab] extractLabName: using title as-is, labName=${doc.title}`)
+    return doc.title
+  }, [])
   
   // Clear all search highlights (temporary highlights, not saved to document)
   const clearSearchHighlights = (editor: Editor) => {
@@ -660,6 +702,7 @@ export default function Layout(): JSX.Element {
 
   const loadDocument = async (docId: string) => {
     try {
+      console.log(`[Layout] loadDocument called for docId: ${docId}`)
       // Retry logic for newly created documents (increased retries and delay for file system sync)
       let doc = await documentApi.get(docId)
       let retries = 5 // Increased from 3 to 5
@@ -672,7 +715,7 @@ export default function Layout(): JSX.Element {
       }
       
       if (!doc || !doc.id) {
-        console.error('Document not found or invalid:', docId)
+        console.error('[Layout] Document not found or invalid:', docId)
         // Don't navigate away immediately - let the fallback useEffect try to load documents
         // This allows the file explorer to show other documents in the project
         setDocument(null)
@@ -686,12 +729,16 @@ export default function Layout(): JSX.Element {
         return
       }
       
+      console.log(`[Layout] Loaded document: id=${doc.id}, title="${doc.title}", folder=${doc.folder}`)
+      
       // Check if PDF needs text extraction
       const isPDF = doc.title.toLowerCase().endsWith('.pdf')
+      console.log(`[Layout] Document type check: isPDF=${isPDF}, isWorldLab=${isWorldLabFile(doc)}`)
       if (isPDF && !doc.pdfText) {
         // Set document first so PDF viewer can render
         if (id === docId) {
           setDocument(doc)
+          setIsWorldLabMode(false)
         }
         
         try {
@@ -710,12 +757,68 @@ export default function Layout(): JSX.Element {
           console.error('[PDF] Failed to extract PDF text:', extractionError)
           // Document is already set, extraction will retry on next load if needed
         }
+      } else if (isWorldLabFile(doc)) {
+        // WorldLab file - load Lab data
+        console.log(`[WorldLab] Detected WorldLab file: id=${doc.id}, title=${doc.title}, folder=${doc.folder}`)
+        if (id === docId) {
+          setDocument(doc)
+          setIsWorldLabMode(true)
+          setIsSplitView(false)
+          setSplitViewNodeId(null)
+          setNodeDocument(null)
+          
+          try {
+            const labName = extractLabName(doc)
+            console.log(`[WorldLab] Extracted lab name: ${labName} from doc title: ${doc.title}`)
+            
+            // Check if Lab exists, create it if it doesn't
+            const labExists = await worldLabApi.labExists(labName)
+            console.log(`[WorldLab] Lab exists check: ${labExists} for labName: ${labName}`)
+            
+            if (!labExists) {
+              console.log(`[WorldLab] Lab ${labName} does not exist, will try to load anyway (Lab will be created on first node creation)`)
+            }
+            
+            const worldLab = await worldLabApi.load(labName)
+            console.log(`[WorldLab] Load result:`, worldLab ? `success, nodes=${worldLab.nodes.length}, edges=${worldLab.edges.length}` : 'null')
+            
+            if (worldLab && id === docId) {
+              setWorldLabData(worldLab)
+              console.log(`[WorldLab] Successfully set WorldLab data, isWorldLabMode=true, nodes=${worldLab.nodes.length}, edges=${worldLab.edges.length}`)
+            } else if (!worldLab && id === docId) {
+              console.warn(`[WorldLab] Load returned null for Lab: ${labName}, creating empty structure`)
+              // Even if Lab doesn't exist, we can still show empty canvas
+              // Create empty WorldLab data structure
+              const emptyWorldLab: WorldLab = {
+                labPath: '',
+                labName,
+                metadata: {
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                },
+                nodes: [],
+                edges: [],
+              }
+              setWorldLabData(emptyWorldLab)
+              console.log(`[WorldLab] Created empty WorldLab structure for new Lab: ${labName}`)
+            }
+          } catch (error) {
+            console.error('[WorldLab] Error loading Lab:', error)
+            if (id === docId) {
+              setIsWorldLabMode(false)
+            }
+          }
+        }
       } else {
-        // Not a PDF or PDF text already available
+        // Not a PDF or WorldLab - regular document
         // Only update document if this is still the current route
         // This prevents race conditions when rapidly switching files
         if (id === docId) {
           setDocument(doc)
+          setIsWorldLabMode(false)
+          setIsSplitView(false)
+          setSplitViewNodeId(null)
+          setNodeDocument(null)
         }
       }
       
@@ -1433,6 +1536,109 @@ export default function Layout(): JSX.Element {
     })
   }
 
+  // WorldLab node interaction handlers
+  const handleNodeSingleClick = useCallback((nodeId: string) => {
+    // Single click - edit node properties (handled by WorldLabCanvas)
+    // This is mainly for logging/debugging
+    console.log('[WorldLab] Node clicked:', nodeId)
+  }, [])
+
+  const handleNodeDoubleClick = useCallback(async (nodeId: string) => {
+    // Double click - open node file in split view
+    if (!worldLabData) return
+
+    try {
+      // Load node file content
+      const nodeContent = await worldLabApi.loadNodes(worldLabData.labName)
+      const node = nodeContent.find(n => n.id === nodeId)
+      
+      if (node && node.data?.content) {
+        // Create a Document-like object for the node file
+        const nodeDoc: Document = {
+          id: `worldlab_node_${nodeId}`,
+          title: `${nodeId}.md`,
+          content: JSON.stringify({
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: node.data.content.split('\n').map((line: string) => ({
+                  type: 'text',
+                  text: line,
+                })),
+              },
+            ],
+          }),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+
+        setSplitViewNodeId(nodeId)
+        setNodeDocument(nodeDoc)
+        setIsSplitView(true)
+      } else {
+        // Node file doesn't exist or is empty, create empty document
+        const nodeDoc: Document = {
+          id: `worldlab_node_${nodeId}`,
+          title: `${nodeId}.md`,
+          content: JSON.stringify({
+            type: 'doc',
+            content: [],
+          }),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+        setSplitViewNodeId(nodeId)
+        setNodeDocument(nodeDoc)
+        setIsSplitView(true)
+      }
+    } catch (error) {
+      console.error('[WorldLab] Failed to load node file:', error)
+    }
+  }, [worldLabData])
+
+  // handleCloseSplitView is kept for future use (e.g., close button in split view)
+  // const handleCloseSplitView = useCallback(() => {
+  //   setIsSplitView(false)
+  //   setSplitViewNodeId(null)
+  //   setNodeDocument(null)
+  // }, [])
+
+  // Handle node file save
+  const handleNodeFileSave = useCallback(async (content: string) => {
+    if (!worldLabData || !splitViewNodeId) return
+
+    try {
+      // Convert TipTap JSON to markdown (simplified - just extract text)
+      let markdownContent = ''
+      try {
+        const parsed = JSON.parse(content)
+        const extractText = (node: any): string => {
+          if (node.type === 'text') {
+            return node.text || ''
+          }
+          if (node.content && Array.isArray(node.content)) {
+            return node.content.map(extractText).join('')
+          }
+          return ''
+        }
+        markdownContent = extractText(parsed) || `# ${splitViewNodeId}\n\n`
+      } catch {
+        markdownContent = `# ${splitViewNodeId}\n\n`
+      }
+
+      await worldLabApi.saveNode(worldLabData.labName, splitViewNodeId, markdownContent)
+      
+      // Reload WorldLab data to update node labels
+      const updatedLab = await worldLabApi.load(worldLabData.labName)
+      if (updatedLab) {
+        setWorldLabData(updatedLab)
+      }
+    } catch (error) {
+      console.error('[WorldLab] Failed to save node file:', error)
+    }
+  }, [worldLabData, splitViewNodeId])
+
   // Save tabs to localStorage whenever they change
   useEffect(() => {
     try {
@@ -2025,21 +2231,31 @@ export default function Layout(): JSX.Element {
     try {
       // Use selected folder if available, otherwise default to 'project'
       // Ensure we always pass a string value, not null or undefined
-      const folder: 'library' | 'project' = selectedFolder === 'library' ? 'library' : 'project'
+      const folder: 'library' | 'project' | 'worldlab' = selectedFolder === 'library' ? 'library' : selectedFolder === 'worldlab' ? 'worldlab' : 'project'
       
-      // Generate name based on folder: "Section X" for workspace, "Doc X" for library
-      const namePrefix = folder === 'library' ? 'Doc' : 'Section'
+      // Generate name based on folder: "Section X" for workspace, "Doc X" for library, "Node X.worldlab" for worldlab
+      const namePrefix = folder === 'library' ? 'Doc' : folder === 'worldlab' ? 'Node' : 'Section'
       const folderDocs = documents.filter(doc => 
         (folder === 'library' && doc.folder === 'library') ||
+        (folder === 'worldlab' && doc.folder === 'worldlab') ||
         (folder === 'project' && (!doc.folder || doc.folder === 'project'))
       )
-      const existingTitles = folderDocs.map(doc => doc.title)
+      // For WorldLab, check titles without .worldlab extension to avoid duplicates
+      const existingTitles = folderDocs.map(doc => {
+        if (folder === 'worldlab' && doc.title.toLowerCase().endsWith('.worldlab')) {
+          return doc.title.slice(0, -10) // Remove .worldlab extension for comparison
+        }
+        return doc.title
+      })
       let number = 1
       while (existingTitles.includes(`${namePrefix} ${number}`)) {
         number++
       }
-      const newTitle = `${namePrefix} ${number}`
+      // For WorldLab files, add .worldlab extension to title
+      const baseTitle = `${namePrefix} ${number}`
+      const newTitle = folder === 'worldlab' ? `${baseTitle}.worldlab` : baseTitle
       
+      console.log(`[WorldLab] Creating new document: folder=${folder}, title=${newTitle}`)
       const newDoc = await documentApi.create(newTitle, folder)
       
       // Small delay to ensure file is fully written to disk before proceeding
@@ -5597,6 +5813,77 @@ export default function Layout(): JSX.Element {
           {isLoadingDocument && !document ? (
             // Show skeleton in editor area when loading first document
             <DocumentEditorSkeleton />
+          ) : isWorldLabMode && worldLabData ? (
+            // WorldLab mode - render Canvas with optional split view
+            isSplitView ? (
+              // Split view: Canvas on top, Node editor on bottom
+              <PanelGroup direction="vertical" style={{ width: '100%', height: '100%' }}>
+                <Panel defaultSize={60} minSize={30}>
+                  <WorldLabCanvas
+                    labName={worldLabData.labName}
+                    initialNodes={worldLabData.nodes}
+                    initialEdges={worldLabData.edges}
+                    onNodeDoubleClick={handleNodeDoubleClick}
+                    onNodeClick={handleNodeSingleClick}
+                    onNodesChange={(nodes) => {
+                      // Update worldLabData with new nodes
+                      setWorldLabData({ ...worldLabData, nodes })
+                    }}
+                    onEdgesChange={(edges) => {
+                      // Update worldLabData with new edges
+                      setWorldLabData({ ...worldLabData, edges })
+                    }}
+                  />
+                </Panel>
+                <PanelResizeHandle style={{
+                  height: '1px',
+                  backgroundColor: borderColor,
+                  cursor: 'row-resize',
+                  transition: 'background-color 0.2s',
+                }} />
+                <Panel defaultSize={40} minSize={20}>
+                  {nodeDocument && (
+                    <DocumentEditorWrapper
+                      document={nodeDocument}
+                      isActive={true}
+                      onEditorCreated={(docId, editor) => {
+                        // Store editor for node file
+                        setEditor(docId, editor)
+                      }}
+                      onDocumentChange={(doc) => {
+                        if (doc) {
+                          setNodeDocument(doc)
+                        }
+                      }}
+                      isAIPanelOpen={isAIPanelOpen}
+                      aiPanelWidth={aiPanelWidth}
+                      createEditorConfigFn={createEditorConfig}
+                      editorRef={getDocumentEditorRef(nodeDocument.id)}
+                      onUpdate={(editor) => {
+                        // Save node file when content changes
+                        const content = editor.getJSON()
+                        handleNodeFileSave(JSON.stringify(content))
+                      }}
+                    />
+                  )}
+                </Panel>
+              </PanelGroup>
+            ) : (
+              // Full Canvas view
+              <WorldLabCanvas
+                labName={worldLabData.labName}
+                initialNodes={worldLabData.nodes}
+                initialEdges={worldLabData.edges}
+                onNodeDoubleClick={handleNodeDoubleClick}
+                onNodeClick={handleNodeSingleClick}
+                onNodesChange={(nodes) => {
+                  setWorldLabData({ ...worldLabData, nodes })
+                }}
+                onEdgesChange={(edges) => {
+                  setWorldLabData({ ...worldLabData, edges })
+                }}
+              />
+            )
           ) : (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
               {/* Render all PDF Viewers for open PDF tabs, but only show the active one */}

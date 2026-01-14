@@ -119,17 +119,18 @@ export default function DocumentList() {
       const defaultName = `Untitled (${nextNumber})`
       const project = await projectApi.create(defaultName.trim())
       
-      // Create README.md document as the first document in workspace folder (project folder)
-      const readmeDoc = await documentApi.create('README.md', 'project')
+      // Create world lab file in WorldLab folder - use project name as the file name
+      const worldlabFileName = `${defaultName}.worldlab`
+      const worldlabDoc = await documentApi.create(worldlabFileName, 'worldlab')
       
-      // Add README.md to project
-      await projectApi.addDocument(project.id, readmeDoc.id, 0)
+      // Add worldlab file to project
+      await projectApi.addDocument(project.id, worldlabDoc.id, 0)
       
       // Update projects list
       setProjects(prev => [project, ...prev])
       
-      // Navigate to the README document (same as handleOpenProject)
-      navigate(`/document/${readmeDoc.id}`)
+      // Navigate to the worldlab document
+      navigate(`/document/${worldlabDoc.id}`)
     } catch (error) {
       console.error('Failed to create project:', error)
       alert('Failed to create project. Please try again.')

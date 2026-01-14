@@ -656,8 +656,8 @@ export default function Toolbar({
   const dropdownBorder = theme === 'dark' ? '#202020' : '#c0c0c0'
   const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const dropdownHoverBg = theme === 'dark' ? '#3e3e42' : '#f8f9fa'
-  const dropdownActiveBg = theme === 'dark' ? '#1f1f1f' : '#e8eaed'
-  const dropdownActiveColor = theme === 'dark' ? '#4fc3f7' : '#1a73e8'
+  const dropdownActiveBg = theme === 'dark' ? '#1f1f1f' : '#f0f0f0'
+  const dropdownActiveColor = theme === 'dark' ? '#9e9e9e' : '#757575'
 
   const buttonStyle: React.CSSProperties = {
     padding: '4px 6px',
@@ -680,8 +680,8 @@ export default function Toolbar({
 
   const activeButtonStyle: React.CSSProperties = {
     ...buttonStyle,
-    backgroundColor: theme === 'dark' ? '#252525' : '#e0e8f5',
-    color: theme === 'dark' ? '#D6D6DD' : '#1967d2',
+    backgroundColor: theme === 'dark' ? '#353535' : '#f0f0f0',
+    color: theme === 'dark' ? '#D6D6DD' : '#616161',
   }
 
   const dividerStyle: React.CSSProperties = {
@@ -1818,7 +1818,7 @@ export default function Toolbar({
                   onMouseEnter={(e) => {
                     if (!isActive) {
                       e.currentTarget.style.transform = 'scale(1.1)'
-                      e.currentTarget.style.boxShadow = theme === 'dark' ? '0 0 0 2px rgba(79, 195, 247, 0.3)' : '0 0 0 2px rgba(26, 115, 232, 0.3)'
+                      e.currentTarget.style.boxShadow = theme === 'dark' ? '0 0 0 2px rgba(158, 158, 158, 0.3)' : '0 0 0 2px rgba(117, 117, 117, 0.3)'
                     }
                   }}
                   onMouseLeave={(e) => {
@@ -1912,7 +1912,7 @@ export default function Toolbar({
                       onMouseEnter={(e) => {
                         if (!isActive) {
                           e.currentTarget.style.transform = 'scale(1.1)'
-                          e.currentTarget.style.boxShadow = theme === 'dark' ? '0 0 0 2px rgba(79, 195, 247, 0.3)' : '0 0 0 2px rgba(26, 115, 232, 0.3)'
+                          e.currentTarget.style.boxShadow = theme === 'dark' ? '0 0 0 2px rgba(158, 158, 158, 0.3)' : '0 0 0 2px rgba(117, 117, 117, 0.3)'
                         }
                       }}
                       onMouseLeave={(e) => {

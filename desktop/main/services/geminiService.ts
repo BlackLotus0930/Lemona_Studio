@@ -8,9 +8,9 @@ import { searchLibraryWithMentions } from './semanticSearchService.js'
 // Store API key instances per API key to allow multiple users
 const genAICache: Map<string, GoogleGenerativeAI> = new Map()
 
-// Get max output tokens for a model (20K for all models)
+// Get max output tokens for a model (8K for all models)
 function getMaxOutputTokens(modelName?: string): number {
-  return 20000 // 20K tokens for all models
+  return 8192 // 8K tokens for all models
 }
 
 // Get max context window for a model

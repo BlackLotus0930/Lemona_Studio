@@ -21,7 +21,7 @@ interface FileExplorerProps {
   onDocumentDelete?: (docId: string) => void
   onReorderDocuments?: (documentIds: string[]) => void
   projectName?: string // Project name for the ProjectName folder
-  onSelectedFolderChange?: (folderId: 'library' | 'project' | null) => void // Callback when folder selection changes
+  onSelectedFolderChange?: (folderId: 'library' | 'project' | 'worldlab' | null) => void // Callback when folder selection changes
   onFileUploaded?: (document: Document, isBatchUpload?: boolean) => void // Callback when a file is uploaded, isBatchUpload indicates if multiple files are being uploaded
   isSearchMode?: boolean // Whether search mode is active
   onSearchModeChange?: (isSearchMode: boolean) => void // Callback to toggle search mode
@@ -29,7 +29,7 @@ interface FileExplorerProps {
   searchQueryProp?: string // External search query to sync with local state
   onDocumentsUpdated?: () => void // Callback when documents are updated (e.g., after replace all)
   onDocumentChange?: (doc: Document | null) => void // Callback to update current document in editor
-  onDocumentFolderChange?: (documentId: string, folder: 'library' | 'project') => void // Callback for optimistic folder updates
+  onDocumentFolderChange?: (documentId: string, folder: 'library' | 'project' | 'worldlab') => void // Callback for optimistic folder updates
 }
 
 interface FileItem {
@@ -61,7 +61,7 @@ function FileExplorer({
   const { theme } = useTheme()
   
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [_selectedFolderId, setSelectedFolderId] = useState<'library' | 'project' | null>(null)
+  const [_selectedFolderId, setSelectedFolderId] = useState<'library' | 'project' | 'worldlab' | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number; item: FileItem } | null>(null)
@@ -71,13 +71,13 @@ function FileExplorer({
   const [dragOverEndZone, setDragOverEndZone] = useState<boolean>(false) // Track if dragging over the end drop zone of project folder
   const [dropPosition, setDropPosition] = useState<'above' | 'below' | null>(null) // Track drop position relative to item
   const [dropTargetId, setDropTargetId] = useState<string | null>(null) // Track which item we're dropping relative to
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['library', 'project'])) // Default both folders expanded
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['worldlab', 'library', 'project'])) // Default all folders expanded
   
   // Indexing status state - track indexing status for library files
   const [indexingStatuses, setIndexingStatuses] = useState<Map<string, IndexingStatus | null>>(new Map())
   
   // Upload queue state - use ref to avoid re-renders and manage queue properly
-  const uploadQueueRef = useRef<Array<{ file: File; folderId: 'library' | 'project' }>>([])
+  const uploadQueueRef = useRef<Array<{ file: File; folderId: 'library' | 'project' | 'worldlab' }>>([])
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; currentFile: string } | null>(null)
   const [uploadQueueTrigger, setUploadQueueTrigger] = useState(0) // Trigger to re-run useEffect when queue changes
   const processingRef = useRef(false)
@@ -505,9 +505,9 @@ function FileExplorer({
     }
   }, [currentDocumentId])
 
-  const bgColor = theme === 'dark' ? '#141414' : '#FBFBFB'
-  const hoverBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
-  const selectedBg = theme === 'dark' ? '#1e1e1e' : '#f1f3f4'
+  const bgColor = theme === 'dark' ? '#141414' : '#FAFAFA'
+  const hoverBg = theme === 'dark' ? '#1e1e1e' : '#F0F0ED'
+  const selectedBg = theme === 'dark' ? '#1e1e1e' : '#F0F0ED'
   const textColor = theme === 'dark' ? '#cccccc' : '#202124'
   const folderTextColor = theme === 'dark' ? '#b5b5b5' : '#4a4a4a' // Slightly lighter color for folder names and arrows
   const indicatorColor = theme === 'dark' ? '#999999' : '#c0c0c0' // Light grey color for drop indicator
@@ -533,6 +533,7 @@ function FileExplorer({
     (doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md') && 
     doc.folder !== 'project'
   )
+  const worldlabDocs = documents.filter(doc => doc.folder === 'worldlab')
   const libraryDocs = documents.filter(doc => doc.folder === 'library' && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
   // Include README.md in project folder - it should appear in Workspace folder
   const projectDocs = documents.filter(doc => (!doc.folder || doc.folder === 'project'))
@@ -546,6 +547,13 @@ function FileExplorer({
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
     })
   }
+
+  const worldlabFiles: FileItem[] = sortDocuments(worldlabDocs).map(doc => ({
+    id: doc.id,
+    name: doc.title,
+    type: 'file' as const,
+    document: doc,
+  }))
 
   const libraryFiles: FileItem[] = sortDocuments(libraryDocs).map(doc => ({
     id: doc.id,
@@ -563,14 +571,20 @@ function FileExplorer({
 
   const fileTree: FileItem[] = [
     {
+      id: 'worldlab',
+      name: 'worldlab',
+      type: 'folder',
+      children: worldlabFiles,
+    },
+    {
       id: 'library',
-      name: 'Library',
+      name: 'library',
       type: 'folder',
       children: libraryFiles,
     },
     {
       id: 'project',
-      name: 'Workspace',
+      name: 'workspace',
       type: 'folder',
       children: projectFiles,
     },
@@ -592,7 +606,7 @@ function FileExplorer({
   const handleItemClick = (item: FileItem) => {
     if (item.type === 'folder') {
       // Select folder when clicking on folder name
-      const folderId = item.id === 'library' ? 'library' : 'project'
+      const folderId = item.id === 'library' ? 'library' : item.id === 'worldlab' ? 'worldlab' : 'project'
       setSelectedFolderId(folderId)
       setSelectedId(item.id) // Also set selectedId for visual feedback
       if (onSelectedFolderChange) {
@@ -601,7 +615,7 @@ function FileExplorer({
     } else if (item.document) {
       setSelectedId(item.id)
       // Determine which folder this file belongs to and set it as selected folder
-      const fileFolderId = item.document.folder === 'library' ? 'library' : 'project'
+      const fileFolderId = item.document.folder === 'library' ? 'library' : item.document.folder === 'worldlab' ? 'worldlab' : 'project'
       setSelectedFolderId(fileFolderId)
       if (onSelectedFolderChange) {
         onSelectedFolderChange(fileFolderId)
@@ -709,7 +723,7 @@ function FileExplorer({
             // and will be indexed to the correct project index with correct metadata
             const currentProjectId = documents.find(d => d.id === currentDocumentId)?.projectId
             // Pass projectId for both library and project files
-            const document = await documentApi.uploadFile(finalFilePath, file.name, folderId, currentProjectId)
+            const document = await documentApi.uploadFile(finalFilePath, file.name, folderId as 'library' | 'project' | 'worldlab', currentProjectId)
             if (document && onFileUploaded) {
               const isBatchUpload = totalFiles > 1
               onFileUploaded(document, isBatchUpload)
@@ -751,7 +765,7 @@ function FileExplorer({
   }, [uploadQueueTrigger, onFileUploaded])
 
   // Handle file drop on folder
-  const handleFolderDrop = async (e: React.DragEvent, folderId: 'library' | 'project') => {
+  const handleFolderDrop = async (e: React.DragEvent, folderId: 'library' | 'project' | 'worldlab') => {
     e.preventDefault()
     e.stopPropagation()
     setDragOverFileItemId(null)
@@ -776,7 +790,7 @@ function FileExplorer({
     supportedFiles.forEach(file => {
       // CRITICAL: PDF files always go to library folder, regardless of drop target
       const isPDF = file.name.toLowerCase().endsWith('.pdf')
-      const targetFolderId = isPDF ? 'library' : folderId
+      const targetFolderId: 'library' | 'project' | 'worldlab' = isPDF ? 'library' : folderId
       uploadQueueRef.current.push({ file, folderId: targetFolderId })
     })
     
@@ -935,7 +949,7 @@ function FileExplorer({
             e.stopPropagation()
             if (isFolder) {
               // Handle drop on folder
-              const folderId = item.id === 'library' ? 'library' : 'project'
+              const folderId = item.id === 'library' ? 'library' : item.id === 'worldlab' ? 'worldlab' : 'project'
               
               // Check if dropping external files
               if (e.dataTransfer.types.includes('Files')) {
@@ -1234,7 +1248,7 @@ function FileExplorer({
             onDrop={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              const folderId = item.id === 'library' ? 'library' : 'project'
+              const folderId = item.id === 'library' ? 'library' : item.id === 'worldlab' ? 'worldlab' : 'project'
               
               // Check if dropping external files
               if (e.dataTransfer.types.includes('Files')) {

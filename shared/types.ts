@@ -20,7 +20,7 @@ export interface Document {
   projectId?: string; // Optional: ID of the project this document belongs to
   dependencies?: string[]; // Optional: Array of document IDs this document depends on
   order?: number; // Optional: Order within project (for sorting)
-  folder?: 'library' | 'project'; // Optional: Folder this document belongs to ('library' or 'project')
+  folder?: 'library' | 'project' | 'worldlab'; // Optional: Folder this document belongs to ('library', 'project', or 'worldlab')
   // PDF text extraction
   pdfText?: PDFTextContent; // Optional: Extracted text from PDF files, organized by page/paragraph
   // Logical deletion
@@ -117,5 +117,48 @@ export interface DocumentSnapshot {
   documentId: string;
   title: string;
   content: string; // Full TipTap JSON content
+}
+
+// WorldLab Types
+export interface WorldLabMetadata {
+  author?: string;
+  theme?: string;
+  tags?: string[];
+  version?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  description?: string;
+}
+
+export interface WorldLabNode {
+  id: string; // Node ID (corresponds to filename without .md extension)
+  label: string; // Display label (usually elementName or extracted from file)
+  category?: string; // Category: 人物, 事件, 地点, 规则, 设定, 概念, 想法, etc.
+  elementName?: string; // Element name
+  position: { x: number; y: number }; // Position on canvas
+  data?: {
+    // Additional node data
+    description?: string;
+    content?: string; // File content preview or full content
+    [key: string]: any;
+  };
+}
+
+export interface WorldLabEdge {
+  id: string; // Edge ID
+  source: string; // Source node ID
+  target: string; // Target node ID
+  type?: string; // Edge type (default, smoothstep, step, etc.)
+  label?: string; // Optional edge label
+  animated?: boolean; // Whether edge is animated
+  style?: Record<string, any>; // Edge style
+}
+
+export interface WorldLab {
+  labPath: string; // Full path to the Lab directory
+  labName: string; // Lab name (folder name)
+  metadata: WorldLabMetadata;
+  nodes: WorldLabNode[];
+  edges: WorldLabEdge[];
 }
 

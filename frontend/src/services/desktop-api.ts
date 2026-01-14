@@ -1,5 +1,5 @@
 // Desktop API - Uses Electron IPC instead of HTTP
-import { Project, AIChatMessage, DocumentSnapshot } from '@shared/types'
+import { Project, AIChatMessage, DocumentSnapshot, WorldLab, WorldLabNode, WorldLabEdge, WorldLabMetadata } from '@shared/types'
 
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electron !== undefined
@@ -36,13 +36,13 @@ async function invokeOrFetch(channel: string, ...args: any[]): Promise<any> {
 
 export const documentApi = {
   get: (id: string) => invokeOrFetch('document:getById', id),
-  create: (title: string, folder?: 'library' | 'project') => invokeOrFetch('document:create', title, folder),
+  create: (title: string, folder?: 'library' | 'project' | 'worldlab') => invokeOrFetch('document:create', title, folder),
   update: (id: string, content: string) => invokeOrFetch('document:update', id, content),
   updateTitle: (id: string, title: string) => invokeOrFetch('document:updateTitle', id, title),
-  updateFolder: (id: string, folder: 'library' | 'project') => invokeOrFetch('document:updateFolder', id, folder),
+  updateFolder: (id: string, folder: 'library' | 'project' | 'worldlab') => invokeOrFetch('document:updateFolder', id, folder),
   delete: (id: string) => invokeOrFetch('document:delete', id),
   list: () => invokeOrFetch('document:getAll'),
-  uploadFile: (filePath: string, fileName: string, folder: 'library' | 'project', projectId?: string) => 
+  uploadFile: (filePath: string, fileName: string, folder: 'library' | 'project' | 'worldlab', projectId?: string) => 
     invokeOrFetch('document:uploadFile', filePath, fileName, folder, projectId),
   extractPDFText: (documentId: string) => invokeOrFetch('pdf:extractText', documentId),
   getPDFFileContent: (documentId: string) => invokeOrFetch('pdf:getFileContent', documentId),
@@ -271,5 +271,30 @@ export const versionApi = {
     invokeOrFetch('version:getHeadCommit', projectId),
   restoreCommit: (projectId: string, commitId: string) =>
     invokeOrFetch('version:restoreCommit', projectId, commitId),
+}
+
+export const worldLabApi = {
+  load: (labName: string): Promise<WorldLab | null> =>
+    invokeOrFetch('worldlab:load', labName),
+  loadNodes: (labName: string): Promise<WorldLabNode[]> =>
+    invokeOrFetch('worldlab:loadNodes', labName),
+  loadEdges: (labName: string): Promise<WorldLabEdge[]> =>
+    invokeOrFetch('worldlab:loadEdges', labName),
+  loadMetadata: (labName: string): Promise<WorldLabMetadata | null> =>
+    invokeOrFetch('worldlab:loadMetadata', labName),
+  saveNode: (labName: string, nodeId: string, content: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:saveNode', labName, nodeId, content),
+  saveEdges: (labName: string, edges: WorldLabEdge[]): Promise<boolean> =>
+    invokeOrFetch('worldlab:saveEdges', labName, edges),
+  createNode: (labName: string, nodeId: string, content?: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:createNode', labName, nodeId, content),
+  deleteNode: (labName: string, nodeId: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:deleteNode', labName, nodeId),
+  saveMetadata: (labName: string, metadata: WorldLabMetadata): Promise<boolean> =>
+    invokeOrFetch('worldlab:saveMetadata', labName, metadata),
+  labExists: (labName: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:labExists', labName),
+  getAllLabNames: (): Promise<string[]> =>
+    invokeOrFetch('worldlab:getAllLabNames'),
 }
 

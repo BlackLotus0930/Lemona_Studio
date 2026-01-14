@@ -229,7 +229,7 @@ export const documentService = {
     }
   },
 
-  async create(title: string, folder?: 'library' | 'project'): Promise<Document> {
+  async create(title: string, folder?: 'library' | 'project' | 'worldlab'): Promise<Document> {
     await ensureDocumentsDir()
     
     const id = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -306,7 +306,7 @@ export const documentService = {
     return document
   },
 
-  async updateFolder(id: string, folder: 'library' | 'project'): Promise<Document | null> {
+  async updateFolder(id: string, folder: 'library' | 'project' | 'worldlab'): Promise<Document | null> {
     const document = await this.getById(id)
     if (!document) {
       return null
@@ -549,7 +549,7 @@ export const documentService = {
     })
   },
 
-  async uploadFile(sourceFilePath: string, fileName: string, folder: 'library' | 'project', projectId?: string): Promise<Document> {
+  async uploadFile(sourceFilePath: string, fileName: string, folder: 'library' | 'project' | 'worldlab', projectId?: string): Promise<Document> {
     await ensureDocumentsDir()
     await ensureFilesDir()
     

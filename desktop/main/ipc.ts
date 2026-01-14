@@ -12,6 +12,7 @@ import { versionService } from './services/versionService.js'
 import { extractPDFTextAsync } from './services/pdfTextExtractor.js'
 import { parseDocx, splitDocxIntoChapters } from './services/docxParser.js'
 import { saveApiKeys, getApiKeys } from './services/apiKeyStore.js'
+import { worldLabService } from './services/worldLabService.js'
 import path from 'path'
 import { app } from 'electron'
 
@@ -35,7 +36,7 @@ export function setupIPC() {
     }
   })
 
-  ipcMain.handle('document:create', async (_, title: string, folder?: 'library' | 'project') => {
+  ipcMain.handle('document:create', async (_, title: string, folder?: 'library' | 'project' | 'worldlab') => {
     try {
       const result = await documentService.create(title, folder)
       return result
@@ -45,7 +46,7 @@ export function setupIPC() {
     }
   })
 
-  ipcMain.handle('document:uploadFile', async (_, filePath: string, fileName: string, folder: 'library' | 'project', projectId?: string) => {
+  ipcMain.handle('document:uploadFile', async (_, filePath: string, fileName: string, folder: 'library' | 'project' | 'worldlab', projectId?: string) => {
     try {
       const result = await documentService.uploadFile(filePath, fileName, folder, projectId)
       return result
@@ -73,7 +74,7 @@ export function setupIPC() {
     }
   })
 
-  ipcMain.handle('document:updateFolder', async (_, id: string, folder: 'library' | 'project') => {
+  ipcMain.handle('document:updateFolder', async (_, id: string, folder: 'library' | 'project' | 'worldlab') => {
     try {
       return await documentService.updateFolder(id, folder)
     } catch (error) {
@@ -990,6 +991,106 @@ Rephrased text:`
       return await versionService.restoreCommit(projectId, commitId)
     } catch (error) {
       console.error('IPC version:restoreCommit error:', error)
+      throw error
+    }
+  })
+
+  // WorldLab operations
+  ipcMain.handle('worldlab:load', async (_, labName: string) => {
+    try {
+      return await worldLabService.load(labName)
+    } catch (error) {
+      console.error('IPC worldlab:load error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('worldlab:loadNodes', async (_, labName: string) => {
+    try {
+      return await worldLabService.loadNodes(labName)
+    } catch (error) {
+      console.error('IPC worldlab:loadNodes error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('worldlab:loadEdges', async (_, labName: string) => {
+    try {
+      return await worldLabService.loadEdges(labName)
+    } catch (error) {
+      console.error('IPC worldlab:loadEdges error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('worldlab:loadMetadata', async (_, labName: string) => {
+    try {
+      return await worldLabService.loadMetadata(labName)
+    } catch (error) {
+      console.error('IPC worldlab:loadMetadata error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('worldlab:saveNode', async (_, labName: string, nodeId: string, content: string) => {
+    try {
+      return await worldLabService.saveNode(labName, nodeId, content)
+    } catch (error) {
+      console.error('IPC worldlab:saveNode error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('worldlab:saveEdges', async (_, labName: string, edges: any[]) => {
+    try {
+      return await worldLabService.saveEdges(labName, edges)
+    } catch (error) {
+      console.error('IPC worldlab:saveEdges error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('worldlab:createNode', async (_, labName: string, nodeId: string, content?: string) => {
+    try {
+      return await worldLabService.createNode(labName, nodeId, content)
+    } catch (error) {
+      console.error('IPC worldlab:createNode error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('worldlab:deleteNode', async (_, labName: string, nodeId: string) => {
+    try {
+      return await worldLabService.deleteNode(labName, nodeId)
+    } catch (error) {
+      console.error('IPC worldlab:deleteNode error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('worldlab:saveMetadata', async (_, labName: string, metadata: any) => {
+    try {
+      return await worldLabService.saveMetadata(labName, metadata)
+    } catch (error) {
+      console.error('IPC worldlab:saveMetadata error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('worldlab:labExists', async (_, labName: string) => {
+    try {
+      return await worldLabService.labExists(labName)
+    } catch (error) {
+      console.error('IPC worldlab:labExists error:', error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('worldlab:getAllLabNames', async () => {
+    try {
+      return await worldLabService.getAllLabNames()
+    } catch (error) {
+      console.error('IPC worldlab:getAllLabNames error:', error)
       throw error
     }
   })

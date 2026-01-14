@@ -288,7 +288,7 @@ export const versionService = {
     )
     
     // Create a map of document IDs to their folder info
-    const docFolderMap = new Map<string, 'library' | 'project'>()
+    const docFolderMap = new Map<string, 'library' | 'project' | 'worldlab'>()
     allProjectDocs.forEach(doc => {
       if (doc.folder) {
         docFolderMap.set(doc.id, doc.folder)

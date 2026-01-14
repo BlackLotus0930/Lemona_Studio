@@ -27,6 +27,7 @@
     "@tiptap/react": "^3.14.0",
     "@tiptap/starter-kit": "^3.14.0",
     "@types/react-syntax-highlighter": "^15.5.13",
+    "@xyflow/react": "^12.10.0",
     "axios": "^1.6.2",
     "katex": "^0.16.27",
     "pdfjs-dist": "^5.4.449",

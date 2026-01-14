@@ -99,9 +99,9 @@ function getModelName(modelName: string, hasAttachments?: boolean): string {
   return modelMap[modelName] || 'gpt-4.1-nano'
 }
 
-// Get max output tokens for a model (20K for all models)
+// Get max output tokens for a model (8K for all models)
 function getMaxOutputTokens(modelName?: string): number {
-  return 20000 // 20K tokens for all models
+  return 8192 // 8K tokens for all models
 }
 
 // Get max context window for a model (used for web search)
