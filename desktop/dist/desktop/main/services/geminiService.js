@@ -11,10 +11,10 @@ function getMaxOutputTokens(modelName) {
 // Get max context window for a model
 function getMaxContextWindow(modelName) {
     const contextWindows = {
-        'gemini-3-flash-preview': 1048576, // 1,048,576 tokens
-        'gemini-2.5-pro': 1048576, // 1,048,576 tokens
+        'gemini-3-flash-preview': 200000, // 200K tokens
+        'gemini-2.5-pro': 200000, // 200K tokens
     };
-    return contextWindows[modelName || 'gemini-3-flash-preview'] || 1048576;
+    return contextWindows[modelName || 'gemini-3-flash-preview'] || 200000;
 }
 function getModel(apiKey, modelName = 'gemini-3-flash-preview') {
     if (!apiKey) {

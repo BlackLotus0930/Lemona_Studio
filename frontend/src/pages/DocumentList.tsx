@@ -188,31 +188,37 @@ export default function DocumentList() {
       // Get documents in project
       const documents = await projectApi.getDocuments(projectId)
       if (documents.length > 0) {
-        // Priority: 1. README.md in project folder, 2. Last opened document, 3. First document
-        let documentToOpen = documents[0] // Default to first document
+        // Priority: 1. Last opened document, 2. README.md in project folder, 3. First document
+        let documentToOpen: Document | null = null
         
-        // First, try to find README.md in project folder (workspace folder)
-        const readmeDoc = documents.find((doc: Document) => 
-          doc.title === 'README.md' && doc.folder === 'project'
-        )
-        
-        if (readmeDoc) {
-          documentToOpen = readmeDoc
-        } else {
-          // If no README.md, try to restore last opened document
-          try {
-            const lastDocumentId = localStorage.getItem(`lastDocument_${projectId}`)
-            if (lastDocumentId) {
-              // Check if the last document still exists in the project
-              const lastDocument = documents.find((doc: Document) => doc.id === lastDocumentId)
-              if (lastDocument) {
-                documentToOpen = lastDocument
-              }
+        // First, try to restore last opened document
+        try {
+          const lastDocumentId = localStorage.getItem(`lastDocument_${projectId}`)
+          if (lastDocumentId) {
+            // Check if the last document still exists in the project
+            const lastDocument = documents.find((doc: Document) => doc.id === lastDocumentId)
+            if (lastDocument) {
+              documentToOpen = lastDocument
             }
-          } catch (error) {
-            console.error('Failed to load last document:', error)
-            // Fall back to first document
           }
+        } catch (error) {
+          console.error('Failed to load last document:', error)
+        }
+        
+        // If no last opened document was found, try to find README.md in project folder (workspace folder)
+        if (!documentToOpen) {
+          const readmeDoc = documents.find((doc: Document) => 
+            doc.title === 'README.md' && doc.folder === 'project'
+          )
+          
+          if (readmeDoc) {
+            documentToOpen = readmeDoc
+          }
+        }
+        
+        // Fall back to first document if neither last opened nor README.md was found
+        if (!documentToOpen) {
+          documentToOpen = documents[0]
         }
         
         navigate(`/document/${documentToOpen.id}`)
