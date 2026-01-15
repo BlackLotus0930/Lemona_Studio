@@ -88,6 +88,12 @@ interface ToolbarProps {
   documentTitle?: string
   onRestoreCommit?: (commitId: string) => void // Callback to set restored commit parent
   onDocumentsReload?: () => void // Callback to reload documents after restore
+  customUndoRedo?: {
+    undo: () => void
+    redo: () => void
+    canUndo: () => boolean
+    canRedo: () => boolean
+  }
 }
 
 export default function Toolbar({ 
@@ -99,7 +105,8 @@ export default function Toolbar({
   projectName = 'LEMONA',
   documentTitle,
   onRestoreCommit,
-  onDocumentsReload
+  onDocumentsReload,
+  customUndoRedo
 }: ToolbarProps) {
   const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
@@ -1213,19 +1220,27 @@ export default function Toolbar({
         <SearchIcon style={{ fontSize: '18px', transform: 'translateY(1px)' }} />
       </button>
 
-      {/* Undo/Redo - Disabled for PDF files */}
+      {/* Undo/Redo - Use custom handlers if provided, otherwise use editor's undo/redo */}
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          if (stableEditor && !isPDF) {
+          if (customUndoRedo) {
+            customUndoRedo.undo()
+          } else if (stableEditor && !isPDF) {
             stableEditor.chain().focus().undo().run()
           }
         }}
-        disabled={!stableEditor || isPDF || !stableEditor.can().undo()}
-        style={{ ...buttonStyle, opacity: (stableEditor && !isPDF && stableEditor.can().undo()) ? 1 : 0.3 }}
+        disabled={customUndoRedo ? !customUndoRedo.canUndo() : (!stableEditor || isPDF || !stableEditor.can().undo())}
+        style={{ 
+          ...buttonStyle, 
+          opacity: customUndoRedo 
+            ? (customUndoRedo.canUndo() ? 1 : 0.3)
+            : (stableEditor && !isPDF && stableEditor.can().undo()) ? 1 : 0.3 
+        }}
         title="Undo"
         onMouseEnter={(e) => {
-          if (stableEditor && !isPDF && stableEditor.can().undo()) {
+          const canUndo = customUndoRedo ? customUndoRedo.canUndo() : (stableEditor && !isPDF && stableEditor.can().undo())
+          if (canUndo) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}
@@ -1236,15 +1251,23 @@ export default function Toolbar({
       <button
         onMouseDown={(e) => {
           e.preventDefault()
-          if (stableEditor && !isPDF) {
+          if (customUndoRedo) {
+            customUndoRedo.redo()
+          } else if (stableEditor && !isPDF) {
             stableEditor.chain().focus().redo().run()
           }
         }}
-        disabled={!stableEditor || isPDF || !stableEditor.can().redo()}
-        style={{ ...buttonStyle, opacity: (stableEditor && !isPDF && stableEditor.can().redo()) ? 1 : 0.3 }}
+        disabled={customUndoRedo ? !customUndoRedo.canRedo() : (!stableEditor || isPDF || !stableEditor.can().redo())}
+        style={{ 
+          ...buttonStyle, 
+          opacity: customUndoRedo 
+            ? (customUndoRedo.canRedo() ? 1 : 0.3)
+            : (stableEditor && !isPDF && stableEditor.can().redo()) ? 1 : 0.3 
+        }}
         title="Redo"
         onMouseEnter={(e) => {
-          if (stableEditor && !isPDF && stableEditor.can().redo()) {
+          const canRedo = customUndoRedo ? customUndoRedo.canRedo() : (stableEditor && !isPDF && stableEditor.can().redo())
+          if (canRedo) {
             e.currentTarget.style.backgroundColor = toolbarHoverBg
           }
         }}

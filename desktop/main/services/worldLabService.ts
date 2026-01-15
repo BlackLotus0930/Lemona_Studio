@@ -4,29 +4,43 @@ import { app } from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
 
-// Use Electron's userData directory for Labs
-const LABS_DIR = path.join(app.getPath('userData'), 'Labs')
+// Use Electron's userData directory for WorldLab
+// Structure: /worldlab/WorldLab(1).worldlab/nodes/..., edges.json, metadata.json
+const WORLDLAB_DIR = path.join(app.getPath('userData'), 'worldlab')
 
 console.log('Desktop WorldLab service initialized:')
-console.log('  LABS_DIR:', LABS_DIR)
+console.log('  WORLDLAB_DIR:', WORLDLAB_DIR)
 
-// Ensure Labs directory exists
-async function ensureLabsDir() {
+// Ensure worldlab directory exists
+async function ensureWorldLabDir() {
   try {
-    await fs.mkdir(LABS_DIR, { recursive: true })
+    await fs.mkdir(WORLDLAB_DIR, { recursive: true })
   } catch (error) {
-    console.error('Error creating Labs directory:', error)
+    console.error('Error creating worldlab directory:', error)
   }
 }
 
 // Initialize on import
-ensureLabsDir()
+ensureWorldLabDir()
 
 /**
- * Get the path to a Lab directory
+ * Get the path to a Lab directory (with .worldlab extension)
+ * Lab name should be like "WorldLab(1)" and will be stored as "WorldLab(1).worldlab"
  */
 function getLabPath(labName: string): string {
-  return path.join(LABS_DIR, labName)
+  // Ensure lab name has .worldlab extension
+  const labFolderName = labName.endsWith('.worldlab') ? labName : `${labName}.worldlab`
+  return path.join(WORLDLAB_DIR, labFolderName)
+}
+
+/**
+ * Extract lab name from folder name (remove .worldlab extension if present)
+ */
+function extractLabName(folderName: string): string {
+  if (folderName.endsWith('.worldlab')) {
+    return folderName.slice(0, -10) // Remove .worldlab extension
+  }
+  return folderName
 }
 
 /**
@@ -171,6 +185,25 @@ export const worldLabService = {
         return []
       }
 
+      // Load edges.json to get node positions (if stored there)
+      // Also load existing nodes to get their positions
+      let nodePositions: Map<string, { x: number; y: number }> = new Map()
+      try {
+        const edgesPath = getEdgesPath(labPath)
+        const edgesContent = await fs.readFile(edgesPath, 'utf-8')
+        const edgesData = JSON.parse(edgesContent)
+        // Check if edges.json contains node positions
+        if (edgesData.nodePositions && typeof edgesData.nodePositions === 'object') {
+          Object.entries(edgesData.nodePositions).forEach(([nodeId, pos]: [string, any]) => {
+            if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+              nodePositions.set(nodeId, { x: pos.x, y: pos.y })
+            }
+          })
+        }
+      } catch {
+        // edges.json doesn't exist or doesn't have positions, that's okay
+      }
+
       // Read all .md files in nodes directory
       const files = await fs.readdir(nodesDir)
       const nodeFiles = files.filter(file => file.endsWith('.md'))
@@ -186,9 +219,12 @@ export const worldLabService = {
           // Extract title/label from content
           const label = extractTitleFromMarkdown(content)
           
-          // Try to load position from edges.json or use default
-          // For now, use default position - we'll enhance this later
-          const position = { x: Math.random() * 400, y: Math.random() * 400 }
+          // Get position from loaded positions or use default
+          const savedPosition = nodePositions.get(nodeId)
+          const position = savedPosition || { 
+            x: Math.random() * 400 + 100, 
+            y: Math.random() * 400 + 100 
+          }
           
           nodes.push({
             id: nodeId,
@@ -213,6 +249,7 @@ export const worldLabService = {
 
   /**
    * Load edges from edges.json
+   * edges.json may contain both edges array and nodePositions object
    */
   async loadEdges(labName: string): Promise<WorldLabEdge[]> {
     try {
@@ -221,22 +258,31 @@ export const worldLabService = {
       
       try {
         const content = await fs.readFile(edgesPath, 'utf-8')
-        const edges = JSON.parse(content)
+        const data = JSON.parse(content)
         
-        // Validate edges array
-        if (Array.isArray(edges)) {
-          return edges.map((edge: any, index: number) => ({
-            id: edge.id || `edge_${index}`,
-            source: edge.source,
-            target: edge.target,
-            type: edge.type || 'default',
-            label: edge.label,
-            animated: edge.animated || false,
-            style: edge.style,
-          }))
+        // Handle both formats: array of edges, or object with edges array
+        let edges: any[] = []
+        if (Array.isArray(data)) {
+          edges = data
+        } else if (data.edges && Array.isArray(data.edges)) {
+          edges = data.edges
+        } else if (Array.isArray(data)) {
+          edges = data
         }
         
-        return []
+        // Filter out nodePositions if it exists in the array (shouldn't happen, but just in case)
+        edges = edges.filter(item => item && typeof item === 'object' && ('source' in item || 'target' in item))
+        
+        // Validate and return edges array
+        return edges.map((edge: any, index: number) => ({
+          id: edge.id || `edge_${index}`,
+          source: edge.source,
+          target: edge.target,
+          type: edge.type || 'default',
+          label: edge.label,
+          animated: edge.animated || false,
+          style: edge.style,
+        }))
       } catch {
         // edges.json doesn't exist, return empty array
         return []
@@ -272,6 +318,51 @@ export const worldLabService = {
   },
 
   /**
+   * Load a single node file content (raw markdown)
+   */
+  async loadNodeContent(labName: string, nodeId: string): Promise<string | null> {
+    try {
+      const labPath = getLabPath(labName)
+      const filePath = getNodeFilePath(labPath, nodeId)
+      
+      try {
+        const content = await fs.readFile(filePath, 'utf-8')
+        return content
+      } catch {
+        // File doesn't exist, return null
+        return null
+      }
+    } catch (error) {
+      console.error(`[worldLabService] Error loading node content ${nodeId} for Lab ${labName}:`, error)
+      return null
+    }
+  },
+
+  /**
+   * Load metadata.json content as string
+   */
+  async loadMetadataContent(labName: string): Promise<string | null> {
+    try {
+      const labPath = getLabPath(labName)
+      const metadataPath = getMetadataPath(labPath)
+      
+      try {
+        const content = await fs.readFile(metadataPath, 'utf-8')
+        return content
+      } catch {
+        // metadata.json doesn't exist, return default JSON
+        return JSON.stringify({
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }, null, 2)
+      }
+    } catch (error) {
+      console.error(`[worldLabService] Error loading metadata content for Lab ${labName}:`, error)
+      return null
+    }
+  },
+
+  /**
    * Save a node file
    */
   async saveNode(labName: string, nodeId: string, content: string): Promise<boolean> {
@@ -297,8 +388,9 @@ export const worldLabService = {
 
   /**
    * Save edges to edges.json
+   * Also optionally saves node positions in the same file
    */
-  async saveEdges(labName: string, edges: WorldLabEdge[]): Promise<boolean> {
+  async saveEdges(labName: string, edges: WorldLabEdge[], nodePositions?: Map<string, { x: number; y: number }>): Promise<boolean> {
     try {
       const labPath = getLabPath(labName)
       const edgesPath = getEdgesPath(labPath)
@@ -306,7 +398,19 @@ export const worldLabService = {
       // Ensure Lab directory exists
       await fs.mkdir(labPath, { recursive: true })
       
-      await fs.writeFile(edgesPath, JSON.stringify(edges, null, 2), 'utf-8')
+      // Prepare edges data
+      const edgesData: any = edges
+      
+      // Add node positions if provided
+      if (nodePositions && nodePositions.size > 0) {
+        const positionsObj: Record<string, { x: number; y: number }> = {}
+        nodePositions.forEach((pos, nodeId) => {
+          positionsObj[nodeId] = pos
+        })
+        edgesData.nodePositions = positionsObj
+      }
+      
+      await fs.writeFile(edgesPath, JSON.stringify(edgesData, null, 2), 'utf-8')
       
       // Update metadata updatedAt
       await this.updateMetadataTimestamp(labName)
@@ -314,6 +418,28 @@ export const worldLabService = {
       return true
     } catch (error) {
       console.error(`[worldLabService] Error saving edges for Lab ${labName}:`, error)
+      return false
+    }
+  },
+
+  /**
+   * Save node positions (updates edges.json with positions)
+   */
+  async saveNodePositions(labName: string, nodes: WorldLabNode[]): Promise<boolean> {
+    try {
+      // Load existing edges
+      const edges = await this.loadEdges(labName)
+      
+      // Create positions map
+      const nodePositions = new Map<string, { x: number; y: number }>()
+      nodes.forEach(node => {
+        nodePositions.set(node.id, node.position)
+      })
+      
+      // Save edges with positions
+      return await this.saveEdges(labName, edges, nodePositions)
+    } catch (error) {
+      console.error(`[worldLabService] Error saving node positions for Lab ${labName}:`, error)
       return false
     }
   },
@@ -438,15 +564,15 @@ export const worldLabService = {
   },
 
   /**
-   * Get all Lab names
+   * Get all Lab names (returns names without .worldlab extension)
    */
   async getAllLabNames(): Promise<string[]> {
     try {
-      await ensureLabsDir()
-      const entries = await fs.readdir(LABS_DIR, { withFileTypes: true })
+      await ensureWorldLabDir()
+      const entries = await fs.readdir(WORLDLAB_DIR, { withFileTypes: true })
       return entries
-        .filter(entry => entry.isDirectory())
-        .map(entry => entry.name)
+        .filter(entry => entry.isDirectory() && entry.name.endsWith('.worldlab'))
+        .map(entry => extractLabName(entry.name))
     } catch (error) {
       console.error('[worldLabService] Error getting all Lab names:', error)
       return []

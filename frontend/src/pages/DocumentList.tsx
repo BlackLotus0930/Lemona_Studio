@@ -119,8 +119,38 @@ export default function DocumentList() {
       const defaultName = `Untitled (${nextNumber})`
       const project = await projectApi.create(defaultName.trim())
       
-      // Create world lab file in WorldLab folder - use project name as the file name
-      const worldlabFileName = `${defaultName}.worldlab`
+      // Generate "New World X.lab" name for WorldLab file
+      // Get all existing WorldLab documents to find next available number
+      const allProjects = await projectApi.getAll()
+      const allWorldLabDocs: Document[] = []
+      for (const proj of allProjects) {
+        try {
+          const docs = await projectApi.getDocuments(proj.id)
+          const worldlabDocs = docs.filter((doc: Document) => 
+            doc.folder === 'worldlab' && 
+            (doc.title.toLowerCase().endsWith('.lab') || doc.title.toLowerCase().endsWith('.worldlab'))
+          )
+          allWorldLabDocs.push(...worldlabDocs)
+        } catch (error) {
+          console.error(`Error fetching documents for project ${proj.id}:`, error)
+        }
+      }
+      
+      // Extract existing "New World X" numbers
+      const newWorldPattern = /^New World (\d+)(\.lab|\.worldlab)?$/i
+      const existingNumbers = allWorldLabDocs
+        .map(doc => {
+          const match = doc.title.match(newWorldPattern)
+          return match ? parseInt(match[1], 10) : 0
+        })
+        .filter(num => num > 0)
+      
+      const nextWorldNumber = existingNumbers.length > 0 
+        ? Math.max(...existingNumbers) + 1 
+        : 1
+      
+      // Create world lab file in WorldLab folder with "New world X.lab" naming
+      const worldlabFileName = `New world ${nextWorldNumber}.lab`
       const worldlabDoc = await documentApi.create(worldlabFileName, 'worldlab')
       
       // Add worldlab file to project

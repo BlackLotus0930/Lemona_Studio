@@ -282,6 +282,10 @@ export const worldLabApi = {
     invokeOrFetch('worldlab:loadEdges', labName),
   loadMetadata: (labName: string): Promise<WorldLabMetadata | null> =>
     invokeOrFetch('worldlab:loadMetadata', labName),
+  loadNodeContent: (labName: string, nodeId: string): Promise<string | null> =>
+    invokeOrFetch('worldlab:loadNodeContent', labName, nodeId),
+  loadMetadataContent: (labName: string): Promise<string | null> =>
+    invokeOrFetch('worldlab:loadMetadataContent', labName),
   saveNode: (labName: string, nodeId: string, content: string): Promise<boolean> =>
     invokeOrFetch('worldlab:saveNode', labName, nodeId, content),
   saveEdges: (labName: string, edges: WorldLabEdge[]): Promise<boolean> =>

@@ -989,6 +989,24 @@ Rephrased text:`;
             throw error;
         }
     });
+    ipcMain.handle('worldlab:loadNodeContent', async (_, labName, nodeId) => {
+        try {
+            return await worldLabService.loadNodeContent(labName, nodeId);
+        }
+        catch (error) {
+            console.error('IPC worldlab:loadNodeContent error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('worldlab:loadMetadataContent', async (_, labName) => {
+        try {
+            return await worldLabService.loadMetadataContent(labName);
+        }
+        catch (error) {
+            console.error('IPC worldlab:loadMetadataContent error:', error);
+            throw error;
+        }
+    });
     ipcMain.handle('worldlab:saveNode', async (_, labName, nodeId, content) => {
         try {
             return await worldLabService.saveNode(labName, nodeId, content);
