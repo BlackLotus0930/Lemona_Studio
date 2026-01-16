@@ -1016,12 +1016,45 @@ Rephrased text:`;
             throw error;
         }
     });
-    ipcMain.handle('worldlab:saveEdges', async (_, labName, edges) => {
+    ipcMain.handle('worldlab:saveEdges', async (_, labName, edges, nodePositions, nodeMetadata) => {
         try {
-            return await worldLabService.saveEdges(labName, edges);
+            // Convert nodePositions from object to Map if provided
+            let positionsMap;
+            if (nodePositions && typeof nodePositions === 'object') {
+                positionsMap = new Map();
+                Object.entries(nodePositions).forEach(([nodeId, pos]) => {
+                    if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+                        positionsMap.set(nodeId, { x: pos.x, y: pos.y });
+                    }
+                });
+            }
+            // Convert nodeMetadata from object to Map if provided
+            let metadataMap;
+            if (nodeMetadata && typeof nodeMetadata === 'object') {
+                metadataMap = new Map();
+                Object.entries(nodeMetadata).forEach(([nodeId, meta]) => {
+                    if (meta && typeof meta === 'object') {
+                        metadataMap.set(nodeId, {
+                            label: typeof meta.label === 'string' ? meta.label : undefined,
+                            category: typeof meta.category === 'string' ? meta.category : undefined,
+                            elementName: typeof meta.elementName === 'string' ? meta.elementName : undefined,
+                        });
+                    }
+                });
+            }
+            return await worldLabService.saveEdges(labName, edges, positionsMap, metadataMap);
         }
         catch (error) {
             console.error('IPC worldlab:saveEdges error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('worldlab:saveNodePositions', async (_, labName, nodes) => {
+        try {
+            return await worldLabService.saveNodePositions(labName, nodes);
+        }
+        catch (error) {
+            console.error('IPC worldlab:saveNodePositions error:', error);
             throw error;
         }
     });
@@ -1035,11 +1068,14 @@ Rephrased text:`;
         }
     });
     ipcMain.handle('worldlab:deleteNode', async (_, labName, nodeId) => {
+        console.log(`[IPC] worldlab:deleteNode called - labName: ${labName}, nodeId: ${nodeId}`);
         try {
-            return await worldLabService.deleteNode(labName, nodeId);
+            const result = await worldLabService.deleteNode(labName, nodeId);
+            console.log(`[IPC] worldlab:deleteNode result: ${result} for nodeId: ${nodeId}`);
+            return result;
         }
         catch (error) {
-            console.error('IPC worldlab:deleteNode error:', error);
+            console.error(`[IPC] worldlab:deleteNode error for nodeId ${nodeId}:`, error);
             throw error;
         }
     });

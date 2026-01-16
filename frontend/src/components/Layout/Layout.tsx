@@ -369,7 +369,7 @@ export default function Layout(): JSX.Element {
   // WorldLab state
   const [isWorldLabMode, setIsWorldLabMode] = useState(false) // Track if current document is a WorldLab
   const [worldLabData, setWorldLabData] = useState<WorldLab | null>(null) // WorldLab data
-  const [editingNodeId, setEditingNodeId] = useState<string | null>(null) // Node ID currently being edited
+  const [_editingNodeId, setEditingNodeId] = useState<string | null>(null) // Node ID currently being edited (setter used by WorldLabCanvas)
   const [nodeDocumentContent, setNodeDocumentContent] = useState<string | null>(null) // Content for the floating node editor
   const lastContentRef = useRef<string>('') // Track last set content to avoid unnecessary updates
   const currentDocIdRef = useRef<string | null>(null) // Track current document ID
@@ -647,7 +647,13 @@ export default function Layout(): JSX.Element {
             clearTimeout(saveTimeoutRef.current)
             saveTimeoutRef.current = null
           }
-          saveDocumentImmediately(document.id)
+          
+          // Save WorldLab changes if in WorldLab mode
+          if (isWorldLabMode && worldLabData) {
+            saveWorldLabChangesImmediately(worldLabData)
+          } else {
+            saveDocumentImmediately(document.id)
+          }
         }
         
         // Clear search state in current editor before switching tabs
@@ -684,7 +690,13 @@ export default function Layout(): JSX.Element {
           clearTimeout(saveTimeoutRef.current)
           saveTimeoutRef.current = null
         }
-        saveDocumentImmediately(document.id)
+        
+        // Save WorldLab changes if in WorldLab mode
+        if (isWorldLabMode && worldLabData) {
+          saveWorldLabChangesImmediately(worldLabData)
+        } else {
+          saveDocumentImmediately(document.id)
+        }
       }
       
       // Clear search state when closing all tabs
@@ -1566,6 +1578,32 @@ export default function Layout(): JSX.Element {
       return newTabs
     })
   }
+
+  // Save WorldLab changes immediately (no debounce)
+  const saveWorldLabChangesImmediately = useCallback(async (labData: WorldLab) => {
+    if (!labData) return
+    
+    try {
+      // Convert nodes to positions and metadata maps
+      const nodePositions: Record<string, { x: number; y: number }> = {}
+      const nodeMetadata: Record<string, { label?: string; category?: string; elementName?: string }> = {}
+      
+      labData.nodes.forEach(node => {
+        nodePositions[node.id] = node.position
+        nodeMetadata[node.id] = {
+          label: node.label,
+          category: node.category,
+          elementName: node.elementName,
+        }
+      })
+      
+      // Save edges with current node positions and metadata
+      await worldLabApi.saveEdges(labData.labName, labData.edges, nodePositions, nodeMetadata)
+      console.log('[WorldLab] ✓ Saved changes before switching')
+    } catch (error) {
+      console.error('[WorldLab] ✗ Failed to save changes:', error)
+    }
+  }, [])
 
   // WorldLab node interaction handlers
   const handleNodeSingleClick = useCallback((nodeId: string) => {
@@ -3536,6 +3574,11 @@ export default function Layout(): JSX.Element {
         }
       }
       
+      // Save WorldLab changes if in WorldLab mode before closing
+      if (isWorldLabMode && worldLabData) {
+        await saveWorldLabChangesImmediately(worldLabData)
+      }
+      
       // Reload current document from backend to restore to last saved state
       if (document?.id) {
         const editor = getEditor(document.id)
@@ -3580,7 +3623,13 @@ export default function Layout(): JSX.Element {
           clearTimeout(saveTimeoutRef.current)
           saveTimeoutRef.current = null
         }
-        await saveDocumentImmediately(document.id)
+        
+        // Save WorldLab changes if in WorldLab mode
+        if (isWorldLabMode && worldLabData) {
+          await saveWorldLabChangesImmediately(worldLabData)
+        } else {
+          await saveDocumentImmediately(document.id)
+        }
       }
     }
     
@@ -3589,7 +3638,7 @@ export default function Layout(): JSX.Element {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
     }
-  }, [document?.id, saveDocumentImmediately])
+  }, [document?.id, isWorldLabMode, worldLabData, saveDocumentImmediately, saveWorldLabChangesImmediately])
 
   // Search results use temporary highlights (Chrome-style) that are not saved to the document
 

@@ -185,9 +185,9 @@ export const worldLabService = {
         return []
       }
 
-      // Load edges.json to get node positions (if stored there)
-      // Also load existing nodes to get their positions
+      // Load edges.json to get node positions and metadata (if stored there)
       let nodePositions: Map<string, { x: number; y: number }> = new Map()
+      let nodeMetadata: Map<string, { label?: string; category?: string; elementName?: string }> = new Map()
       try {
         const edgesPath = getEdgesPath(labPath)
         const edgesContent = await fs.readFile(edgesPath, 'utf-8')
@@ -200,8 +200,20 @@ export const worldLabService = {
             }
           })
         }
+        // Check if edges.json contains node metadata
+        if (edgesData.nodeMetadata && typeof edgesData.nodeMetadata === 'object') {
+          Object.entries(edgesData.nodeMetadata).forEach(([nodeId, metadata]: [string, any]) => {
+            if (metadata && typeof metadata === 'object') {
+              nodeMetadata.set(nodeId, {
+                label: typeof metadata.label === 'string' ? metadata.label : undefined,
+                category: typeof metadata.category === 'string' ? metadata.category : undefined,
+                elementName: typeof metadata.elementName === 'string' ? metadata.elementName : undefined,
+              })
+            }
+          })
+        }
       } catch {
-        // edges.json doesn't exist or doesn't have positions, that's okay
+        // edges.json doesn't exist or doesn't have positions/metadata, that's okay
       }
 
       // Read all .md files in nodes directory
@@ -216,8 +228,14 @@ export const worldLabService = {
           const filePath = getNodeFilePath(labPath, nodeId)
           const content = await fs.readFile(filePath, 'utf-8')
           
-          // Extract title/label from content
-          const label = extractTitleFromMarkdown(content)
+          // Extract title/label from content (fallback if not in metadata)
+          const defaultLabel = extractTitleFromMarkdown(content)
+          
+          // Get metadata from edges.json or use defaults
+          const savedMetadata = nodeMetadata.get(nodeId)
+          const label = savedMetadata?.label || defaultLabel
+          const category = savedMetadata?.category
+          const elementName = savedMetadata?.elementName
           
           // Get position from loaded positions or use default
           const savedPosition = nodePositions.get(nodeId)
@@ -229,6 +247,8 @@ export const worldLabService = {
           nodes.push({
             id: nodeId,
             label,
+            category,
+            elementName,
             position,
             data: {
               content,
@@ -282,6 +302,8 @@ export const worldLabService = {
           label: edge.label,
           animated: edge.animated || false,
           style: edge.style,
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle,
         }))
       } catch {
         // edges.json doesn't exist, return empty array
@@ -388,9 +410,14 @@ export const worldLabService = {
 
   /**
    * Save edges to edges.json
-   * Also optionally saves node positions in the same file
+   * Also optionally saves node positions and node metadata in the same file
    */
-  async saveEdges(labName: string, edges: WorldLabEdge[], nodePositions?: Map<string, { x: number; y: number }>): Promise<boolean> {
+  async saveEdges(
+    labName: string, 
+    edges: WorldLabEdge[], 
+    nodePositions?: Map<string, { x: number; y: number }>,
+    nodeMetadata?: Map<string, { label?: string; category?: string; elementName?: string }>
+  ): Promise<boolean> {
     try {
       const labPath = getLabPath(labName)
       const edgesPath = getEdgesPath(labPath)
@@ -398,8 +425,20 @@ export const worldLabService = {
       // Ensure Lab directory exists
       await fs.mkdir(labPath, { recursive: true })
       
-      // Prepare edges data
-      const edgesData: any = edges
+      // Load existing edges.json to preserve any existing data
+      let existingData: any = {}
+      try {
+        const existingContent = await fs.readFile(edgesPath, 'utf-8')
+        existingData = JSON.parse(existingContent)
+      } catch {
+        // File doesn't exist, start fresh
+      }
+      
+      // Prepare edges data - preserve structure
+      const edgesData: any = {
+        ...existingData,
+        edges: edges,
+      }
       
       // Add node positions if provided
       if (nodePositions && nodePositions.size > 0) {
@@ -408,6 +447,15 @@ export const worldLabService = {
           positionsObj[nodeId] = pos
         })
         edgesData.nodePositions = positionsObj
+      }
+      
+      // Add node metadata if provided
+      if (nodeMetadata && nodeMetadata.size > 0) {
+        const metadataObj: Record<string, { label?: string; category?: string; elementName?: string }> = {}
+        nodeMetadata.forEach((meta, nodeId) => {
+          metadataObj[nodeId] = meta
+        })
+        edgesData.nodeMetadata = metadataObj
       }
       
       await fs.writeFile(edgesPath, JSON.stringify(edgesData, null, 2), 'utf-8')
@@ -423,7 +471,7 @@ export const worldLabService = {
   },
 
   /**
-   * Save node positions (updates edges.json with positions)
+   * Save node positions and metadata (updates edges.json with positions and metadata)
    */
   async saveNodePositions(labName: string, nodes: WorldLabNode[]): Promise<boolean> {
     try {
@@ -436,8 +484,18 @@ export const worldLabService = {
         nodePositions.set(node.id, node.position)
       })
       
-      // Save edges with positions
-      return await this.saveEdges(labName, edges, nodePositions)
+      // Create metadata map
+      const nodeMetadata = new Map<string, { label?: string; category?: string; elementName?: string }>()
+      nodes.forEach(node => {
+        nodeMetadata.set(node.id, {
+          label: node.label,
+          category: node.category,
+          elementName: node.elementName,
+        })
+      })
+      
+      // Save edges with positions and metadata
+      return await this.saveEdges(labName, edges, nodePositions, nodeMetadata)
     } catch (error) {
       console.error(`[worldLabService] Error saving node positions for Lab ${labName}:`, error)
       return false
@@ -466,7 +524,8 @@ export const worldLabService = {
         // Node doesn't exist, create it
       }
       
-      await fs.writeFile(filePath, content || `# ${nodeId}\n\n`, 'utf-8')
+      // Write content as-is (empty string will show placeholder in editor)
+      await fs.writeFile(filePath, content, 'utf-8')
       
       // Update metadata updatedAt
       await this.updateMetadataTimestamp(labName)
@@ -483,20 +542,39 @@ export const worldLabService = {
    */
   async deleteNode(labName: string, nodeId: string): Promise<boolean> {
     try {
+      console.log(`[worldLabService] deleteNode called for lab: ${labName}, nodeId: ${nodeId}`)
       const labPath = getLabPath(labName)
       const filePath = getNodeFilePath(labPath, nodeId)
+      console.log(`[worldLabService] deleteNode - labPath: ${labPath}`)
+      console.log(`[worldLabService] deleteNode - filePath: ${filePath}`)
+      
+      // Check if file exists before attempting to delete
+      try {
+        await fs.access(filePath)
+        console.log(`[worldLabService] deleteNode - File exists, proceeding with deletion`)
+      } catch (accessError) {
+        console.warn(`[worldLabService] deleteNode - File does not exist or cannot be accessed: ${filePath}`, accessError)
+        // Continue anyway - maybe file was already deleted
+      }
       
       await fs.unlink(filePath)
+      console.log(`[worldLabService] deleteNode - Successfully deleted file: ${filePath}`)
       
       // Also remove edges connected to this node
+      console.log(`[worldLabService] deleteNode - Loading edges to remove connections`)
       const edges = await this.loadEdges(labName)
+      console.log(`[worldLabService] deleteNode - Loaded ${edges.length} edges`)
       const filteredEdges = edges.filter(
         edge => edge.source !== nodeId && edge.target !== nodeId
       )
+      console.log(`[worldLabService] deleteNode - Filtered to ${filteredEdges.length} edges (removed ${edges.length - filteredEdges.length} edges connected to node)`)
       await this.saveEdges(labName, filteredEdges)
+      console.log(`[worldLabService] deleteNode - Saved filtered edges`)
       
       // Update metadata updatedAt
+      console.log(`[worldLabService] deleteNode - Updating metadata timestamp`)
       await this.updateMetadataTimestamp(labName)
+      console.log(`[worldLabService] deleteNode - Successfully completed deletion for node ${nodeId}`)
       
       return true
     } catch (error) {

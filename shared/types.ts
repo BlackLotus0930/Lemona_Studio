@@ -152,6 +152,8 @@ export interface WorldLabEdge {
   label?: string; // Optional edge label
   animated?: boolean; // Whether edge is animated
   style?: Record<string, any>; // Edge style
+  sourceHandle?: string; // Source handle ID (e.g., 'top-target', 'bottom-source', etc.)
+  targetHandle?: string; // Target handle ID (e.g., 'top-target', 'bottom-source', etc.)
 }
 
 export interface WorldLab {
