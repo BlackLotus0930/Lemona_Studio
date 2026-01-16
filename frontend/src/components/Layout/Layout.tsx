@@ -5605,13 +5605,26 @@ export default function Layout(): JSX.Element {
   // Skeletons will handle loading states for progressive reveal
 
   return (
-    <div style={{ 
-      height: '100vh', 
-      display: 'flex', 
-      flexDirection: 'column',
-      backgroundColor: bgColor
-    }}>
-      {/* Top Bar - Logo + Tabs */}
+    <>
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes fadeInScale {
+          from {
+            opacity: 0;
+            transform: scale(0.95);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+      `}} />
+      <div style={{ 
+        height: '100vh', 
+        display: 'flex', 
+        flexDirection: 'column',
+        backgroundColor: bgColor
+      }}>
+        {/* Top Bar - Logo + Tabs */}
       <TopBar 
         onExport={handleExport}
         documentTitle={document?.title}
@@ -5844,14 +5857,6 @@ export default function Layout(): JSX.Element {
                 <input
                   value={projectRenameValue}
                   onChange={(e) => setProjectRenameValue(e.target.value)}
-                  onBlur={() => {
-                    if (projectRenameValue.trim()) {
-                      handleProjectRename(projectRenameValue)
-                    } else {
-                      setIsRenamingProject(false)
-                      setProjectRenameValue(projectName)
-                    }
-                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       if (projectRenameValue.trim()) {
@@ -5867,21 +5872,39 @@ export default function Layout(): JSX.Element {
                     fontSize: '11px',
                     fontWeight: 600,
                     color: theme === 'dark' ? '#D6D6DD' : '#202124',
-                    backgroundColor: theme === 'dark' ? '#181818' : '#f1f3f4',
-                    border: `1px solid ${borderColor}`,
-                    borderRadius: '4px',
-                    padding: '2px 6px',
+                    backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff',
+                    border: `1.5px solid ${theme === 'dark' ? '#3a3a3a' : '#dadce0'}`,
+                    borderRadius: '3px',
+                    padding: '2px 4px',
                     outline: 'none',
                     textTransform: 'uppercase',
                     fontFamily: 'inherit',
-                    width: '150px',
-                    letterSpacing: '0.5px'
+                    flex: 1,
+                    minWidth: 0,
+                    maxWidth: 'calc(100% - 30px)',
+                    letterSpacing: '0.5px',
+                    transition: 'all 0.2s ease',
+                    animation: 'fadeInScale 0.15s ease-out'
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = theme === 'dark' ? '#4a4a4a' : '#bdc1c6'
+                    e.target.style.backgroundColor = theme === 'dark' ? '#1f1f1f' : '#ffffff'
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = theme === 'dark' ? '#3a3a3a' : '#dadce0'
+                    e.target.style.backgroundColor = theme === 'dark' ? '#1a1a1a' : '#ffffff'
+                    if (projectRenameValue.trim()) {
+                      handleProjectRename(projectRenameValue)
+                    } else {
+                      setIsRenamingProject(false)
+                      setProjectRenameValue(projectName)
+                    }
                   }}
                   onClick={(e) => e.stopPropagation()}
                 />
               ) : (
                 <span 
-                  onClick={() => {
+                  onDoubleClick={() => {
                     const projectId = document?.projectId
                     if (projectId) {
                       setIsRenamingProject(true)
@@ -5892,7 +5915,7 @@ export default function Layout(): JSX.Element {
                     cursor: document?.projectId ? 'pointer' : 'default',
                     userSelect: 'none'
                   }}
-                  title={document?.projectId ? "Click to rename project" : undefined}
+                  title={document?.projectId ? "Double-click to rename project" : undefined}
                 >
                   {projectName.toUpperCase()}
                 </span>
@@ -6358,6 +6381,7 @@ export default function Layout(): JSX.Element {
           `}</style>
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }

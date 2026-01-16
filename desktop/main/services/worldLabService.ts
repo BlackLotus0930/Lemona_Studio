@@ -549,18 +549,34 @@ export const worldLabService = {
       console.log(`[worldLabService] deleteNode - filePath: ${filePath}`)
       
       // Check if file exists before attempting to delete
+      let fileExists = false
       try {
         await fs.access(filePath)
+        fileExists = true
         console.log(`[worldLabService] deleteNode - File exists, proceeding with deletion`)
       } catch (accessError) {
         console.warn(`[worldLabService] deleteNode - File does not exist or cannot be accessed: ${filePath}`, accessError)
-        // Continue anyway - maybe file was already deleted
+        // File doesn't exist - this is okay, we'll treat it as already deleted
       }
       
-      await fs.unlink(filePath)
-      console.log(`[worldLabService] deleteNode - Successfully deleted file: ${filePath}`)
+      // Only try to delete if file exists
+      if (fileExists) {
+        try {
+          await fs.unlink(filePath)
+          console.log(`[worldLabService] deleteNode - Successfully deleted file: ${filePath}`)
+        } catch (unlinkError: any) {
+          // If file was deleted between access check and unlink, that's okay
+          if (unlinkError?.code === 'ENOENT') {
+            console.log(`[worldLabService] deleteNode - File was already deleted: ${filePath}`)
+          } else {
+            throw unlinkError // Re-throw if it's a different error
+          }
+        }
+      } else {
+        console.log(`[worldLabService] deleteNode - File does not exist, skipping deletion`)
+      }
       
-      // Also remove edges connected to this node
+      // Also remove edges connected to this node (even if file didn't exist)
       console.log(`[worldLabService] deleteNode - Loading edges to remove connections`)
       const edges = await this.loadEdges(labName)
       console.log(`[worldLabService] deleteNode - Loaded ${edges.length} edges`)

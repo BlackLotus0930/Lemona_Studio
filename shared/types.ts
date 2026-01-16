@@ -128,6 +128,11 @@ export interface WorldLabMetadata {
   createdAt?: string;
   updatedAt?: string;
   description?: string;
+  viewport?: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
 }
 
 export interface WorldLabNode {

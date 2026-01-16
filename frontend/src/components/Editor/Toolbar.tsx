@@ -659,11 +659,11 @@ export default function Toolbar({
   const toolbarBgColor = theme === 'dark' ? '#141414' : '#ffffff'
   const toolbarTextColor = theme === 'dark' ? '#D6D6DD' : '#5f6368'
   const toolbarHoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'
-  const dropdownBg = theme === 'dark' ? '#141414' : '#ffffff'
-  const dropdownBorder = theme === 'dark' ? '#202020' : '#c0c0c0'
+  const dropdownBg = theme === 'dark' ? '#1a1a1a' : '#ffffff'
+  const dropdownBorder = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)'
   const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
-  const dropdownHoverBg = theme === 'dark' ? '#3e3e42' : '#f8f9fa'
-  const dropdownActiveBg = theme === 'dark' ? '#1f1f1f' : '#f0f0f0'
+  const dropdownHoverBg = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)'
+  const dropdownActiveBg = theme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.06)'
   const dropdownActiveColor = theme === 'dark' ? '#9e9e9e' : '#757575'
 
   const buttonStyle: React.CSSProperties = {
@@ -1337,16 +1337,20 @@ export default function Toolbar({
           return (
             <div ref={styleDropdownRef} style={{
               position: 'fixed',
-              top: rect ? `${rect.bottom + 4}px` : '100%',
+              top: rect ? `${rect.bottom + 8}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
+              borderRadius: '8px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
               zIndex: 10010,
               minWidth: '200px',
               maxWidth: '200px',
-              padding: '4px 0'
+              padding: '4px',
+              backdropFilter: 'blur(20px)',
+              transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
             {styles.map((style) => {
               const isActive = isStyleActive(style.value)
@@ -1421,13 +1425,16 @@ export default function Toolbar({
                     setShowStyleMenu(false)
                   }}
                   style={{
-                    padding: '8px 16px',
+                    padding: '10px 14px',
                     cursor: 'pointer',
                     color: dropdownTextColor,
                     backgroundColor: isActive ? dropdownActiveBg : 'transparent',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '8px'
+                    gap: '10px',
+                    borderRadius: '6px',
+                    transition: 'background-color 0.15s ease, color 0.15s ease',
+                    margin: '2px 0'
                   }}
                   onMouseEnter={(e) => {
                     if (!isActive) {
@@ -1493,17 +1500,22 @@ export default function Toolbar({
           return (
             <div ref={fontDropdownRef} style={{
               position: 'fixed',
-              top: rect ? `${rect.bottom + 4}px` : '100%',
+              top: rect ? `${rect.bottom + 8}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
+              borderRadius: '8px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
               zIndex: 10010,
               minWidth: '170px',
               maxWidth: '170px',
               maxHeight: '300px',
-              overflowY: 'auto'
+              overflowY: 'auto',
+              padding: '4px',
+              backdropFilter: 'blur(20px)',
+              transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
             {fonts.map((font) => {
               const isActive = getCurrentFontFamily() === font
@@ -1518,7 +1530,7 @@ export default function Toolbar({
                     }
                   }}
                   style={{
-                    padding: '8px 16px',
+                    padding: '10px 14px',
                     cursor: 'pointer',
                     fontSize: '13px',
                     color: dropdownTextColor,
@@ -1526,7 +1538,10 @@ export default function Toolbar({
                     backgroundColor: isActive ? dropdownActiveBg : 'transparent',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '8px'
+                    gap: '10px',
+                    borderRadius: '6px',
+                    transition: 'background-color 0.15s ease, color 0.15s ease',
+                    margin: '2px 0'
                   }}
                   onMouseEnter={(e) => {
                     if (!isActive) {
@@ -1606,16 +1621,21 @@ export default function Toolbar({
           return (
             <div ref={fontSizeDropdownRef} style={{
               position: 'fixed',
-              top: rect ? `${rect.bottom + 4}px` : '100%',
+              top: rect ? `${rect.bottom + 8}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
+              borderRadius: '8px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
               zIndex: 10010,
               minWidth: '70px',
               maxHeight: '300px',
-              overflowY: 'auto'
+              overflowY: 'auto',
+              padding: '4px',
+              backdropFilter: 'blur(20px)',
+              transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
             {fontSizes.map((size) => {
               const isActive = fontSize === size
@@ -1627,10 +1647,13 @@ export default function Toolbar({
                     handleFontSizeSelect(size)
                   }}
                   style={{
-                    padding: '8px 16px',
+                    padding: '10px 14px',
                     cursor: 'pointer',
                     fontSize: '13px',
                     color: dropdownTextColor,
+                    borderRadius: '6px',
+                    transition: 'background-color 0.15s ease, color 0.15s ease',
+                    margin: '2px 0',
                     backgroundColor: isActive 
                       ? (theme === 'dark' ? '#2a2a2a' : '#f0f0f0')
                       : 'transparent',
@@ -1785,26 +1808,33 @@ export default function Toolbar({
           return (
             <div ref={colorDropdownRef} style={{
               position: 'fixed',
-              top: rect ? `${rect.bottom + 4}px` : '100%',
+              top: rect ? `${rect.bottom + 8}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
+              borderRadius: '8px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
               zIndex: 10010,
-              padding: '8px',
+              padding: '10px',
               display: 'grid',
               gridTemplateColumns: 'repeat(5, 1fr)',
-              gap: '4px'
+              gap: '6px',
+              backdropFilter: 'blur(20px)',
+              transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
-            {['#2C2C2B', '#7D7A75', '#A57F64', '#D27B2D', '#CB9434', '#50946E', '#387DC9', '#9A6BB4', '#C14C8A', '#CF5148'].map((color) => {
+            {(theme === 'dark' 
+              ? ['#FFFFFF', '#B0B0B0', '#FF6B6B', '#FF8E53', '#FFB84D', '#51CF66', '#4DABF7', '#748FFC', '#B197FC', '#F783AC']
+              : ['#202124', '#6B7280', '#EF4444', '#F97316', '#F59E0B', '#10B981', '#3B82F6', '#6366F1', '#8B5CF6', '#EC4899']
+            ).map((color, index) => {
               const currentColor = getCurrentColor()
-              // Check if this is "default" color (black or white) - should unset color instead
-              const isDefaultColor = color === '#000000' || color === '#ffffff'
-              // For default colors, show as active when no color is set (null)
+              // Check if this is the first color (default text color) - should unset color instead
+              const isDefaultColor = index === 0
+              // For default colors, show as active when no color is set (null) or matches default colors
               // For other colors, show as active when they match the current color
               const isActive = isDefaultColor 
-                ? (currentColor === null || currentColor === '#000000' || currentColor === '#ffffff')
+                ? (currentColor === null || currentColor === '#000000' || currentColor === '#ffffff' || currentColor === '#202124')
                 : (currentColor === color.toLowerCase())
               return (
                 <div
@@ -1822,26 +1852,28 @@ export default function Toolbar({
                     setShowColorMenu(false)
                   }}
                   style={{
-                    width: '24px',
-                    height: '24px',
+                    width: '28px',
+                    height: '28px',
                     backgroundColor: color,
                     border: isActive 
-                      ? `2px solid ${dropdownActiveColor}` 
-                      : `1px solid ${dropdownBorder}`,
+                      ? `2.5px solid ${dropdownActiveColor}` 
+                      : `1.5px solid ${dropdownBorder}`,
                     borderRadius: '50%',
                     cursor: 'pointer',
-                    transition: 'transform 0.1s, box-shadow 0.1s, border 0.1s',
+                    transition: 'transform 0.2s ease, box-shadow 0.2s ease, border 0.2s ease',
                     boxShadow: isActive 
                       ? theme === 'dark' 
-                        ? `0 0 0 2px ${dropdownActiveColor}40` 
-                        : `0 0 0 2px ${dropdownActiveColor}40`
+                        ? `0 0 0 3px ${dropdownActiveColor}30, 0 2px 8px rgba(0, 0, 0, 0.3)` 
+                        : `0 0 0 3px ${dropdownActiveColor}30, 0 2px 8px rgba(0, 0, 0, 0.15)`
                       : 'none',
                     position: 'relative'
                   }}
                   onMouseEnter={(e) => {
                     if (!isActive) {
-                      e.currentTarget.style.transform = 'scale(1.1)'
-                      e.currentTarget.style.boxShadow = theme === 'dark' ? '0 0 0 2px rgba(158, 158, 158, 0.3)' : '0 0 0 2px rgba(117, 117, 117, 0.3)'
+                      e.currentTarget.style.transform = 'scale(1.15)'
+                      e.currentTarget.style.boxShadow = theme === 'dark' 
+                        ? '0 0 0 3px rgba(158, 158, 158, 0.25), 0 4px 12px rgba(0, 0, 0, 0.4)' 
+                        : '0 0 0 3px rgba(117, 117, 117, 0.25), 0 4px 12px rgba(0, 0, 0, 0.2)'
                     }
                   }}
                   onMouseLeave={(e) => {
@@ -1887,24 +1919,31 @@ export default function Toolbar({
           return (
             <div ref={highlightDropdownRef} style={{
               position: 'fixed',
-              top: rect ? `${rect.bottom + 4}px` : '100%',
+              top: rect ? `${rect.bottom + 8}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              borderRadius: '8px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
               zIndex: 10010,
-              padding: '8px',
+              padding: '10px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '4px'
+              gap: '8px',
+              backdropFilter: 'blur(20px)',
+              transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(6, 1fr)',
                 gap: '4px'
               }}>
-                {['#FCE9E7', '#FAE9F1', '#F3EBF9', '#E5F2FC', '#E8F1EC', '#F9F3DC', '#233850', '#502C29', '#4E2B3C', '#3C2D47', '#263D30', '#504425'].map((color) => {
+                {(theme === 'dark'
+                  ? ['#FFE5E5', '#FFE5F1', '#F3E5F5', '#E5E7FF', '#E5F2FF', '#E5F9F0', '#FFF4E5', '#2D3748', '#2D1B2E', '#1A202C', '#1A2E1A', '#2D2D1A']
+                  : ['#FEE2E2', '#FCE7F3', '#F3E8FF', '#E0E7FF', '#DBEAFE', '#D1FAE5', '#FEF3C7', '#1E293B', '#581C87', '#1E1B4B', '#064E3B', '#78350F']
+                ).map((color) => {
                   const isActive = getCurrentHighlightColor() === color.toLowerCase()
                   return (
                     <div
@@ -1916,26 +1955,28 @@ export default function Toolbar({
                         setShowHighlightMenu(false)
                       }}
                       style={{
-                        width: '24px',
-                        height: '24px',
+                        width: '28px',
+                        height: '28px',
                         backgroundColor: color,
                         border: isActive 
-                          ? `2px solid ${dropdownActiveColor}` 
-                          : `1px solid ${dropdownBorder}`,
+                          ? `2.5px solid ${dropdownActiveColor}` 
+                          : `1.5px solid ${dropdownBorder}`,
                         borderRadius: '50%',
                         cursor: 'pointer',
-                        transition: 'transform 0.1s, box-shadow 0.1s, border 0.1s',
+                        transition: 'transform 0.2s ease, box-shadow 0.2s ease, border 0.2s ease',
                         boxShadow: isActive 
                           ? theme === 'dark' 
-                            ? `0 0 0 2px ${dropdownActiveColor}40` 
-                            : `0 0 0 2px ${dropdownActiveColor}40`
+                            ? `0 0 0 3px ${dropdownActiveColor}30, 0 2px 8px rgba(0, 0, 0, 0.3)` 
+                            : `0 0 0 3px ${dropdownActiveColor}30, 0 2px 8px rgba(0, 0, 0, 0.15)`
                           : 'none',
                         position: 'relative'
                       }}
                       onMouseEnter={(e) => {
                         if (!isActive) {
-                          e.currentTarget.style.transform = 'scale(1.1)'
-                          e.currentTarget.style.boxShadow = theme === 'dark' ? '0 0 0 2px rgba(158, 158, 158, 0.3)' : '0 0 0 2px rgba(117, 117, 117, 0.3)'
+                          e.currentTarget.style.transform = 'scale(1.15)'
+                          e.currentTarget.style.boxShadow = theme === 'dark' 
+                            ? '0 0 0 3px rgba(158, 158, 158, 0.25), 0 4px 12px rgba(0, 0, 0, 0.4)' 
+                            : '0 0 0 3px rgba(117, 117, 117, 0.25), 0 4px 12px rgba(0, 0, 0, 0.2)'
                         }
                       }}
                       onMouseLeave={(e) => {
@@ -1961,7 +2002,7 @@ export default function Toolbar({
                   disabled={!canUseEditor()}
                   style={{
                     width: '100%',
-                    padding: '6px 12px',
+                    padding: '10px 14px',
                     backgroundColor: 'transparent',
                     border: 'none',
                     borderRadius: '6px',
@@ -1970,7 +2011,8 @@ export default function Toolbar({
                     fontSize: '13px',
                     textAlign: 'left',
                     fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
-                    transition: 'background-color 0.15s'
+                    transition: 'background-color 0.15s ease, color 0.15s ease',
+                    marginTop: '4px'
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = dropdownHoverBg
@@ -2059,15 +2101,20 @@ export default function Toolbar({
           return (
             <div ref={graphDropdownRef} style={{
               position: 'fixed',
-              top: rect ? `${rect.bottom + 4}px` : '100%',
+              top: rect ? `${rect.bottom + 8}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              borderRadius: '8px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
               zIndex: 10010,
               minWidth: '150px',
-              maxWidth: '150px'
+              maxWidth: '150px',
+              padding: '4px',
+              backdropFilter: 'blur(20px)',
+              transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
             {graphTypes.map((graphType) => {
               const IconComponent = graphType.icon
@@ -2079,14 +2126,17 @@ export default function Toolbar({
                     handleInsertGraph(graphType.value)
                   }}
                   style={{
-                    padding: '8px 16px',
+                    padding: '10px 14px',
                     cursor: 'pointer',
                     fontSize: '13px',
                     color: dropdownTextColor,
                     backgroundColor: 'transparent',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '12px'
+                    gap: '12px',
+                    borderRadius: '6px',
+                    transition: 'background-color 0.15s ease, color 0.15s ease',
+                    margin: '2px 0'
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = dropdownHoverBg
@@ -2134,15 +2184,19 @@ export default function Toolbar({
           return (
             <div ref={mathDropdownRef} style={{
               position: 'fixed',
-              top: rect ? `${rect.bottom + 4}px` : '100%',
+              top: rect ? `${rect.bottom + 8}px` : '100%',
               left: rect ? `${buttonCenter - dropdownWidth / 2}px` : 0,
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              borderRadius: '8px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
               zIndex: 10010,
-              padding: '12px',
+              padding: '16px',
               width: `${dropdownWidth}px`,
+              backdropFilter: 'blur(20px)',
+              transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
               <div style={{ marginBottom: '8px', fontSize: '13px', fontWeight: 500, color: dropdownTextColor }}>
                 Enter LaTeX Formula
@@ -2236,7 +2290,7 @@ export default function Toolbar({
           return (
             <div ref={alignDropdownRef} style={{
               position: 'fixed',
-              top: rect ? `${rect.bottom + 4}px` : '100%',
+              top: rect ? `${rect.bottom + 8}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
@@ -2361,15 +2415,19 @@ export default function Toolbar({
           return (
             <div ref={spacingDropdownRef} style={{
               position: 'fixed',
-              top: rect ? `${rect.bottom + 4}px` : '100%',
+              top: rect ? `${rect.bottom + 8}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
-              boxShadow: theme === 'dark' ? '0 2px 10px rgba(0,0,0,0.5)' : '0 2px 10px rgba(0,0,0,0.2)',
+              borderRadius: '8px',
+              boxShadow: theme === 'dark' 
+                ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
               zIndex: 10010,
               minWidth: '180px',
-              padding: '8px 0'
+              padding: '4px',
+              backdropFilter: 'blur(20px)',
+              transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
             {[1.0, 1.15, 1.5, 2.0, 2.5, 3.0].map((spacing) => (
               <div

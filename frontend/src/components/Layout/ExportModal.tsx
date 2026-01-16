@@ -173,10 +173,10 @@ export default function ExportModal({
     onExport(format, downloadFilename, selectedIds, usePageBreaks)
   }
 
-  const dropdownBg = theme === 'dark' ? '#181818' : '#ffffff'
-  const dropdownBorder = theme === 'dark' ? '#212121' : '#dadce0'
+  const dropdownBg = theme === 'dark' ? '#1a1a1a' : '#ffffff'
+  const dropdownBorder = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)'
   const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
-  const dropdownHoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'
+  const dropdownHoverBg = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)'
   const brandBlue = theme === 'dark' ? '#6ba8c7' : '#5a9ec7'
   const isAllSelected = workspaceDocuments.length > 0 && selectedDocumentIds.size === workspaceDocuments.length
   const hasSelection = selectedDocumentIds.size > 0
@@ -190,18 +190,22 @@ export default function ExportModal({
       ref={shareMenuRef}
       style={{
         position: 'fixed',
-        top: rect ? `${rect.bottom + 4}px` : '100%',
+        top: rect ? `${rect.bottom + 8}px` : '100%',
         right: rect ? `${window.innerWidth - rect.right}px` : '24px',
         backgroundColor: dropdownBg,
         border: `1px solid ${dropdownBorder}`,
-        borderRadius: '6px',
-        boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
+        borderRadius: '8px',
+        boxShadow: theme === 'dark' 
+          ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+          : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
         zIndex: 10010,
         width: '380px',
         maxHeight: '600px',
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        backdropFilter: 'blur(20px)',
+        transition: 'opacity 0.2s ease, transform 0.2s ease'
       }}
     >
       {/* Header */}
@@ -259,7 +263,7 @@ export default function ExportModal({
               width: '100%',
               padding: '10px 12px',
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
+              borderRadius: '8px',
               fontSize: '14px',
               color: dropdownTextColor,
               backgroundColor: dropdownBg,
@@ -302,7 +306,7 @@ export default function ExportModal({
               width: '100%',
               padding: '10px 12px',
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
+              borderRadius: '8px',
               fontSize: '14px',
               color: dropdownTextColor,
               backgroundColor: dropdownBg,
@@ -352,13 +356,17 @@ export default function ExportModal({
                 ref={fileDropdownRef}
                 style={{
                   position: 'fixed',
-                  top: buttonRect ? `${buttonRect.bottom + 4}px` : '100%',
+                  top: buttonRect ? `${buttonRect.bottom + 8}px` : '100%',
                   left: buttonRect ? `${buttonRect.left}px` : 0,
                   width: buttonRect ? `${buttonRect.width}px` : '100%',
                   backgroundColor: dropdownBg,
                   border: `1px solid ${dropdownBorder}`,
-                  borderRadius: '6px',
-                  boxShadow: theme === 'dark' ? '0 4px 12px rgba(0,0,0,0.4)' : '0 4px 12px rgba(0,0,0,0.15)',
+                  borderRadius: '8px',
+                  boxShadow: theme === 'dark' 
+                    ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                    : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
+                  backdropFilter: 'blur(20px)',
+                  transition: 'opacity 0.2s ease, transform 0.2s ease',
                   zIndex: 10030,
                   maxHeight: '300px',
                   overflowY: 'auto',
@@ -527,7 +535,7 @@ export default function ExportModal({
                 width: '18px',
                 height: '18px',
                 border: `1px solid ${dropdownBorder}`,
-                borderRadius: '6px',
+                borderRadius: '8px',
                 backgroundColor: usePageBreaks ? brandBlue : 'transparent',
                 cursor: 'pointer',
                 display: 'flex',
@@ -587,7 +595,7 @@ export default function ExportModal({
               flex: 1,
               padding: '10px 16px',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: '8px',
               backgroundColor: hasSelection
                 ? (theme === 'dark' ? '#d9779f' : '#e8a5b8')
                 : (theme === 'dark' ? '#3e3e42' : '#e0e0e0'),
@@ -636,7 +644,7 @@ export default function ExportModal({
               flex: 1,
               padding: '10px 16px',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: '8px',
               backgroundColor: hasSelection
                 ? (theme === 'dark' ? '#7bb3d9' : '#8fc4e8')
                 : (theme === 'dark' ? '#3e3e42' : '#e0e0e0'),

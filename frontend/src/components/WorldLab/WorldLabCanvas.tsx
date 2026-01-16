@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
+import React, { useCallback, useState, useRef, useEffect, useMemo } from 'react'
 import {
   ReactFlow,
   Node,
@@ -14,8 +14,12 @@ import {
   Position,
   ReactFlowInstance,
   useUpdateNodeInternals,
+  useNodesInitialized,
   EdgeLabelRenderer,
   getBezierPath,
+  BaseEdge,
+  EdgeTypes,
+  SelectionMode,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Panel, PanelGroup } from 'react-resizable-panels'
@@ -285,11 +289,10 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
   const onRenameCancel = data.onRenameCancel || (() => {})
   const onStartRename = data.onStartRename || (() => {})
   const onCategoryChange = data.onCategoryChange || (() => {})
-  const renameInputRef = useRef<HTMLInputElement>(null)
+  const renameInputRef = useRef<HTMLTextAreaElement>(null)
   const labelRef = useRef<HTMLDivElement>(null)
   const categoryDropdownRef = useRef<HTMLDivElement>(null)
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false)
-  const [inputWidth, setInputWidth] = useState<number | undefined>(undefined)
   const [isHovered, setIsHovered] = useState(false)
   const [isRenameInputFocused, setIsRenameInputFocused] = useState(false)
   
@@ -321,12 +324,17 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
   const nodeCategory = data.category || 'Character'
   const categoryColors = getCategoryColor(nodeCategory, theme)
 
-  // Handle configuration - four handles on all sides
+  // Handle configuration - handles on all four sides for both source and target
+  // This allows edges to always find the shortest path regardless of node positions
   const handleConfigs = [
+    { id: 'top-source', type: 'source' as const, position: Position.Top },
     { id: 'top-target', type: 'target' as const, position: Position.Top },
     { id: 'bottom-source', type: 'source' as const, position: Position.Bottom },
+    { id: 'bottom-target', type: 'target' as const, position: Position.Bottom },
+    { id: 'left-source', type: 'source' as const, position: Position.Left },
     { id: 'left-target', type: 'target' as const, position: Position.Left },
     { id: 'right-source', type: 'source' as const, position: Position.Right },
+    { id: 'right-target', type: 'target' as const, position: Position.Right },
   ]
 
   const nodeBg = theme === 'dark'
@@ -347,24 +355,18 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
     ? 'rgba(0, 0, 0, 0.3)'
     : 'rgba(0, 0, 0, 0.08)'
 
-  // Measure label width when renaming starts and apply to input
-  // Use useLayoutEffect to measure synchronously before browser paints
-  useLayoutEffect(() => {
-    if (isRenaming) {
-      // Measure the label width (it's still in DOM, just hidden)
-      if (labelRef.current) {
-        const width = labelRef.current.offsetWidth
-        // Add extra width for better usability (30px padding + 15% of width)
-        const extraWidth = 30 + Math.floor(width * 0.15)
-        setInputWidth(Math.max(width + extraWidth, 100)) // Minimum width of 100px
-      }
-    } else {
-      // Reset input width when not renaming
-      setInputWidth(undefined)
+  // Auto-resize textarea height
+  const adjustTextareaHeight = useCallback(() => {
+    if (renameInputRef.current) {
+      renameInputRef.current.style.height = 'auto'
+      const scrollHeight = renameInputRef.current.scrollHeight
+      // Set max height to prevent it from growing too large (e.g., 5 lines)
+      const maxHeight = 22 * 5 // 5 lines at 22px per line
+      renameInputRef.current.style.height = `${Math.min(scrollHeight, maxHeight)}px`
     }
-  }, [isRenaming])
-  
-  // Focus input when renaming starts (without scrolling/zooming)
+  }, [])
+
+  // Focus textarea when renaming starts (without scrolling/zooming)
   useEffect(() => {
     if (isRenaming && renameInputRef.current) {
       // Use requestAnimationFrame to ensure DOM is ready and prevent any viewport changes
@@ -381,10 +383,12 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
             const length = renameInputRef.current.value.length
             renameInputRef.current.setSelectionRange(length, length)
           }
+          // Adjust height after focusing
+          adjustTextareaHeight()
         }
       })
     }
-  }, [isRenaming, data.label, data.elementName, data.id])
+  }, [isRenaming, data.label, data.elementName, data.id, adjustTextareaHeight])
 
   // Handle click outside to close category dropdown
   useEffect(() => {
@@ -418,36 +422,50 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
   }
 
   // Handle rename input
-  const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter') {
-      e.preventDefault()
-      const newLabel = e.currentTarget.value.trim()
-      if (newLabel) {
-        onRename(newLabel)
+      // Enter to submit/confirm name
+      if (!e.ctrlKey && !e.shiftKey) {
+        e.preventDefault()
+        const newLabel = e.currentTarget.value.trim()
+        if (newLabel) {
+          onRename(newLabel)
+        } else {
+          onRenameCancel()
+        }
+        // Remove focus from textarea after submit
+        if (renameInputRef.current) {
+          renameInputRef.current.blur()
+        }
       } else {
-        onRenameCancel()
-      }
-      // Remove focus from input after Enter
-      if (renameInputRef.current) {
-        renameInputRef.current.blur()
+        // Ctrl+Enter or Shift+Enter to create new line
+        // Allow default behavior (insert newline) and adjust height
+        setTimeout(adjustTextareaHeight, 0)
       }
     } else if (e.key === 'Escape') {
       e.preventDefault()
       onRenameCancel()
-      // Remove focus from input after Escape
+      // Remove focus from textarea after Escape
       if (renameInputRef.current) {
         renameInputRef.current.blur()
       }
+    } else {
+      // For other keys, adjust height if needed (e.g., when deleting lines)
+      setTimeout(adjustTextareaHeight, 0)
     }
   }
 
-  const handleRenameBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+  const handleRenameBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
     const newLabel = e.currentTarget.value.trim()
     if (newLabel) {
       onRename(newLabel)
     } else {
       onRenameCancel()
     }
+  }
+
+  const handleRenameInput = () => {
+    adjustTextareaHeight()
   }
 
   // Handle mouse events for hover state
@@ -469,8 +487,8 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
         border: `${selected ? '2px' : '3px'} solid ${borderColor}`,
         borderRadius: '12px',
         padding: '20px 24px',
-        minWidth: '180px',
-        maxWidth: '220px',
+        minWidth: '160px',
+        maxWidth: '200px',
         boxShadow: selected
           ? `0 8px 32px ${shadowColor}, 0 0 0 3px ${categoryColors.glow}`
           : `0 4px 16px ${shadowColor}`,
@@ -478,7 +496,7 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
         backdropFilter: 'blur(10px)',
         fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif",
         cursor: 'pointer',
-        transition: 'border-width 0.2s ease, border-color 0.2s ease, box-shadow 0.3s ease, transform 0.2s ease',
+        transition: 'border-width 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease, transform 0.1s ease',
         transform: selected ? 'scale(1.01)' : 'scale(1)',
       }}
       onMouseEnter={handleMouseEnter}
@@ -512,6 +530,13 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
         }
         // Otherwise: handles are hidden (opacity: 0, visibility: hidden)
         
+        // Determine handle dimensions based on position
+        // Horizontal handles (top/bottom): wider width, smaller height
+        // Vertical handles (left/right): wider height, smaller width
+        const isHorizontal = handleConfig.position === Position.Top || handleConfig.position === Position.Bottom
+        const handleWidth = isHorizontal ? '24px' : '8px'
+        const handleHeight = isHorizontal ? '8px' : '24px'
+        
         return (
           <Handle
             key={handleConfig.id}
@@ -521,13 +546,13 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
             // Don't add onMouseDown here - React Flow needs to handle it for connections to work
             style={{
               background: categoryColors.primary,
-              width: '10px',
-              height: '10px',
+              width: handleWidth,
+              height: handleHeight,
               border: `2px solid ${theme === 'dark' ? '#1a1a1a' : '#ffffff'}`,
-              borderRadius: '50%',
+              borderRadius: '4px',
               opacity: shouldShowHandles ? 1 : 0,
               visibility: shouldShowHandles ? 'visible' : 'hidden',
-              transition: 'opacity 0.2s ease, visibility 0.2s ease',
+              transition: 'opacity 0.1s ease, visibility 0.1s ease',
               pointerEvents: shouldShowHandles ? 'all' : 'none',
             }}
           />
@@ -660,23 +685,27 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
       >
         {data.label || data.elementName || data.id}
       </div>
-      {/* Input field for renaming */}
+      {/* Textarea field for renaming (expandable) */}
       {isRenaming && (
-        <input
+        <textarea
           ref={renameInputRef}
-          type="text"
           defaultValue={data.label || data.elementName || data.id}
           onKeyDown={handleRenameKeyDown}
+          onInput={handleRenameInput}
           onBlur={(e) => {
             setIsRenameInputFocused(false)
             handleRenameBlur(e)
           }}
-          onFocus={() => setIsRenameInputFocused(true)}
+          onFocus={() => {
+            setIsRenameInputFocused(true)
+            // Adjust height on focus to ensure proper initial size
+            setTimeout(adjustTextareaHeight, 0)
+          }}
           style={{
-            width: inputWidth !== undefined ? `${inputWidth}px` : 'auto',
-            minWidth: '60px',
+            width: '100%',
+            minWidth: '100%',
             maxWidth: '100%',
-            height: '22px', // Increased height
+            minHeight: '22px',
             fontSize: '16px', // Match label font size
             fontWeight: 400,
             color: nodeTextColor,
@@ -685,7 +714,7 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
               ? `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)'}` // Thin grey border when focused
               : `2px solid ${hexToRgba(categoryColors.primary, 0.5)}`, // Less bright border (50% opacity) when not focused
             borderRadius: '4px', // Less rounded corners
-            padding: '0px 10px', // Remove vertical padding since we're using fixed height
+            padding: '4px 10px', // Add vertical padding for better textarea appearance
             outline: 'none',
             marginBottom: data.elementName && data.elementName !== data.label ? '6px' : '0',
             lineHeight: '1.4',
@@ -696,8 +725,13 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
               : `inset 0 0 0 1px ${categoryColors.primary}20`,
             boxSizing: 'border-box',
             verticalAlign: 'top', // Align with label
+            resize: 'none', // Disable manual resize, use auto-resize instead
+            overflow: 'hidden', // Hide scrollbar, textarea will auto-expand
+            wordWrap: 'break-word',
+            whiteSpace: 'pre-wrap', // Preserve line breaks and wrap text
           }}
           onClick={(e) => e.stopPropagation()}
+          rows={1}
         />
       )}
 
@@ -746,6 +780,85 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
 // Define nodeTypes outside component to prevent React Flow warning
 const nodeTypes: NodeTypes = {
   custom: CustomNode,
+}
+
+// Custom Bezier Edge with curve offset support
+// Keeps source and target points fixed, only offsets control points for natural curve bending
+function CustomBezierEdge({ 
+  id, 
+  sourceX, 
+  sourceY, 
+  targetX, 
+  targetY, 
+  sourcePosition, 
+  targetPosition, 
+  style, 
+  markerEnd, 
+  pathOptions 
+}: any) {
+  const offset = pathOptions?.offset || 0
+  
+  // Calculate direction vector
+  const dx = targetX - sourceX
+  const dy = targetY - sourceY
+  const length = Math.sqrt(dx * dx + dy * dy)
+  
+  if (length === 0 || offset === 0) {
+    // No offset, use standard bezier path
+    const [edgePath] = getBezierPath({
+      sourceX,
+      sourceY,
+      targetX,
+      targetY,
+      sourcePosition,
+      targetPosition,
+    })
+    return (
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        style={style}
+        markerEnd={markerEnd}
+      />
+    )
+  }
+  
+  // Calculate perpendicular unit vector (normal to the edge direction)
+  const perpX = -dy / length
+  const perpY = dx / length
+  
+  // Calculate control point positions (at 38% and 62% along the path for more pronounced curve)
+  // Apply offset perpendicular to create curve bending effect
+  // Increase offset magnitude for more visible curve
+  const curveMultiplier = 2.0 // Multiply offset for more pronounced curve
+  const controlOffsetX = perpX * offset * curveMultiplier
+  const controlOffsetY = perpY * offset * curveMultiplier
+  
+  // First control point (closer to source, at ~38% of path - moved closer to center for more curve)
+  const cp1X = sourceX + dx * 0.38 + controlOffsetX
+  const cp1Y = sourceY + dy * 0.38 + controlOffsetY
+  
+  // Second control point (closer to target, at ~62% of path - moved closer to center for more curve)
+  const cp2X = sourceX + dx * 0.62 + controlOffsetX
+  const cp2Y = sourceY + dy * 0.62 + controlOffsetY
+  
+  // Build custom Bezier path: M (move to source), C (cubic bezier curve)
+  // Format: M x,y C cp1x,cp1y cp2x,cp2y x,y
+  const edgePath = `M ${sourceX},${sourceY} C ${cp1X},${cp1Y} ${cp2X},${cp2Y} ${targetX},${targetY}`
+  
+  return (
+    <BaseEdge
+      id={id}
+      path={edgePath}
+      style={style}
+      markerEnd={markerEnd}
+    />
+  )
+}
+
+// Define edgeTypes outside component to prevent React Flow warning
+const edgeTypes: EdgeTypes = {
+  customBezier: CustomBezierEdge,
 }
 
 // History entry for undo/redo
@@ -797,9 +910,19 @@ function WorldLabCanvasInner({
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null)
+  const viewportSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const savedViewportRef = useRef<{ x: number; y: number; zoom: number } | null>(null)
   
   // Track previous node positions to detect position changes
   const prevNodePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+  
+  // Track if we've refreshed node internals after WorldLab hydrate
+  const didRefreshNodeInternalsRef = useRef(false)
+  
+  // Wait for ReactFlow nodes to initialize before refreshing node internals
+  // (Edge labels depend on node dimensions, so updating node internals refreshes edge labels)
+  const nodesInitialized = useNodesInitialized()
+  const updateNodeInternals = useUpdateNodeInternals()
   
   // Floating editor state
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
@@ -916,7 +1039,6 @@ function WorldLabCanvasInner({
           }
         }, 100)
       } catch (error) {
-        console.error('Error setting editor content:', error)
         // Fallback to empty content if there's an error
         floatingEditor.commands.clearContent()
         setTimeout(() => {
@@ -977,6 +1099,7 @@ function WorldLabCanvasInner({
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
   const isUndoingRef = useRef(false)
+  const historyInitializedRef = useRef(false)
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -994,6 +1117,9 @@ function WorldLabCanvasInner({
   const [inlineEditingEdgeId, setInlineEditingEdgeId] = useState<string | null>(null)
   const [inlineEditingPosition, setInlineEditingPosition] = useState<{ x: number; y: number } | null>(null)
   const inlineEdgeInputRef = useRef<HTMLTextAreaElement>(null)
+  
+  // Track hover state for edge labels
+  const [hoveredEdgeLabelId, setHoveredEdgeLabelId] = useState<string | null>(null)
 
   // Keyboard shortcuts modal state
   const [showShortcutsModal, setShowShortcutsModal] = useState(false)
@@ -1044,8 +1170,9 @@ function WorldLabCanvasInner({
   // which are provided by useNodesState and useEdgesState hooks
   // We sync changes through the saveNodes and saveEdges callbacks
 
-  // Calculate optimal handle positions based on shortest path with directional constraints
-  // This ensures edges take the most natural route when nodes are moved
+  // Calculate optimal handle positions based on shortest path between two nodes
+  // This ensures edges always use the shortest distance between nodes
+  // Now considers all 4 sides for both source and target handles (4x4 = 16 combinations)
   const calculateOptimalHandles = useCallback((sourceNode: Node, targetNode: Node): { sourceHandle: string; targetHandle: string } => {
     const sourceX = sourceNode.position.x
     const sourceY = sourceNode.position.y
@@ -1058,37 +1185,28 @@ function WorldLabCanvasInner({
     const targetWidth = (targetNode as any).measured?.width || (targetNode as any).width || 200
     const targetHeight = (targetNode as any).measured?.height || (targetNode as any).height || 100
     
-    // Calculate node centers
-    const sourceCenterY = sourceY + sourceHeight / 2
-    const targetCenterY = targetY + targetHeight / 2
-    const sourceCenterX = sourceX + sourceWidth / 2
-    const targetCenterX = targetX + targetWidth / 2
-    
-    // Determine relative position
-    const deltaY = targetCenterY - sourceCenterY
-    const deltaX = targetCenterX - sourceCenterX
-    const absDeltaY = Math.abs(deltaY)
-    const absDeltaX = Math.abs(deltaX)
-    
-    // Calculate handle positions on node edges
-    // Source handles (outgoing)
+    // Calculate handle positions on node edges - ALL 4 sides for both source and target
+    // Source handles (outgoing) - all 4 sides
     const sourceHandles = {
+      'top-source': { x: sourceX + sourceWidth / 2, y: sourceY },
       'bottom-source': { x: sourceX + sourceWidth / 2, y: sourceY + sourceHeight },
+      'left-source': { x: sourceX, y: sourceY + sourceHeight / 2 },
       'right-source': { x: sourceX + sourceWidth, y: sourceY + sourceHeight / 2 },
     }
     
-    // Target handles (incoming)
+    // Target handles (incoming) - all 4 sides
     const targetHandles = {
       'top-target': { x: targetX + targetWidth / 2, y: targetY },
+      'bottom-target': { x: targetX + targetWidth / 2, y: targetY + targetHeight },
       'left-target': { x: targetX, y: targetY + targetHeight / 2 },
+      'right-target': { x: targetX + targetWidth, y: targetY + targetHeight / 2 },
     }
     
-    // Calculate distance for each valid handle combination
+    // Calculate distance for each valid handle combination (4x4 = 16 combinations)
     const combinations: Array<{ 
       sourceHandle: string
       targetHandle: string
       distance: number
-      directionalScore: number // Bonus for natural directional flow
     }> = []
     
     // Try all valid combinations
@@ -1099,54 +1217,17 @@ function WorldLabCanvasInner({
         const dy = targetPos.y - sourcePos.y
         const distance = Math.sqrt(dx * dx + dy * dy)
         
-        // Calculate directional score (bonus for natural flow)
-        let directionalScore = 0
-        
-        // Vertical relationships: prefer bottom-source -> top-target when target is below
-        if (absDeltaY > absDeltaX) {
-          if (deltaY > 0) {
-            // Target is below source - prefer bottom-source -> top-target
-            if (sourceHandleId === 'bottom-source' && targetHandleId === 'top-target') {
-              directionalScore = 50 // Strong preference
-            }
-          } else {
-            // Target is above source - prefer bottom-source -> top-target (still natural)
-            if (sourceHandleId === 'bottom-source' && targetHandleId === 'top-target') {
-              directionalScore = 30 // Moderate preference
-            }
-          }
-        }
-        
-        // Horizontal relationships: prefer right-source -> left-target when target is to the right
-        if (absDeltaX > absDeltaY) {
-          if (deltaX > 0) {
-            // Target is to the right of source - prefer right-source -> left-target
-            if (sourceHandleId === 'right-source' && targetHandleId === 'left-target') {
-              directionalScore = 50 // Strong preference
-            }
-          } else {
-            // Target is to the left of source - prefer right-source -> left-target (still natural)
-            if (sourceHandleId === 'right-source' && targetHandleId === 'left-target') {
-              directionalScore = 30 // Moderate preference
-            }
-          }
-        }
-        
         combinations.push({
           sourceHandle: sourceHandleId,
           targetHandle: targetHandleId,
           distance,
-          directionalScore,
         })
       })
     })
     
-    // Find the combination with best score (distance - directionalScore)
-    // Lower score is better (distance minus bonus)
+    // Find the combination with the shortest distance
     const best = combinations.reduce((min, combo) => {
-      const score = combo.distance - combo.directionalScore
-      const minScore = min.distance - min.directionalScore
-      return score < minScore ? combo : min
+      return combo.distance < min.distance ? combo : min
     })
     
     return {
@@ -1262,6 +1343,89 @@ function WorldLabCanvasInner({
     [onNodesChangeInner, setNodes, adjustEdgeHandlesOnNodeMove]
   )
 
+  // Track previous labName to detect project changes (external data source changes)
+  const prevLabNameRef = useRef<string>(labName)
+  // Store latest props in refs so we can access them in useEffect without adding to deps
+  const initialNodesRef = useRef<WorldLabNode[]>(initialNodes)
+  const initialEdgesRef = useRef<WorldLabEdge[]>(initialEdges)
+  
+  // Update refs on every render (but don't trigger sync)
+  initialNodesRef.current = initialNodes
+  initialEdgesRef.current = initialEdges
+
+  // Sync nodes and edges ONLY when labName changes (external data source change)
+  // This ensures we only sync when switching projects, not when user edits the graph
+  // Graph editing is the single source of truth - we never overwrite user edits
+  useEffect(() => {
+    const labNameChanged = prevLabNameRef.current !== labName
+    
+    if (labNameChanged) {
+      // Lab name changed = external data source changed = WorldLab hydrate started
+      prevLabNameRef.current = labName
+      // Reset refresh flag when switching projects
+      didRefreshNodeInternalsRef.current = false
+      
+      // Sync memory state with external data source (from refs, which have latest props)
+      const newNodes = initialNodesRef.current.map((node) => ({
+        id: node.id,
+        type: 'custom' as const,
+        position: node.position,
+        data: {
+          label: node.label,
+          category: node.category,
+          elementName: node.elementName,
+          ...node.data,
+        },
+      }))
+      setNodes(newNodes)
+
+      const newEdges = initialEdgesRef.current.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: edge.type || 'smoothstep',
+        label: edge.label,
+        animated: edge.animated,
+        style: edge.style,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+      }))
+      setEdges(newEdges)
+    }
+    // Only depend on labName - do NOT depend on initialNodes/initialEdges/edges
+    // because they change when user edits (via onNodesChange/onEdgesChange callbacks),
+    // which would cause unwanted syncs that overwrite user edits
+    // We use refs to access latest props without adding them to deps
+  }, [labName, setNodes, setEdges])
+
+  // ✅ Refresh node internals AFTER ReactFlow nodes initialize (WorldLab hydrate completes)
+  // This is the ONLY time we refresh internals - ensures edge labels render correctly
+  // Edge labels depend on node dimensions, so updating node internals refreshes edge labels
+  // 
+  // ❌ DO NOT refresh when:
+  // - edges/nodes state changes (user editing, connecting, etc.)
+  // - during render
+  // - user is dragging/typing/connecting
+  //
+  // ✅ ONLY refresh when:
+  // - WorldLab enters/hydrates (labName changes) AND nodes are initialized
+  useEffect(() => {
+    if (!nodesInitialized) return
+    if (didRefreshNodeInternalsRef.current) return
+
+    // Refresh all node internals to ensure edge labels render correctly
+    // Edge labels calculate position based on node dimensions, so updating node internals
+    // will trigger edge label recalculation
+    // Use nodes from state (via closure) but don't add to deps to avoid refresh on every node change
+    nodes.forEach((node) => {
+      updateNodeInternals(node.id)
+    })
+
+    didRefreshNodeInternalsRef.current = true
+    // Only depend on nodesInitialized and labName - do NOT depend on nodes/edges
+    // because they change when user edits, which would cause unwanted refreshes
+  }, [nodesInitialized, labName, updateNodeInternals])
+
   // Initialize previous positions on mount
   useEffect(() => {
     const initialPositions = new Map<string, { x: number; y: number }>()
@@ -1274,15 +1438,11 @@ function WorldLabCanvasInner({
   // Save nodes with debounce - persists to backend
   const saveNodes = useCallback(
     (nodesToSave: Node[]) => {
-      console.log(`[WorldLabCanvas] saveNodes called with ${nodesToSave.length} nodes`)
-      console.log(`[WorldLabCanvas] saveNodes - node IDs:`, nodesToSave.map((n: any) => n.id))
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current)
       }
       saveTimeoutRef.current = setTimeout(async () => {
         const worldLabNodes = convertToWorldLabNodes(nodesToSave)
-        console.log(`[WorldLabCanvas] saveNodes timeout: Converting to ${worldLabNodes.length} WorldLabNodes`)
-        console.log(`[WorldLabCanvas] saveNodes timeout - WorldLabNode IDs:`, worldLabNodes.map((n: any) => n.id))
         
         // Update local state first for immediate UI feedback
         if (onNodesChange) {
@@ -1291,11 +1451,9 @@ function WorldLabCanvasInner({
         
         // Persist nodes to backend (positions and metadata)
         try {
-          console.log(`[WorldLabCanvas] saveNodes timeout: Calling saveNodePositions for lab: ${labName}`)
-          const result = await worldLabApi.saveNodePositions(labName, worldLabNodes)
-          console.log(`[WorldLabCanvas] saveNodes timeout: saveNodePositions result:`, result)
+          await worldLabApi.saveNodePositions(labName, worldLabNodes)
         } catch (error) {
-          console.error('[WorldLabCanvas] saveNodes timeout: Failed to save nodes:', error)
+          // Error handling
         }
       }, 500)
     },
@@ -1306,24 +1464,16 @@ function WorldLabCanvasInner({
   // FIXED: Now accepts nodes parameter to avoid closure stale state issue
   const saveEdges = useCallback(
     (edgesToSave: Edge[], nodesToSave?: Node[]) => {
-      // Use provided nodes or fall back to current state (for backward compatibility)
-      const nodesToUse = nodesToSave ?? nodes
-      console.log(`[WorldLabCanvas] saveEdges called with ${edgesToSave.length} edges`)
-      console.log(`[WorldLabCanvas] saveEdges - edge IDs:`, edgesToSave.map((e: any) => `${e.source}->${e.target}`))
-      console.log(`[WorldLabCanvas] saveEdges - using ${nodesToUse.length} nodes (provided: ${nodesToSave ? 'yes' : 'no'})`)
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current)
       }
       saveTimeoutRef.current = setTimeout(async () => {
         const worldLabEdges = convertToWorldLabEdges(edgesToSave)
-        console.log(`[WorldLabCanvas] saveEdges timeout: Converting to ${worldLabEdges.length} WorldLabEdges`)
         
         // Use the nodes that were passed in (or current state if not provided)
         // This ensures we don't use stale closure state
         const currentNodesSnapshot = nodesToSave ?? nodes
         const worldLabNodes = convertToWorldLabNodes(currentNodesSnapshot)
-        console.log(`[WorldLabCanvas] saveEdges timeout: Current nodes count: ${worldLabNodes.length}`)
-        console.log(`[WorldLabCanvas] saveEdges timeout: Current node IDs:`, worldLabNodes.map((n: any) => n.id))
         const nodePositions: Record<string, { x: number; y: number }> = {}
         const nodeMetadata: Record<string, { label?: string; category?: string; elementName?: string }> = {}
         
@@ -1336,19 +1486,14 @@ function WorldLabCanvasInner({
           }
         })
         
-        console.log(`[WorldLabCanvas] saveEdges timeout: Node positions count: ${Object.keys(nodePositions).length}`)
-        console.log(`[WorldLabCanvas] saveEdges timeout: Node positions keys:`, Object.keys(nodePositions))
-        
         try {
           // Save edges along with current node positions and metadata
-          console.log(`[WorldLabCanvas] saveEdges timeout: Calling saveEdges API for lab: ${labName}`)
-          const result = await worldLabApi.saveEdges(labName, worldLabEdges, nodePositions, nodeMetadata)
-          console.log(`[WorldLabCanvas] saveEdges timeout: saveEdges API result:`, result)
+          await worldLabApi.saveEdges(labName, worldLabEdges, nodePositions, nodeMetadata)
           if (onEdgesChange) {
             onEdgesChange(worldLabEdges)
           }
         } catch (error) {
-          console.error('Failed to save edges:', error)
+          // Error handling
         }
       }, 500)
     },
@@ -1364,11 +1509,50 @@ function WorldLabCanvasInner({
   // Add to history for undo/redo (MUST be defined before other handlers use it)
   const addToHistory = useCallback(
     (newNodes: Node[], newEdges: Edge[]) => {
-      if (isUndoingRef.current) return
+      if (isUndoingRef.current) {
+        return
+      }
+
+      // Check if only selection state changed (compare edges excluding selected property)
+      const currentEdgesWithoutSelection = edges.map((edge: any) => {
+        const { selected, ...rest } = edge
+        return rest
+      })
+      const newEdgesWithoutSelection = newEdges.map((edge: any) => {
+        const { selected, ...rest } = edge
+        return rest
+      })
+      const edgesEqual = JSON.stringify(currentEdgesWithoutSelection) === JSON.stringify(newEdgesWithoutSelection)
+      
+      // Check if only selection state changed for nodes
+      const currentNodesWithoutSelection = nodes.map((node: any) => {
+        const { selected, ...rest } = node
+        return rest
+      })
+      const newNodesWithoutSelection = newNodes.map((node: any) => {
+        const { selected, ...rest } = node
+        return rest
+      })
+      const nodesEqual = JSON.stringify(currentNodesWithoutSelection) === JSON.stringify(newNodesWithoutSelection)
+      
+      // If only selection changed, don't add to history
+      if (edgesEqual && nodesEqual) {
+        return
+      }
+
+      // Strip selected property from edges and nodes before saving to history
+      const edgesWithoutSelection = newEdges.map((edge: any) => {
+        const { selected, ...rest } = edge
+        return rest
+      })
+      const nodesWithoutSelection = newNodes.map((node: any) => {
+        const { selected, ...rest } = node
+        return rest
+      })
 
       const newEntry: HistoryEntry = {
-        nodes: JSON.parse(JSON.stringify(newNodes)),
-        edges: JSON.parse(JSON.stringify(newEdges)),
+        nodes: JSON.parse(JSON.stringify(nodesWithoutSelection)),
+        edges: JSON.parse(JSON.stringify(edgesWithoutSelection)),
       }
 
       setHistory((prev) => {
@@ -1379,44 +1563,97 @@ function WorldLabCanvasInner({
         // Limit history to 50 entries
         if (newHistory.length > 50) {
           newHistory.shift()
-          return newHistory
         }
+        const finalLength = newHistory.length
+        // Update historyIndex to point to the new entry (last index in array = length - 1)
+        setHistoryIndex(finalLength - 1)
         return newHistory
       })
-      setHistoryIndex((prev) => Math.min(prev + 1, 49))
     },
-    [historyIndex]
+    [historyIndex, edges, nodes]
   )
 
   // Undo function
   const undo = useCallback(() => {
-    if (historyIndex <= 0) return
+    if (historyIndex <= 0 || history.length === 0) {
+      return
+    }
+
+    const prevIndex = historyIndex - 1
+    
+    if (prevIndex < 0 || prevIndex >= history.length) {
+      return
+    }
+
+    const prevEntry = history[prevIndex]
+    if (!prevEntry || !prevEntry.nodes || !prevEntry.edges) {
+      return
+    }
 
     isUndoingRef.current = true
-    const prevEntry = history[historyIndex - 1]
+    
+    // Preserve current selection state when restoring from history
+    const currentSelectionMap = new Map<string, boolean>()
+    edges.forEach((edge: any) => {
+      if ('selected' in edge && edge.selected !== undefined) {
+        currentSelectionMap.set(edge.id, edge.selected)
+      }
+    })
+    
+    const restoredEdges = prevEntry.edges.map((edge: any) => {
+      const currentSelected = currentSelectionMap.get(edge.id)
+      return currentSelected !== undefined ? { ...edge, selected: currentSelected } : edge
+    })
+    
     setNodes(prevEntry.nodes as any)
-    setEdges(prevEntry.edges as any)
-    setHistoryIndex(historyIndex - 1)
+    setEdges(restoredEdges as any)
+    setHistoryIndex(prevIndex)
     
     setTimeout(() => {
       isUndoingRef.current = false
     }, 100)
-  }, [history, historyIndex, setNodes, setEdges])
+  }, [history, historyIndex, setNodes, setEdges, edges])
 
   // Redo function
   const redo = useCallback(() => {
-    if (historyIndex >= history.length - 1) return
+    if (historyIndex >= history.length - 1 || history.length === 0) {
+      return
+    }
+
+    const nextIndex = historyIndex + 1
+    
+    if (nextIndex < 0 || nextIndex >= history.length) {
+      return
+    }
+
+    const nextEntry = history[nextIndex]
+    if (!nextEntry || !nextEntry.nodes || !nextEntry.edges) {
+      return
+    }
 
     isUndoingRef.current = true
-    const nextEntry = history[historyIndex + 1]
+    
+    // Preserve current selection state when restoring from history
+    const currentSelectionMap = new Map<string, boolean>()
+    edges.forEach((edge: any) => {
+      if ('selected' in edge && edge.selected !== undefined) {
+        currentSelectionMap.set(edge.id, edge.selected)
+      }
+    })
+    
+    const restoredEdges = nextEntry.edges.map((edge: any) => {
+      const currentSelected = currentSelectionMap.get(edge.id)
+      return currentSelected !== undefined ? { ...edge, selected: currentSelected } : edge
+    })
+    
     setNodes(nextEntry.nodes as any)
-    setEdges(nextEntry.edges as any)
-    setHistoryIndex(historyIndex + 1)
+    setEdges(restoredEdges as any)
+    setHistoryIndex(nextIndex)
     
     setTimeout(() => {
       isUndoingRef.current = false
     }, 100)
-  }, [history, historyIndex, setNodes, setEdges])
+  }, [history, historyIndex, setNodes, setEdges, edges])
 
   // Handle node click - just select the node, don't open editor
   const handleNodeClick = useCallback(
@@ -1465,10 +1702,7 @@ function WorldLabCanvasInner({
       event.preventDefault()
       event.stopPropagation()
 
-      console.log('[WorldLabCanvas] Edge double-clicked:', edge.id)
-
       if (!canvasContainerRef.current) {
-        console.log('[WorldLabCanvas] No canvas container ref')
         return
       }
 
@@ -1476,8 +1710,6 @@ function WorldLabCanvasInner({
       const containerRect = canvasContainerRef.current.getBoundingClientRect()
       const x = event.clientX - containerRect.left
       const y = event.clientY - containerRect.top
-
-      console.log('[WorldLabCanvas] Setting inline editing:', { edgeId: edge.id, x, y, clientX: event.clientX, clientY: event.clientY })
 
       setInlineEditingEdgeId(edge.id)
       setInlineEditingPosition({ x, y })
@@ -1492,9 +1724,6 @@ function WorldLabCanvasInner({
           // Set cursor position to end of text
           const length = inlineEdgeInputRef.current.value.length
           inlineEdgeInputRef.current.setSelectionRange(length, length)
-          console.log('[WorldLabCanvas] Textarea focused')
-        } else {
-          console.log('[WorldLabCanvas] Textarea ref is null')
         }
       }, 10)
     },
@@ -1521,6 +1750,7 @@ function WorldLabCanvasInner({
       })
       setInlineEditingEdgeId(null)
       setInlineEditingPosition(null)
+      setHoveredEdgeLabelId(null) // Clear hover state when closing editor
     },
     [nodes, setEdges, addToHistory, saveEdges]
   )
@@ -1529,16 +1759,14 @@ function WorldLabCanvasInner({
   const handleInlineEdgeLabelCancel = useCallback(() => {
     setInlineEditingEdgeId(null)
     setInlineEditingPosition(null)
+    setHoveredEdgeLabelId(null) // Clear hover state when closing editor
   }, [])
 
-  // Handle pane context menu (right-click on canvas)
+  // Handle pane context menu (right-click on canvas) - disabled to avoid empty menu
   const handlePaneContextMenu = useCallback((event: MouseEvent | React.MouseEvent) => {
     event.preventDefault()
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      type: 'pane',
-    })
+    // Don't show context menu for pane (empty menu)
+    // setContextMenu(null)
   }, [])
 
   // Handle node double click - open floating editor (only if not clicking on label or handle)
@@ -1671,8 +1899,8 @@ function WorldLabCanvasInner({
             })
           }
         })
-        .catch((error) => {
-          console.error(`[WorldLabCanvas] Failed to reload node content for ${closedNodeId}:`, error)
+        .catch(() => {
+          // Error handling
         })
     }
     
@@ -1750,7 +1978,6 @@ function WorldLabCanvasInner({
             await worldLabApi.createNode(labName, nodeId, '')
           }
         } catch (error) {
-          console.error('Failed to create node file:', error)
           // Continue even if file creation fails - node metadata is already saved
         }
       }
@@ -1800,7 +2027,7 @@ function WorldLabCanvasInner({
             await worldLabApi.createNode(labName, nodeId, '')
           }
         } catch (error) {
-          console.error('Failed to create node file on category change:', error)
+          // Error handling
         }
       }
     },
@@ -1888,11 +2115,8 @@ function WorldLabCanvasInner({
   // Context menu actions
   const handleDeleteNode = useCallback(
     async (nodeId: string) => {
-      console.log(`[WorldLabCanvas] handleDeleteNode called for node: ${nodeId}`)
       const newNodes = nodes.filter((n) => n.id !== nodeId)
       const newEdges = edges.filter((e) => e.source !== nodeId && e.target !== nodeId)
-      
-      console.log(`[WorldLabCanvas] handleDeleteNode: ${nodes.length} -> ${newNodes.length} nodes, ${edges.length} -> ${newEdges.length} edges`)
       
       // Store original state for rollback if deletion fails
       const originalNodes = nodes
@@ -1902,33 +2126,25 @@ function WorldLabCanvasInner({
       setEdges(newEdges)
       addToHistory(newNodes, newEdges)
       
-      console.log(`[WorldLabCanvas] handleDeleteNode: Calling saveNodes with ${newNodes.length} nodes`)
       saveNodes(newNodes)
-      console.log(`[WorldLabCanvas] handleDeleteNode: Calling saveEdges with ${newEdges.length} edges and ${newNodes.length} nodes`)
       saveEdges(newEdges, newNodes)
       
       // Delete node file from backend
       try {
-        console.log(`[WorldLabCanvas] handleDeleteNode: Attempting to delete node file: ${nodeId} in lab: ${labName}`)
         const result = await worldLabApi.deleteNode(labName, nodeId)
-        console.log(`[WorldLabCanvas] handleDeleteNode: Backend deletion result for node ${nodeId}:`, result)
         if (!result) {
-          console.error(`[WorldLabCanvas] handleDeleteNode: Backend deletion returned false for node ${nodeId}, rolling back`)
-          // Rollback: restore original state
+          // Rollback: restore original state (don't add to history - this is error recovery, not user action)
           setNodes(originalNodes as any)
           setEdges(originalEdges as any)
-          addToHistory(originalNodes, originalEdges)
           saveNodes(originalNodes)
           saveEdges(originalEdges, originalNodes)
           alert(`Failed to delete node. Changes have been rolled back.`)
           return
         }
       } catch (error) {
-        console.error(`[WorldLabCanvas] handleDeleteNode: Failed to delete node file ${nodeId}:`, error)
-          // Rollback on error
+          // Rollback on error (don't add to history - this is error recovery, not user action)
           setNodes(originalNodes as any)
           setEdges(originalEdges as any)
-        addToHistory(originalNodes, originalEdges)
         saveNodes(originalNodes)
         saveEdges(originalEdges, originalNodes)
         alert(`Failed to delete node: ${error}. Changes have been rolled back.`)
@@ -2012,24 +2228,22 @@ function WorldLabCanvasInner({
                   label: edge.label,
                   data: newData,
                 }
-                // Will be added after this map
+                // Will be added after this map (don't add to history - this is automatic correction, not user action)
                 setTimeout(() => {
                   setEdges((current: any) => {
                     const withReverse = [...current, reverseEdge]
-                    addToHistory(nodes, withReverse)
                     saveEdges(withReverse, nodes)
                     return withReverse
                   })
                 }, 0)
               }
             } else if (updates.bidirectional === false) {
-              // Remove reverse edge
+              // Remove reverse edge (don't add to history - this is automatic correction, not user action)
               setTimeout(() => {
                 setEdges((current: any) => {
                   const filtered = current.filter(
                     (e: any) => !(e.source === edge.target && e.target === edge.source)
                   )
-                  addToHistory(nodes, filtered)
                   saveEdges(filtered, nodes)
                   return filtered
                 })
@@ -2052,14 +2266,115 @@ function WorldLabCanvasInner({
     [nodes, setEdges, addToHistory, saveEdges]
   )
 
+  // Save viewport to metadata with debounce
+  const saveViewport = useCallback(async (viewport: { x: number; y: number; zoom: number }) => {
+    if (viewportSaveTimeoutRef.current) {
+      clearTimeout(viewportSaveTimeoutRef.current)
+    }
+    viewportSaveTimeoutRef.current = setTimeout(async () => {
+      try {
+        // Load current metadata to preserve other fields
+        const currentMetadata = await worldLabApi.loadMetadata(labName)
+        const updatedMetadata = {
+          ...currentMetadata,
+          viewport,
+        }
+        await worldLabApi.saveMetadata(labName, updatedMetadata)
+        savedViewportRef.current = viewport
+      } catch (error) {
+        console.error('[WorldLabCanvas] Error saving viewport:', error)
+      }
+    }, 500) // Debounce for 500ms
+  }, [labName])
+
+  // Load viewport from metadata on mount or when labName changes
+  useEffect(() => {
+    // Reset saved viewport when labName changes
+    savedViewportRef.current = null
+    
+    const loadViewport = async () => {
+      try {
+        const metadata = await worldLabApi.loadMetadata(labName)
+        if (metadata?.viewport) {
+          savedViewportRef.current = metadata.viewport
+          // Set viewport if ReactFlow instance is already initialized
+          if (reactFlowInstance.current) {
+            reactFlowInstance.current.setViewport(metadata.viewport, { duration: 0 })
+          }
+        }
+      } catch (error) {
+        console.error('[WorldLabCanvas] Error loading viewport:', error)
+      }
+    }
+    loadViewport()
+
+    // Cleanup: Save viewport when leaving the project
+    return () => {
+      // Clear any pending timeout
+      if (viewportSaveTimeoutRef.current) {
+        clearTimeout(viewportSaveTimeoutRef.current)
+      }
+      // Save current viewport immediately if ReactFlow instance exists
+      if (reactFlowInstance.current) {
+        const currentViewport = reactFlowInstance.current.getViewport()
+        // Only save if viewport has changed from saved value
+        if (!savedViewportRef.current || 
+            savedViewportRef.current.x !== currentViewport.x ||
+            savedViewportRef.current.y !== currentViewport.y ||
+            savedViewportRef.current.zoom !== currentViewport.zoom) {
+          // Save synchronously on unmount
+          worldLabApi.loadMetadata(labName).then((currentMetadata) => {
+            const updatedMetadata = {
+              ...currentMetadata,
+              viewport: currentViewport,
+            }
+            worldLabApi.saveMetadata(labName, updatedMetadata).catch((error) => {
+              console.error('[WorldLabCanvas] Error saving viewport on unmount:', error)
+            })
+          }).catch((error) => {
+            console.error('[WorldLabCanvas] Error loading metadata on unmount:', error)
+          })
+        }
+      }
+    }
+  }, [labName])
+
   // Handle ReactFlow instance initialization
   const handleInit = useCallback((instance: any) => {
     reactFlowInstance.current = instance
-  }, [])
+    // Set saved viewport if available (either from ref or load it)
+    const setViewportIfNeeded = () => {
+      if (savedViewportRef.current) {
+        instance.setViewport(savedViewportRef.current, { duration: 0 })
+      } else {
+        // If viewport not loaded yet, try loading it
+        worldLabApi.loadMetadata(labName).then((metadata) => {
+          if (metadata?.viewport && reactFlowInstance.current) {
+            savedViewportRef.current = metadata.viewport
+            reactFlowInstance.current.setViewport(metadata.viewport, { duration: 0 })
+          }
+        }).catch((error) => {
+          console.error('[WorldLabCanvas] Error loading viewport in handleInit:', error)
+        })
+      }
+    }
+    // Use requestAnimationFrame to ensure ReactFlow is fully initialized
+    requestAnimationFrame(() => {
+      setViewportIfNeeded()
+    })
+  }, [labName])
+
+  // Handle viewport changes (pan/zoom)
+  const handleMoveEnd = useCallback((_event: any, viewport: { x: number; y: number; zoom: number }) => {
+    saveViewport(viewport)
+  }, [saveViewport])
 
   // Keyboard shortcuts and click handlers
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
+      const ctrlOrCmd = isMac ? e.metaKey : e.ctrlKey
+      
       // Don't handle shortcuts if user is typing in the editor
       if (editingNodeId && editorRef.current?.contains(document.activeElement)) {
         // User is typing in editor, only handle Escape to close
@@ -2082,34 +2397,26 @@ function WorldLabCanvasInner({
       )) {
         return
       }
-      
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
-      const ctrlOrCmd = isMac ? e.metaKey : e.ctrlKey
 
-      // Undo: Ctrl/Cmd + Z
-      if (ctrlOrCmd && e.key === 'z' && !e.shiftKey) {
+      // Undo: Ctrl/Cmd + Z (without Shift)
+      if (ctrlOrCmd && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
         e.preventDefault()
+        e.stopPropagation()
         undo()
+        return
       }
       // Redo: Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y
-      else if ((ctrlOrCmd && e.key === 'z' && e.shiftKey) || (ctrlOrCmd && e.key === 'y')) {
+      if ((ctrlOrCmd && (e.key === 'z' || e.key === 'Z') && e.shiftKey) || (ctrlOrCmd && (e.key === 'y' || e.key === 'Y'))) {
         e.preventDefault()
+        e.stopPropagation()
         redo()
+        return
       }
       // Delete: Delete or Backspace
       else if (e.key === 'Delete' || e.key === 'Backspace') {
-        console.log(`[WorldLabCanvas] ${e.key} key pressed (capture phase)`)
-        console.log('[WorldLabCanvas] keydown target:', e.target)
-        console.log('[WorldLabCanvas] activeElement:', document.activeElement)
-        console.log('[WorldLabCanvas] activeElement tagName:', document.activeElement?.tagName)
-        console.log('[WorldLabCanvas] activeElement isContentEditable:', (document.activeElement as HTMLElement)?.isContentEditable)
-        
         // Check selection from our own state FIRST (in capture phase, before React Flow processes it)
         const selectedNodesFromState = nodes.filter((n: any) => n.selected)
         const selectedEdgesFromState = edges.filter((e: any) => e.selected)
-        
-        console.log(`[WorldLabCanvas] Selected nodes from state: ${selectedNodesFromState.length}, Selected edges from state: ${selectedEdgesFromState.length}`)
-        console.log(`[WorldLabCanvas] Selected node IDs from state:`, selectedNodesFromState.map((n: any) => n.id))
         
         // Also check React Flow instance as fallback
         let selectedNodes = selectedNodesFromState
@@ -2121,12 +2428,8 @@ function WorldLabCanvasInner({
           const selectedNodesFromRF = currentNodes.filter((n: any) => n.selected)
           const selectedEdgesFromRF = currentEdges.filter((e: any) => e.selected)
           
-          console.log(`[WorldLabCanvas] Selected nodes from ReactFlow: ${selectedNodesFromRF.length}, Selected edges from ReactFlow: ${selectedEdgesFromRF.length}`)
-          console.log(`[WorldLabCanvas] Selected node IDs from ReactFlow:`, selectedNodesFromRF.map((n: any) => n.id))
-          
           // Use React Flow selection if state selection is empty (might be more up-to-date)
           if (selectedNodesFromState.length === 0 && selectedNodesFromRF.length > 0) {
-            console.log('[WorldLabCanvas] Using ReactFlow selection (state was empty)')
             selectedNodes = selectedNodesFromRF as any
             selectedEdges = selectedEdgesFromRF as any
           }
@@ -2136,17 +2439,12 @@ function WorldLabCanvasInner({
           // Prevent default immediately in capture phase to stop React Flow from processing backspace
           e.preventDefault()
           e.stopPropagation()
-          console.log('[WorldLabCanvas] Prevented default and stopped propagation for deletion')
-          
-          console.log(`[WorldLabCanvas] Processing deletion for ${selectedNodes.length} nodes and ${selectedEdges.length} edges`)
           
           // Filter out selected nodes and edges from state
           const selectedNodeIds = new Set(selectedNodes.map((n: any) => n.id))
           const selectedEdgeIds = new Set(selectedEdges.map((e: any) => e.id))
           const newNodes = nodes.filter((n: any) => !selectedNodeIds.has(n.id))
           const newEdges = edges.filter((e: any) => !selectedEdgeIds.has(e.id))
-          
-          console.log(`[WorldLabCanvas] Updating state: ${nodes.length} -> ${newNodes.length} nodes, ${edges.length} -> ${newEdges.length} edges`)
           
           // Store original state for rollback if deletion fails
           const originalNodes = nodes
@@ -2156,59 +2454,42 @@ function WorldLabCanvasInner({
           setEdges(newEdges)
           addToHistory(newNodes, newEdges)
           
-          console.log(`[WorldLabCanvas] Calling saveNodes with ${newNodes.length} nodes`)
           saveNodes(newNodes)
-          console.log(`[WorldLabCanvas] Calling saveEdges with ${newEdges.length} edges and ${newNodes.length} nodes`)
           // FIXED: Pass newNodes to saveEdges to avoid stale closure
           saveEdges(newEdges, newNodes)
           
           // Delete node files from backend
-          console.log(`[WorldLabCanvas] Starting backend deletion for ${selectedNodes.length} nodes`)
           Promise.all(
             selectedNodes.map(async (node) => {
               try {
-                console.log(`[WorldLabCanvas] Attempting to delete node file: ${node.id} in lab: ${labName}`)
                 const result = await worldLabApi.deleteNode(labName, node.id)
-                console.log(`[WorldLabCanvas] Backend deletion result for node ${node.id}:`, result)
                 return { nodeId: node.id, success: result }
               } catch (error) {
-                console.error(`[WorldLabCanvas] Failed to delete node file ${node.id}:`, error)
                 return { nodeId: node.id, success: false, error }
               }
             })
           ).then((results) => {
             const failedDeletions = results.filter(r => !r.success)
             if (failedDeletions.length > 0) {
-              console.error(`[WorldLabCanvas] Backend deletion failed for ${failedDeletions.length} nodes, rolling back state`)
-              console.error(`[WorldLabCanvas] Failed nodes:`, failedDeletions.map(r => r.nodeId))
-              
-              // Rollback: restore original state
+              // Rollback: restore original state (don't add to history - this is error recovery, not user action)
               setNodes(originalNodes as any)
               setEdges(originalEdges as any)
-              addToHistory(originalNodes as any, originalEdges as any)
               
               // Also rollback saves
-              console.log(`[WorldLabCanvas] Rolling back saves with original state`)
               saveNodes(originalNodes as any)
               saveEdges(originalEdges as any, originalNodes as any)
               
               // Show user-friendly error (you might want to add a toast/notification here)
               alert(`Failed to delete ${failedDeletions.length} node(s). Changes have been rolled back.`)
-            } else {
-              console.log(`[WorldLabCanvas] Successfully completed backend deletion for all ${selectedNodes.length} nodes`)
             }
-          }).catch((error) => {
-            console.error(`[WorldLabCanvas] Error during backend deletion:`, error)
+          }).catch(() => {
             // Rollback on unexpected error
-            console.error(`[WorldLabCanvas] Rolling back state due to error`)
+            // Rollback (don't add to history - this is error recovery, not user action)
             setNodes(originalNodes as any)
             setEdges(originalEdges as any)
-            addToHistory(originalNodes, originalEdges)
             saveNodes(originalNodes)
             saveEdges(originalEdges, originalNodes)
           })
-        } else {
-          console.log('[WorldLabCanvas] No nodes or edges selected, nothing to delete')
         }
       }
       // Escape: Close editor, deselect all, close context menu
@@ -2260,12 +2541,13 @@ function WorldLabCanvasInner({
     }
   }, [nodes, edges, undo, redo, setNodes, setEdges, addToHistory, saveNodes, saveEdges, contextMenu, renamingNodeId, editingNodeId, onCloseNodeEditor, labName])
 
-  // Record initial state in history
+  // Record initial state in history (only once on mount)
   useEffect(() => {
-    if (history.length === 0 && nodes.length > 0) {
+    if (!historyInitializedRef.current && nodes.length > 0) {
+      historyInitializedRef.current = true
       addToHistory(nodes, edges)
     }
-  }, []) // Only run once on mount
+  }, [nodes, edges, addToHistory]) // Initialize history when nodes are available
 
   // Expose undo/redo handlers to parent component
   useEffect(() => {
@@ -2282,23 +2564,15 @@ function WorldLabCanvasInner({
   // Enhanced edge styling - representing "world rules" with custom types
   const getEdgeStyle = useCallback(
     (edge: Edge) => {
-      const sourceNode = nodes.find((n) => n.id === edge.source)
-      
       // Get custom edge type from edge.data or edge.label
       const edgeData = (edge as any).data || {}
       const edgeType = edgeData.edgeType || edgeData.type || 'default'
       const edgeStrength = edgeData.strength || edgeData.thickness || 1
       
-      // Get colors from source node category
-      const sourceCategory = sourceNode?.data?.category
-      const categoryColors = sourceCategory
-        ? getCategoryColor(sourceCategory, theme)
-        : getCategoryColor('', theme)
-
       // Base edge color
       const edgeColor = theme === 'dark'
-        ? `rgba(255, 255, 255, ${edge.selected ? 0.4 : 0.15})`
-        : `rgba(0, 0, 0, ${edge.selected ? 0.3 : 0.12})`
+        ? `rgba(255, 255, 255, ${edge.selected ? 0.4 : 0.18})`
+        : `rgba(0, 0, 0, ${edge.selected ? 0.3 : 0.15})`
 
       // Determine stroke style based on edge type
       let strokeDasharray = 'none'
@@ -2313,13 +2587,17 @@ function WorldLabCanvasInner({
       }
 
       // Calculate stroke width based on strength (1-5 scale, default 2)
-      const baseWidth = edge.selected ? 3 : 2
+      const baseWidth = 2
       const strokeWidth = Math.max(1, Math.min(5, baseWidth * edgeStrength))
 
       // Use custom color if specified, otherwise use category color or default
       const customColor = edgeData.color
+      // When selected, use uniform grey color for all edges
+      const selectedEdgeColor = theme === 'dark'
+        ? 'rgba(255, 255, 255, 0.7)'  // Brighter light grey for dark theme
+        : 'rgba(0, 0, 0, 0.6)'         // Brighter dark grey for light theme
       const finalStrokeColor = edge.selected
-        ? (customColor || categoryColors.primary)
+        ? selectedEdgeColor
         : (customColor || edgeColor)
 
       return {
@@ -2327,7 +2605,7 @@ function WorldLabCanvasInner({
         strokeWidth: strokeWidth,
         strokeDasharray: strokeDasharray,
         opacity: edge.selected ? 1 : 0.6,
-        transition: 'all 0.3s ease',
+        transition: 'all 0.1s ease',
       }
     },
     [nodes, theme]
@@ -2358,8 +2636,11 @@ function WorldLabCanvasInner({
   }, [edges, filteredNodes])
 
   // Calculate offset for edges between the same node pairs to avoid overlap
+  // Offset scales with edge length: longer edges get bigger curves
   const edgesWithOffset = React.useMemo(() => {
-    const EDGE_OFFSET_SPACING = 20 // Spacing between parallel edges in pixels
+    const BASE_OFFSET_SPACING = 0.15 // Base spacing as fraction of edge length (15% of edge length)
+    const MIN_OFFSET_SPACING = 60 // Minimum spacing in pixels for very short edges
+    const MAX_OFFSET_SPACING = 120 // Maximum spacing in pixels for very long edges
     
     // Group edges by (source, target, sourceHandle, targetHandle)
     const edgeGroups = new Map<string, Edge[]>()
@@ -2375,12 +2656,73 @@ function WorldLabCanvasInner({
     // Calculate offset for each edge in each group
     const offsetMap = new Map<string, number>()
     edgeGroups.forEach((groupEdges) => {
+      if (groupEdges.length === 0) return
+      
+      // Calculate edge length for this group (all edges in group have same source/target)
+      const firstEdge = groupEdges[0]
+      const sourceNode = filteredNodes.find(n => n.id === firstEdge.source)
+      const targetNode = filteredNodes.find(n => n.id === firstEdge.target)
+      
+      let edgeLength = 200 // Default fallback length
+      if (sourceNode && targetNode) {
+        // Get handle positions to calculate actual edge length
+        const sourceWidth = (sourceNode as any).measured?.width || (sourceNode as any).width || 200
+        const sourceHeight = (sourceNode as any).measured?.height || (sourceNode as any).height || 100
+        const targetWidth = (targetNode as any).measured?.width || (targetNode as any).width || 200
+        const targetHeight = (targetNode as any).measured?.height || (targetNode as any).height || 100
+        
+        // Calculate actual handle positions based on handle IDs
+        let sourceX = sourceNode.position.x + sourceWidth / 2
+        let sourceY = sourceNode.position.y + sourceHeight / 2
+        
+        if (firstEdge.sourceHandle === 'top-source') {
+          sourceX = sourceNode.position.x + sourceWidth / 2
+          sourceY = sourceNode.position.y
+        } else if (firstEdge.sourceHandle === 'bottom-source') {
+          sourceX = sourceNode.position.x + sourceWidth / 2
+          sourceY = sourceNode.position.y + sourceHeight
+        } else if (firstEdge.sourceHandle === 'left-source') {
+          sourceX = sourceNode.position.x
+          sourceY = sourceNode.position.y + sourceHeight / 2
+        } else if (firstEdge.sourceHandle === 'right-source') {
+          sourceX = sourceNode.position.x + sourceWidth
+          sourceY = sourceNode.position.y + sourceHeight / 2
+        }
+        
+        let targetX = targetNode.position.x + targetWidth / 2
+        let targetY = targetNode.position.y + targetHeight / 2
+        
+        if (firstEdge.targetHandle === 'top-target') {
+          targetX = targetNode.position.x + targetWidth / 2
+          targetY = targetNode.position.y
+        } else if (firstEdge.targetHandle === 'bottom-target') {
+          targetX = targetNode.position.x + targetWidth / 2
+          targetY = targetNode.position.y + targetHeight
+        } else if (firstEdge.targetHandle === 'left-target') {
+          targetX = targetNode.position.x
+          targetY = targetNode.position.y + targetHeight / 2
+        } else if (firstEdge.targetHandle === 'right-target') {
+          targetX = targetNode.position.x + targetWidth
+          targetY = targetNode.position.y + targetHeight / 2
+        }
+        
+        // Calculate actual edge length
+        const dx = targetX - sourceX
+        const dy = targetY - sourceY
+        edgeLength = Math.sqrt(dx * dx + dy * dy)
+      }
+      
+      // Calculate offset spacing proportional to edge length
+      // Use a fraction of edge length, clamped between min and max
+      const proportionalSpacing = edgeLength * BASE_OFFSET_SPACING
+      const offsetSpacing = Math.max(MIN_OFFSET_SPACING, Math.min(MAX_OFFSET_SPACING, proportionalSpacing))
+      
       // Sort edges by ID to ensure consistent ordering (by creation time)
       const sortedEdges = [...groupEdges].sort((a, b) => a.id.localeCompare(b.id))
       
       sortedEdges.forEach((edge, index) => {
-        // Center the offsets around 0: for 1 edge -> 0, for 2 edges -> -10, 10, for 3 edges -> -20, 0, 20, etc.
-        const offset = (index - (sortedEdges.length - 1) / 2) * EDGE_OFFSET_SPACING
+        // Center the offsets around 0: for 1 edge -> 0, for 2 edges -> -spacing/2, spacing/2, etc.
+        const offset = (index - (sortedEdges.length - 1) / 2) * offsetSpacing
         offsetMap.set(edge.id, offset)
       })
     })
@@ -2392,12 +2734,12 @@ function WorldLabCanvasInner({
         offset: offsetMap.get(edge.id) || 0
       }
     }))
-  }, [filteredEdges])
+  }, [filteredEdges, filteredNodes])
 
   // Enhanced background colors
   const bgColor = theme === 'dark' ? '#0D0D0D' : '#FAFAFA'
   const gridColor = theme === 'dark' ? '#1A1A1A' : '#F0F0F0'
-  const borderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)'
+  const borderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.1)'
 
   return (
     <PanelGroup direction="vertical" style={{ width: '100%', height: '100%' }}>
@@ -2436,13 +2778,22 @@ function WorldLabCanvasInner({
             .react-flow__node {
               pointer-events: all;
             }
+            /* Hide ReactFlow's default blue selection box around selected nodes */
+            .react-flow__nodesselection,
+            .react-flow__nodesselection-rect {
+              display: none !important;
+              opacity: 0 !important;
+              pointer-events: none !important;
+            }
           `}</style>
 
           <ReactFlow
             nodes={filteredNodes}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             edges={edgesWithOffset.map((edge) => ({
               ...edge,
-              type: 'default', // Smooth bezier curves (default type in React Flow v11)
+              type: 'customBezier', // Custom bezier with offset support
               style: getEdgeStyle(edge),
               markerEnd: undefined, // No arrow markers - just smooth lines
               // Hide default label - we'll render custom multi-line labels using EdgeLabelRenderer
@@ -2473,6 +2824,7 @@ function WorldLabCanvasInner({
             onPaneClick={handlePaneClick}
             onPaneContextMenu={handlePaneContextMenu}
             onInit={handleInit}
+            onMoveEnd={handleMoveEnd}
             onConnect={onConnect}
             onConnectStart={(_, params: any) => {
               // Set connecting state to show handles on target nodes
@@ -2484,17 +2836,29 @@ function WorldLabCanvasInner({
               setIsConnecting(false)
               setConnectingFromNodeId(null)
             }}
-            nodeTypes={nodeTypes}
             nodesDraggable={true}
             nodesConnectable={true}
             elementsSelectable={true}
             edgesFocusable={true}
+            selectionKeyCode="Shift"
+            selectionOnDrag={false}
+            selectionMode={SelectionMode.Partial}
+            onSelectionEnd={() => {
+              // Force clear selection box by removing it from DOM
+              // ReactFlow should handle this automatically, but ensure it's cleared
+              setTimeout(() => {
+                const selectionBox = document.querySelector('.react-flow__selection')
+                if (selectionBox) {
+                  selectionBox.remove()
+                }
+              }, 0)
+            }}
             isValidConnection={(connection) => {
               return !!(connection.source && connection.target && connection.source !== connection.target)
             }}
+            connectionRadius={40}
             style={{ background: bgColor }}
             defaultEdgeOptions={{
-              type: 'default', // Smooth bezier curves (default type in React Flow v11)
               animated: false,
             }}
             connectionLineStyle={{
@@ -2508,7 +2872,7 @@ function WorldLabCanvasInner({
             fitView={false}
             minZoom={0.1}
             maxZoom={4}
-            defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+            defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
           >
             <Background
               color={gridColor}
@@ -2520,103 +2884,273 @@ function WorldLabCanvasInner({
             />
             {/* Multi-line Edge Labels */}
             <EdgeLabelRenderer>
-              {edgesWithOffset
-                .filter((edge) => {
-                  // Only show labels that are not being edited and have content
-                  return inlineEditingEdgeId !== edge.id && edge.label && edge.label.trim()
-                })
-                .map((edge) => {
-                  const sourceNode = nodes.find((n) => n.id === edge.source)
-                  const targetNode = nodes.find((n) => n.id === edge.target)
-                  
-                  if (!sourceNode || !targetNode || !reactFlowInstance.current) return null
+              {(() => {
+                // First, calculate all label positions
+                const labelData = edgesWithOffset
+                  .filter((edge) => {
+                    return inlineEditingEdgeId !== edge.id && edge.label && edge.label.trim()
+                  })
+                  .map((edge) => {
+                    const sourceNode = nodes.find((n) => n.id === edge.source)
+                    const targetNode = nodes.find((n) => n.id === edge.target)
+                    
+                    if (!sourceNode || !targetNode || !reactFlowInstance.current) return null
 
-                  // Get actual node dimensions (use measured width/height if available, otherwise defaults)
-                  const sourceNodeWidth = (sourceNode as any).measured?.width || (sourceNode as any).width || 150
-                  const sourceNodeHeight = (sourceNode as any).measured?.height || (sourceNode as any).height || 50
-                  const targetNodeWidth = (targetNode as any).measured?.width || (targetNode as any).width || 150
-                  const targetNodeHeight = (targetNode as any).measured?.height || (targetNode as any).height || 50
+                    // Get actual node dimensions
+                    const sourceNodeWidth = (sourceNode as any).measured?.width || (sourceNode as any).width || 200
+                    const sourceNodeHeight = (sourceNode as any).measured?.height || (sourceNode as any).height || 100
+                    const targetNodeWidth = (targetNode as any).measured?.width || (targetNode as any).width || 200
+                    const targetNodeHeight = (targetNode as any).measured?.height || (targetNode as any).height || 100
 
-                  // Calculate edge endpoints (center of nodes)
-                  const sourceX = sourceNode.position.x + sourceNodeWidth / 2
-                  const sourceY = sourceNode.position.y + sourceNodeHeight / 2
-                  const targetX = targetNode.position.x + targetNodeWidth / 2
-                  const targetY = targetNode.position.y + targetNodeHeight / 2
+                    // Calculate handle positions - support all 8 handles
+                    let sourceX = sourceNode.position.x + sourceNodeWidth / 2
+                    let sourceY = sourceNode.position.y + sourceNodeHeight
+                    let sourcePosition = Position.Bottom
+                    
+                    if (edge.sourceHandle === 'top-source') {
+                      sourceX = sourceNode.position.x + sourceNodeWidth / 2
+                      sourceY = sourceNode.position.y
+                      sourcePosition = Position.Top
+                    } else if (edge.sourceHandle === 'bottom-source') {
+                      sourceX = sourceNode.position.x + sourceNodeWidth / 2
+                      sourceY = sourceNode.position.y + sourceNodeHeight
+                      sourcePosition = Position.Bottom
+                    } else if (edge.sourceHandle === 'left-source') {
+                      sourceX = sourceNode.position.x
+                      sourceY = sourceNode.position.y + sourceNodeHeight / 2
+                      sourcePosition = Position.Left
+                    } else if (edge.sourceHandle === 'right-source') {
+                      sourceX = sourceNode.position.x + sourceNodeWidth
+                      sourceY = sourceNode.position.y + sourceNodeHeight / 2
+                      sourcePosition = Position.Right
+                    }
+                    
+                    let targetX = targetNode.position.x + targetNodeWidth / 2
+                    let targetY = targetNode.position.y
+                    let targetPosition = Position.Top
+                    
+                    if (edge.targetHandle === 'top-target') {
+                      targetX = targetNode.position.x + targetNodeWidth / 2
+                      targetY = targetNode.position.y
+                      targetPosition = Position.Top
+                    } else if (edge.targetHandle === 'bottom-target') {
+                      targetX = targetNode.position.x + targetNodeWidth / 2
+                      targetY = targetNode.position.y + targetNodeHeight
+                      targetPosition = Position.Bottom
+                    } else if (edge.targetHandle === 'left-target') {
+                      targetX = targetNode.position.x
+                      targetY = targetNode.position.y + targetNodeHeight / 2
+                      targetPosition = Position.Left
+                    } else if (edge.targetHandle === 'right-target') {
+                      targetX = targetNode.position.x + targetNodeWidth
+                      targetY = targetNode.position.y + targetNodeHeight / 2
+                      targetPosition = Position.Right
+                    }
 
-                  try {
-                    // Calculate label position at midpoint of edge path
-                    // Note: offset affects the edge path but label position is calculated at midpoint,
-                    // so the visual difference is minimal for label positioning
-                    const [, labelX, labelY] = getBezierPath({
+                    // Helper function to calculate position along curve at given t value
+                    const calculatePositionOnCurve = (t: number, perpendicularOffset: number = 0): { x: number; y: number } => {
+                      const offset = edge.pathOptions?.offset || 0
+                      const dx = targetX - sourceX
+                      const dy = targetY - sourceY
+                      const length = Math.sqrt(dx * dx + dy * dy)
+                      
+                      if (length === 0) {
+                        return { x: (sourceX + targetX) / 2, y: (sourceY + targetY) / 2 }
+                      }
+                      
+                      if (offset !== 0) {
+                        const perpX = -dy / length
+                        const perpY = dx / length
+                        const curveMultiplier = 2.0
+                        const controlOffsetX = perpX * offset * curveMultiplier
+                        const controlOffsetY = perpY * offset * curveMultiplier
+                        
+                        const cp1X = sourceX + dx * 0.38 + controlOffsetX
+                        const cp1Y = sourceY + dy * 0.38 + controlOffsetY
+                        const cp2X = sourceX + dx * 0.62 + controlOffsetX
+                        const cp2Y = sourceY + dy * 0.62 + controlOffsetY
+                        
+                        const mt = 1 - t
+                        const x = mt * mt * mt * sourceX + 
+                                  3 * mt * mt * t * cp1X + 
+                                  3 * mt * t * t * cp2X + 
+                                  t * t * t * targetX
+                        const y = mt * mt * mt * sourceY + 
+                                  3 * mt * mt * t * cp1Y + 
+                                  3 * mt * t * t * cp2Y + 
+                                  t * t * t * targetY
+                        
+                        // Calculate tangent for perpendicular offset
+                        const tangentX = 3 * mt * mt * (cp1X - sourceX) + 
+                                         6 * mt * t * (cp2X - cp1X) + 
+                                         3 * t * t * (targetX - cp2X)
+                        const tangentY = 3 * mt * mt * (cp1Y - sourceY) + 
+                                         6 * mt * t * (cp2Y - cp1Y) + 
+                                         3 * t * t * (targetY - cp2Y)
+                        const tangentLength = Math.sqrt(tangentX * tangentX + tangentY * tangentY)
+                        
+                        if (tangentLength > 0 && perpendicularOffset !== 0) {
+                          // Perpendicular vector (rotate tangent 90 degrees)
+                          const perpOffsetX = -tangentY / tangentLength * perpendicularOffset
+                          const perpOffsetY = tangentX / tangentLength * perpendicularOffset
+                          return { x: x + perpOffsetX, y: y + perpOffsetY }
+                        }
+                        
+                        return { x, y }
+                      } else {
+                        // For bezier without offset
+                        try {
+                          const [, x, y] = getBezierPath({
+                            sourceX,
+                            sourceY,
+                            targetX,
+                            targetY,
+                            sourcePosition,
+                            targetPosition,
+                          })
+                          // Calculate perpendicular offset
+                          if (perpendicularOffset !== 0) {
+                            const perpX = -dy / length
+                            const perpY = dx / length
+                            return { 
+                              x: x + perpX * perpendicularOffset, 
+                              y: y + perpY * perpendicularOffset 
+                            }
+                          }
+                          return { x, y }
+                        } catch {
+                          const midX = sourceX + (targetX - sourceX) * t
+                          const midY = sourceY + (targetY - sourceY) * t
+                          if (perpendicularOffset !== 0) {
+                            const perpX = -dy / length
+                            const perpY = dx / length
+                            return { 
+                              x: midX + perpX * perpendicularOffset, 
+                              y: midY + perpY * perpendicularOffset 
+                            }
+                          }
+                          return { x: midX, y: midY }
+                        }
+                      }
+                    }
+                    
+                    // Start with default position (t = 0.5, midpoint, no perpendicular offset)
+                    let t = 0.5
+                    let perpendicularOffset = 0
+                    let { x: labelX, y: labelY } = calculatePositionOnCurve(t, perpendicularOffset)
+                    
+                    return {
+                      edge,
                       sourceX,
                       sourceY,
                       targetX,
                       targetY,
-                      sourcePosition: Position.Bottom,
-                      targetPosition: Position.Top,
-                    })
-                    
-                    return (
-                      <div
-                        key={edge.id}
-                        className="nodrag nopan"
-                        style={{
-                          position: 'absolute',
-                          left: labelX,
-                          top: labelY,
-                          transform: 'translate(-50%, -50%)',
-                          fontSize: '12px',
-                          fontWeight: 500,
-                          color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                          background: theme === 'dark' ? 'rgba(30, 30, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-                          padding: '4px 8px',
-                          borderRadius: '6px',
-                          border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                          maxWidth: '200px',
-                          textAlign: 'center',
-                          pointerEvents: 'none',
-                          lineHeight: '1.4',
-                        }}
-                      >
-                        {edge.label}
-                      </div>
-                    )
-                  } catch (error) {
-                    // Fallback to simple midpoint
-                    const midX = (sourceX + targetX) / 2
-                    const midY = (sourceY + targetY) / 2
-                    
-                    return (
-                      <div
-                        key={edge.id}
-                        className="nodrag nopan"
-                        style={{
-                          position: 'absolute',
-                          left: midX,
-                          top: midY,
-                          transform: 'translate(-50%, -50%)',
-                          fontSize: '12px',
-                          fontWeight: 500,
-                          color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                          background: theme === 'dark' ? 'rgba(30, 30, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-                          padding: '4px 8px',
-                          borderRadius: '6px',
-                          border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                          maxWidth: '200px',
-                          textAlign: 'center',
-                          pointerEvents: 'none',
-                          lineHeight: '1.4',
-                        }}
-                      >
-                        {edge.label}
-                      </div>
-                    )
+                      sourcePosition,
+                      targetPosition,
+                      labelX,
+                      labelY,
+                      t,
+                      perpendicularOffset,
+                      calculatePositionOnCurve,
+                    }
+                  })
+                  .filter((data): data is NonNullable<typeof data> => data !== null)
+                
+                // Detect and resolve overlaps
+                const MIN_DISTANCE = 60 // Minimum distance between labels to avoid overlap
+                const MAX_PERPENDICULAR_OFFSET = 40 // Maximum offset perpendicular to curve
+                
+                // Multiple passes to resolve overlaps
+                for (let pass = 0; pass < 3; pass++) {
+                  for (let i = 0; i < labelData.length; i++) {
+                    for (let j = i + 1; j < labelData.length; j++) {
+                      const label1 = labelData[i]
+                      const label2 = labelData[j]
+                      
+                      // Calculate distance between labels
+                      const dx = label2.labelX - label1.labelX
+                      const dy = label2.labelY - label1.labelY
+                      const distance = Math.sqrt(dx * dx + dy * dy)
+                      
+                      if (distance < MIN_DISTANCE) {
+                        // Labels overlap, adjust positions
+                        const overlap = MIN_DISTANCE - distance
+                        
+                        // First try: move along curve (spread them out)
+                        const tAdjustment = overlap / 300
+                        label1.t = Math.max(0.2, label1.t - tAdjustment)
+                        label2.t = Math.min(0.8, label2.t + tAdjustment)
+                        
+                        // Second: add perpendicular offset (move up/down from curve)
+                        // Alternate direction for each label
+                        if (Math.abs(label1.perpendicularOffset) < MAX_PERPENDICULAR_OFFSET) {
+                          label1.perpendicularOffset = (label1.perpendicularOffset || 0) - overlap * 0.5
+                        }
+                        if (Math.abs(label2.perpendicularOffset) < MAX_PERPENDICULAR_OFFSET) {
+                          label2.perpendicularOffset = (label2.perpendicularOffset || 0) + overlap * 0.5
+                        }
+                        
+                        // Recalculate positions with new t and perpendicular offset
+                        const pos1 = label1.calculatePositionOnCurve(label1.t, label1.perpendicularOffset)
+                        const pos2 = label2.calculatePositionOnCurve(label2.t, label2.perpendicularOffset)
+                        
+                        label1.labelX = pos1.x
+                        label1.labelY = pos1.y
+                        label2.labelX = pos2.x
+                        label2.labelY = pos2.y
+                      }
+                    }
                   }
-                })}
+                }
+                
+                // Render labels with adjusted positions
+                return labelData.map(({ edge, labelX, labelY }) => {
+                  const isHovered = hoveredEdgeLabelId === edge.id
+                  
+                  return (
+                    <div
+                      key={edge.id}
+                      className="nodrag nopan"
+                      style={{
+                        position: 'absolute',
+                        left: labelX,
+                        top: labelY,
+                        transform: 'translate(-50%, -50%)',
+                        fontSize: '12px',
+                        fontWeight: 400,
+                        color: isHovered 
+                          ? (theme === 'dark' ? 'rgba(232, 232, 232, 0.95)' : 'rgba(26, 26, 26, 0.95)')
+                          : (theme === 'dark' ? 'rgba(232, 232, 232, 0.65)' : 'rgba(26, 26, 26, 0.65)'),
+                        background: bgColor,
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.15)'}`,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        maxWidth: '140px',
+                        textAlign: 'center',
+                        pointerEvents: 'all',
+                        lineHeight: '1.4',
+                        zIndex: 1000,
+                        cursor: 'text',
+                        transition: 'color 0.2s ease',
+                      }}
+                      onMouseEnter={() => setHoveredEdgeLabelId(edge.id)}
+                      onMouseLeave={() => setHoveredEdgeLabelId(null)}
+                      onDoubleClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        handleEdgeDoubleClick(e as any, edge)
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                      }}
+                    >
+                      {edge.label}
+                    </div>
+                  )
+                })
+              })()}
             </EdgeLabelRenderer>
           </ReactFlow>
 
@@ -2624,11 +3158,16 @@ function WorldLabCanvasInner({
           {inlineEditingEdgeId && inlineEditingPosition && (() => {
             const edge = edges.find((e) => e.id === inlineEditingEdgeId)
             if (!edge) {
-              console.log('[WorldLabCanvas] Edge not found for inline editing:', inlineEditingEdgeId)
               return null
             }
 
-            console.log('[WorldLabCanvas] Rendering inline input at:', inlineEditingPosition)
+            // Get current zoom level to scale input size
+            const zoom = reactFlowInstance.current?.getViewport().zoom || 1
+            const baseFontSize = 12
+            const basePadding = 4
+            const basePaddingX = 8
+            const baseMaxWidth = 140
+            const baseBorderRadius = 6
 
             return (
               <div
@@ -2650,28 +3189,36 @@ function WorldLabCanvasInner({
                   placeholder="Relation"
                   rows={1}
                   style={{
-                    padding: '4px 8px',
-                    fontSize: '12px',
-                    fontWeight: 500,
-                    color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                    background: theme === 'dark' ? 'rgba(30, 30, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-                    border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
-                    borderRadius: '6px',
+                    padding: `${basePadding * zoom}px ${basePaddingX * zoom}px`,
+                    fontSize: `${baseFontSize * zoom}px`,
+                    fontWeight: 400,
+                    color: theme === 'dark' ? 'rgba(232, 232, 232, 0.95)' : 'rgba(26, 26, 26, 0.95)',
+                    background: bgColor,
+                    border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)'}`,
+                    borderRadius: `${baseBorderRadius * zoom}px`,
                     outline: 'none',
                     resize: 'none',
                     overflow: 'hidden',
                     fontFamily: 'inherit',
                     lineHeight: '1.4',
-                    width: '120px',
-                    minWidth: '80px',
-                    maxWidth: '250px',
+                    maxWidth: `${baseMaxWidth * zoom}px`,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    textAlign: 'center',
                   }}
                   onKeyDown={(e) => {
-                    // Ctrl/Cmd+Enter to save
-                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    // Enter to save (for edge label editing)
+                    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
                       e.preventDefault()
                       handleInlineEdgeLabelSave(inlineEditingEdgeId, e.currentTarget.value)
-                    } else if (e.key === 'Escape') {
+                    }
+                    // Ctrl/Cmd+Enter to save (alternative)
+                    else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault()
+                      handleInlineEdgeLabelSave(inlineEditingEdgeId, e.currentTarget.value)
+                    } 
+                    // Escape to cancel
+                    else if (e.key === 'Escape') {
                       e.preventDefault()
                       handleInlineEdgeLabelCancel()
                     }
@@ -2703,7 +3250,7 @@ function WorldLabCanvasInner({
           })()}
 
           {/* Context Menu */}
-          {contextMenu && (
+          {contextMenu && contextMenu.type !== 'pane' && (
             <div
               style={{
                 position: 'fixed',

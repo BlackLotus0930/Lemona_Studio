@@ -30,13 +30,13 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
   const [isDragOver, setIsDragOver] = useState(false)
 
   const tabBg = isActive 
-    ? (theme === 'dark' ? '#1e1e1e' : '#f5f5f5')
+    ? (theme === 'dark' ? '#1e1e1e' : '#f6f6f6')
     : (theme === 'dark' ? '#141414' : '#ffffff')
   const tabTextColor = isActive
     ? (theme === 'dark' ? '#D6D6DD' : '#5f6368')
     : (theme === 'dark' ? '#858585' : '#5f6368')
   // Hover color same as selection color
-  const tabHoverBg = theme === 'dark' ? '#1e1e1e' : '#f5f5f5'
+  const tabHoverBg = theme === 'dark' ? '#1e1e1e' : '#f6f6f6'
   const separatorColor = theme === 'dark' ? '#1E1E1E' : '#e0e0e0' // Theme-aware separator color
   const showCloseButton = canClose && (isActive || isHovered)
 

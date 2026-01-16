@@ -507,7 +507,7 @@ function FileExplorer({
 
   const bgColor = theme === 'dark' ? '#141414' : '#FAFAFA'
   const hoverBg = theme === 'dark' ? '#1e1e1e' : '#F0F0ED'
-  const selectedBg = theme === 'dark' ? '#1e1e1e' : '#F0F0ED'
+  const selectedBg = theme === 'dark' ? '#1e1e1e' : '#F2F2F0'
   const textColor = theme === 'dark' ? '#cccccc' : '#202124'
   const folderTextColor = theme === 'dark' ? '#b5b5b5' : '#4a4a4a' // Slightly lighter color for folder names and arrows
   const indicatorColor = theme === 'dark' ? '#999999' : '#c0c0c0' // Light grey color for drop indicator
@@ -1170,7 +1170,6 @@ function FileExplorer({
               type="text"
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
-              onBlur={() => handleRenameSubmit(item)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   handleRenameSubmit(item)
@@ -1183,14 +1182,25 @@ function FileExplorer({
                 width: 'auto',
                 minWidth: '60px',
                 maxWidth: 'calc(100% - 20px)',
-                border: `1px solid ${selectedBg}`,
-                borderRadius: '6px',
+                border: `1.5px solid ${theme === 'dark' ? '#3a3a3a' : '#dadce0'}`,
+                borderRadius: '3px',
                 padding: '2px 4px',
                 fontSize: '13px',
                 fontFamily: 'inherit',
-                backgroundColor: bgColor,
+                backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff',
                 color: textColor,
                 outline: 'none',
+                transition: 'all 0.2s ease',
+                animation: 'fadeInScale 0.15s ease-out'
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = theme === 'dark' ? '#4a4a4a' : '#bdc1c6'
+                e.target.style.backgroundColor = theme === 'dark' ? '#1f1f1f' : '#ffffff'
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = theme === 'dark' ? '#3a3a3a' : '#dadce0'
+                e.target.style.backgroundColor = theme === 'dark' ? '#1a1a1a' : '#ffffff'
+                handleRenameSubmit(item)
               }}
               autoFocus
             />
@@ -1542,13 +1552,6 @@ function FileExplorer({
               type="text"
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
-              onBlur={() => {
-                if (renameValue.trim() && onDocumentRename) {
-                  onDocumentRename(readmeDoc.id, renameValue.trim())
-                }
-                setRenamingId(null)
-                setRenameValue('')
-              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   if (renameValue.trim() && onDocumentRename) {
@@ -1566,14 +1569,29 @@ function FileExplorer({
                 width: 'auto',
                 minWidth: '60px',
                 maxWidth: 'calc(100% - 20px)',
-                border: `1px solid ${selectedBg}`,
-                borderRadius: '6px',
+                border: `1.5px solid ${theme === 'dark' ? '#3a3a3a' : '#dadce0'}`,
+                borderRadius: '3px',
                 padding: '2px 4px',
                 fontSize: '13px',
                 fontFamily: 'inherit',
-                backgroundColor: bgColor,
+                backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff',
                 color: textColor,
                 outline: 'none',
+                transition: 'all 0.2s ease',
+                animation: 'fadeInScale 0.15s ease-out'
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = theme === 'dark' ? '#4a4a4a' : '#bdc1c6'
+                e.target.style.backgroundColor = theme === 'dark' ? '#1f1f1f' : '#ffffff'
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = theme === 'dark' ? '#3a3a3a' : '#dadce0'
+                e.target.style.backgroundColor = theme === 'dark' ? '#1a1a1a' : '#ffffff'
+                if (renameValue.trim() && onDocumentRename) {
+                  onDocumentRename(readmeDoc.id, renameValue.trim())
+                }
+                setRenamingId(null)
+                setRenameValue('')
               }}
               autoFocus
             />
@@ -1899,19 +1917,32 @@ function FileExplorer({
   }
 
   return (
-    <div
-      className="scrollable-container no-gutter"
-      style={{
-        width: '100%',
-        height: '100%',
-        backgroundColor: bgColor,
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        padding: 0,
-        margin: 0,
-        boxSizing: 'border-box',
-        position: 'relative',
-      }}
+    <>
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes fadeInScale {
+          from {
+            opacity: 0;
+            transform: scale(0.95);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+      `}} />
+      <div
+        className="scrollable-container no-gutter"
+        style={{
+          width: '100%',
+          height: '100%',
+          backgroundColor: bgColor,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          padding: 0,
+          margin: 0,
+          boxSizing: 'border-box',
+          position: 'relative',
+        }}
       onClick={() => {
         // Only handle context menu closing if not in search mode
         // In search mode, let search results handle their own clicks
@@ -2030,7 +2061,8 @@ function FileExplorer({
 
       {/* Upload progress indicator */}
       {uploadProgressIndicator}
-    </div>
+      </div>
+    </>
   )
 }
 

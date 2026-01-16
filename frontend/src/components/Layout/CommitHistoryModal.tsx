@@ -246,10 +246,10 @@ export default function CommitHistoryModal({
     }
   }
 
-  const dropdownBg = theme === 'dark' ? '#181818' : '#ffffff'
-  const dropdownBorder = theme === 'dark' ? '#212121' : '#dadce0'
+  const dropdownBg = theme === 'dark' ? '#1a1a1a' : '#ffffff'
+  const dropdownBorder = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)'
   const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
-  const dropdownHoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'
+  const dropdownHoverBg = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)'
   const brandBlue = theme === 'dark' ? '#6ba8c7' : '#5a9ec7'
 
   const rect = triggerRef?.current?.getBoundingClientRect()
@@ -261,18 +261,22 @@ export default function CommitHistoryModal({
           ref={modalRef}
           style={{
             position: 'fixed',
-            top: rect ? `${rect.bottom + 4}px` : '100%',
+            top: rect ? `${rect.bottom + 8}px` : '100%',
             right: rect ? `${window.innerWidth - rect.right}px` : '24px',
             backgroundColor: dropdownBg,
             border: `1px solid ${dropdownBorder}`,
-            borderRadius: '6px',
-            boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
+            borderRadius: '8px',
+            boxShadow: theme === 'dark' 
+              ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+              : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
             zIndex: 10010,
             width: '380px',
             maxHeight: '400px',
             display: 'flex',
             flexDirection: 'column',
-            overflow: 'hidden'
+            overflow: 'hidden',
+            backdropFilter: 'blur(20px)',
+            transition: 'opacity 0.2s ease, transform 0.2s ease'
           }}
         >
         {/* Header */}
@@ -458,7 +462,7 @@ export default function CommitHistoryModal({
                         style={{
                           padding: '6px',
                           border: `1px solid ${dropdownBorder}`,
-                          borderRadius: '6px',
+                          borderRadius: '8px',
                           backgroundColor: 'transparent',
                           color: dropdownTextColor,
                           cursor: (isRestoring || renamingCommitId === commit.id) ? 'not-allowed' : 'pointer',
@@ -501,7 +505,7 @@ export default function CommitHistoryModal({
                         style={{
                           padding: '6px 12px',
                           border: `1px solid ${dropdownBorder}`,
-                          borderRadius: '6px',
+                          borderRadius: '8px',
                           backgroundColor: 'transparent',
                           color: dropdownTextColor,
                           cursor: isRestoring ? 'not-allowed' : 'pointer',
@@ -563,13 +567,16 @@ export default function CommitHistoryModal({
           <div
             style={{
               backgroundColor: dropdownBg,
-              borderRadius: '6px',
+              borderRadius: '8px',
               padding: '24px',
               minWidth: '400px',
               maxWidth: '500px',
+              border: `1px solid ${dropdownBorder}`,
               boxShadow: theme === 'dark' 
-                ? '0 8px 32px rgba(0, 0, 0, 0.5)' 
-                : '0 8px 32px rgba(0, 0, 0, 0.2)',
+                ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+                : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
+              backdropFilter: 'blur(20px)',
+              transition: 'opacity 0.2s ease, transform 0.2s ease',
               pointerEvents: 'auto',
               position: 'relative',
               zIndex: 10025
@@ -608,7 +615,7 @@ export default function CommitHistoryModal({
                   padding: '8px 16px',
                   fontSize: '14px',
                   border: `1px solid ${dropdownBorder}`,
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   backgroundColor: 'transparent',
                   color: dropdownTextColor,
                   cursor: 'pointer',
@@ -638,7 +645,7 @@ export default function CommitHistoryModal({
                   padding: '8px 16px',
                   fontSize: '14px',
                   border: 'none',
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   backgroundColor: brandBlue,
                   color: '#ffffff',
                   cursor: 'pointer',
