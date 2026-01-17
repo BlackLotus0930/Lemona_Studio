@@ -178,8 +178,8 @@ export const chatApi = {
   getChat: (documentId: string, chatId: string) => invokeOrFetch('chat:getChat', documentId, chatId),
   addMessage: (documentId: string, chatId: string, message: AIChatMessage) =>
     invokeOrFetch('chat:addMessage', documentId, chatId, message),
-  updateMessage: (documentId: string, chatId: string, messageId: string, content: string) =>
-    invokeOrFetch('chat:updateMessage', documentId, chatId, messageId, content),
+  updateMessage: (documentId: string, chatId: string, messageId: string, content: string, reasoningMetadata?: AIChatMessage['reasoningMetadata']) =>
+    invokeOrFetch('chat:updateMessage', documentId, chatId, messageId, content, reasoningMetadata),
   deleteChat: (documentId: string, chatId: string) => invokeOrFetch('chat:deleteChat', documentId, chatId),
 }
 
@@ -258,6 +258,9 @@ export const indexingApi = {
   getIndexingStatus: (documentId: string) => invokeOrFetch('library:getIndexingStatus', documentId),
   indexProjectLibraryFiles: (projectId: string, geminiApiKey?: string, openaiApiKey?: string, onlyUnindexed?: boolean) =>
     invokeOrFetch('library:indexProject', projectId, geminiApiKey, openaiApiKey, onlyUnindexed),
+  incrementalIndexProjectFiles: (projectId: string, documentIds: string[], geminiApiKey?: string, openaiApiKey?: string) =>
+    invokeOrFetch('indexing:incrementalIndexProjectFiles', projectId, documentIds, geminiApiKey, openaiApiKey),
+  isLibraryIndexed: (projectId: string) => invokeOrFetch('library:isIndexValid', projectId),
 }
 
 export const versionApi = {

@@ -1296,6 +1296,50 @@ export default function Layout(): JSX.Element {
             setTimeout(() => {
               setShowCommitSuccessNotification(null)
             }, 3000)
+
+            // Trigger incremental indexing for workspace documents (async, non-blocking)
+            // Only index documents that were included in the commit (filteredSnapshots)
+            const workspaceDocumentIds = filteredSnapshots
+              .map(snapshot => {
+                const doc = documents.find(d => d.id === snapshot.documentId)
+                return doc && doc.folder === 'project' ? doc.id : null
+              })
+              .filter((id): id is string => id !== null)
+
+            if (workspaceDocumentIds.length > 0) {
+              // Get API keys for indexing
+              try {
+                const keys = await settingsApi.getApiKeys()
+                const geminiApiKey = keys.geminiApiKey || undefined
+                const openaiApiKey = keys.openaiApiKey || undefined
+
+                // Only proceed if at least one API key is available
+                if (geminiApiKey || openaiApiKey) {
+                  // Trigger incremental indexing asynchronously (don't await, don't block UI)
+                  indexingApi.incrementalIndexProjectFiles(
+                    currentProjectId,
+                    workspaceDocumentIds,
+                    geminiApiKey,
+                    openaiApiKey
+                  ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+                    const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+                    const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+                    if (successCount > 0) {
+                      console.log(`[Indexing] Incrementally indexed ${successCount} workspace document(s)`)
+                    }
+                    if (errorCount > 0) {
+                      console.warn(`[Indexing] Failed to index ${errorCount} workspace document(s)`)
+                    }
+                  }).catch((error) => {
+                    // Don't show error to user - indexing failure shouldn't affect commit
+                    console.warn('[Indexing] Incremental indexing failed (non-blocking):', error)
+                  })
+                }
+              } catch (error) {
+                // Silently fail - API key retrieval failure shouldn't affect commit
+                console.warn('[Indexing] Failed to get API keys for incremental indexing:', error)
+              }
+            }
           } catch (error) {
             // Could show error notification here
           }

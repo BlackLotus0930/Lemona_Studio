@@ -364,7 +364,7 @@ export default function DocumentList() {
         alignItems: 'center',
         height: '40px',
         padding: '0 16px',
-        borderBottom: `1px solid ${borderColor}`,
+        borderBottom: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'}`,
         backgroundColor: bgColor,
         userSelect: 'none',
         flexShrink: 0,
@@ -416,28 +416,21 @@ export default function DocumentList() {
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              backgroundColor: brighterBg,
+              backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
               borderRadius: '6px',
               padding: '4px 10px',
               gap: '6px',
               height: '24px',
               border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'}`,
               transition: 'all 0.2s ease',
-              boxShadow: theme === 'dark' 
-                ? '0 1px 3px rgba(0, 0, 0, 0.2)' 
-                : '0 1px 2px rgba(0, 0, 0, 0.05)',
             }}
             onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)'
               e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'
-              e.currentTarget.style.boxShadow = theme === 'dark' 
-                ? '0 2px 6px rgba(0, 0, 0, 0.3)' 
-                : '0 2px 4px rgba(0, 0, 0, 0.1)'
             }}
             onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)'
               e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'
-              e.currentTarget.style.boxShadow = theme === 'dark' 
-                ? '0 1px 3px rgba(0, 0, 0, 0.2)' 
-                : '0 1px 2px rgba(0, 0, 0, 0.05)'
             }}
             >
               <SearchIcon style={{ fontSize: '14px', color: secondaryTextColor }} />
@@ -1087,9 +1080,9 @@ export default function DocumentList() {
                             }}
                             onMouseEnter={(e) => {
                               e.currentTarget.style.backgroundColor = theme === 'dark' 
-                                ? 'rgba(244, 114, 182, 0.15)' 
-                                : 'rgba(244, 114, 182, 0.08)'
-                              e.currentTarget.style.color = theme === 'dark' ? '#f472b6' : '#ec4899'
+                                ? 'rgba(255, 255, 255, 0.05)' 
+                                : 'rgba(0, 0, 0, 0.03)'
+                              e.currentTarget.style.color = dropdownTextColor
                             }}
                             onMouseLeave={(e) => {
                               e.currentTarget.style.backgroundColor = 'transparent'

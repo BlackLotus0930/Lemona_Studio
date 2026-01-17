@@ -37,8 +37,6 @@ import StopIcon from '@mui/icons-material/Stop'
 // @ts-ignore
 import FolderIcon from '@mui/icons-material/Folder'
 // @ts-ignore
-import FileCopyOutlinedIcon from '@mui/icons-material/FileCopyOutlined'
-// @ts-ignore
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
 
 interface ChatInterfaceProps {
@@ -56,6 +54,7 @@ interface ChatInterfaceProps {
 export default function ChatInterface({ documentId, projectId, chatId, documentContent, isStreaming, setIsStreaming, onFirstMessage, initialInput, onInputSet }: ChatInterfaceProps) {
   const { theme } = useTheme()
   const [messages, setMessages] = useState<AIChatMessage[]>([])
+  const [expandedActions, setExpandedActions] = useState<Set<string>>(new Set()) // Track expanded actions by messageId:action
   const [input, setInput] = useState(initialInput || '')
   const [isLoading, setIsLoading] = useState(false)
   const [lastUserMessageForSearch, setLastUserMessageForSearch] = useState<string>('')
@@ -135,10 +134,13 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [mentionQuery, setMentionQuery] = useState('')
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [libraryDocuments, setLibraryDocuments] = useState<Document[]>([])
+  const [allDocuments, setAllDocuments] = useState<Document[]>([])
+  const [isLibraryIndexed, setIsLibraryIndexed] = useState<boolean>(false)
+  const [libraryFileIndexingStatuses, setLibraryFileIndexingStatuses] = useState<Map<string, IndexingStatus | null>>(new Map())
   const mentionStartIndexRef = useRef<number>(-1)
-  const [currentSuggestion, setCurrentSuggestion] = useState<string | null>(null)
   const [showMentionDropdown, setShowMentionDropdown] = useState(false)
   const mentionDropdownRef = useRef<HTMLDivElement>(null)
+  const [isInMentionMode, setIsInMentionMode] = useState(false)
   
   // Load API keys and Smart indexing setting from localStorage on mount and sync to main process
   useEffect(() => {
@@ -213,35 +215,44 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   }, [googleApiKey, openaiApiKey]) // Removed selectedModel from dependencies to avoid loops
 
 
-  // Load documents for @mention autocomplete (current project files + library)
+  // Check if library is indexed for the current project
+  const checkLibraryIndexStatus = async () => {
+    if (!projectId) {
+      setIsLibraryIndexed(false)
+      return
+    }
+    try {
+      const isValid = await indexingApi.isLibraryIndexed(projectId)
+      setIsLibraryIndexed(isValid)
+    } catch (error) {
+      console.error('Failed to check library index status:', error)
+      setIsLibraryIndexed(false)
+    }
+  }
+
+  // Load documents for @mention autocomplete (workspace files only)
   const loadMentionDocuments = async () => {
     try {
-      const allDocuments = await documentApi.list()
+      const docs = await documentApi.list()
+      setAllDocuments(docs)
       
-      // Filter to only show:
-      // 1. Files in the library folder that belong to the current project (doc.folder === 'library' AND doc.projectId === projectId)
-      // 2. Files in the current project (doc.projectId === projectId AND folder is 'project' or undefined)
-      const mentionableDocs = allDocuments.filter((doc: Document) => {
+      // Filter to only show workspace files (folder === 'project' or undefined/null)
+      // Library files are handled separately in getFilteredMentions based on index status
+      const mentionableDocs = docs.filter((doc: Document) => {
         // Exclude README files
         if (doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md') {
           return false
         }
         
-        // Include library documents that belong to the current project only
-        // CRITICAL: Library files are scoped per project, not shared across all projects
+        // Only include workspace files (folder === 'project' or undefined/null)
+        // Exclude library files (they will be shown separately if indexed)
         if (doc.folder === 'library') {
-          // Only include if it belongs to the current project
-          if (projectId && doc.projectId === projectId) {
-            return true
-          }
-          // If no projectId is set, exclude it (orphaned library file)
           return false
         }
         
         // Include documents from the current project only
         // Must have matching projectId (folder can be 'project' or undefined/null)
         if (projectId && doc.projectId === projectId) {
-          // This is a project file (already excluded library files above)
           return true
         }
         
@@ -255,17 +266,62 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
   }
 
-  // Load documents when projectId changes
+  // Fetch indexing statuses for library files
   useEffect(() => {
-    loadMentionDocuments()
+    const libraryDocs = allDocuments.filter(doc => doc.folder === 'library' && projectId && doc.projectId === projectId)
+    if (libraryDocs.length === 0) {
+      setLibraryFileIndexingStatuses(new Map())
+      return
+    }
+
+    let isMounted = true
+
+    const fetchStatuses = async () => {
+      const promises = libraryDocs.map(async (doc) => {
+        try {
+          const status = await indexingApi.getIndexingStatus(doc.id)
+          return { docId: doc.id, status }
+        } catch (error) {
+          console.error(`Failed to get indexing status for ${doc.id}:`, error)
+          return { docId: doc.id, status: null }
+        }
+      })
+
+      const results = await Promise.all(promises)
+      if (isMounted) {
+        const newStatusMap = new Map<string, IndexingStatus | null>()
+        results.forEach(({ docId, status }) => {
+          newStatusMap.set(docId, status)
+        })
+        setLibraryFileIndexingStatuses(newStatusMap)
+      }
+    }
+
+    fetchStatuses()
+
+    return () => {
+      isMounted = false
+    }
+  }, [allDocuments, projectId])
+
+  // Load documents and check library index status when projectId changes
+  useEffect(() => {
+    if (projectId) {
+      loadMentionDocuments()
+      checkLibraryIndexStatus()
+    } else {
+      setLibraryDocuments([])
+      setIsLibraryIndexed(false)
+    }
   }, [projectId])
 
-  // Reload documents when dropdown opens to ensure we have the latest files
+  // Reload documents and check library index status when dropdown opens to ensure we have the latest files
   useEffect(() => {
-    if (showMentionDropdown) {
+    if (showMentionDropdown && projectId) {
       loadMentionDocuments()
+      checkLibraryIndexStatus()
     }
-  }, [showMentionDropdown])
+  }, [showMentionDropdown, projectId])
 
 
   // Save Google API key to localStorage and main process
@@ -479,10 +535,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
 
   // Removed scroll position saving/loading - AI panel should maintain consistent state across files
   const inputBg = theme === 'dark' ? '#1d1d1d' : '#FEFEFE'
-  const borderColor = theme === 'dark' ? '#313131' : '#DADCE0'
+  const borderColor = theme === 'dark' ? '#232323' : '#E8EAED'
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#9aa0a6'
-  const userMessageBg = theme === 'dark' ? '#1C1C1C' : '#f0f0ed'
+  const userMessageBg = theme === 'dark' ? '#1E1E1E' : '#f0f0ed'
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -802,7 +858,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         }
         updateMessageTimeoutRef.current = setTimeout(async () => {
             try {
-              await chatApi.updateMessage(documentId, chatId, messageId, message.content)
+              await chatApi.updateMessage(documentId, chatId, messageId, message.content, message.reasoningMetadata)
             } catch (error) {
               // If update fails (e.g., message not found), try adding it again
               console.warn('Update failed, trying to add message:', error)
@@ -822,7 +878,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           addedMessageIdsRef.current.add(messageId)
         } else {
           // Final save: update the message
-          await chatApi.updateMessage(documentId, chatId, messageId, message.content)
+          await chatApi.updateMessage(documentId, chatId, messageId, message.content, message.reasoningMetadata)
         }
       }
     } catch (error) {
@@ -973,13 +1029,17 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       const isLibrary = mentionName === 'Library'
       
       // Check if this is a prefix of a document title (like "file" -> "file (2).pdf")
-      let matchedDoc = libraryDocuments.find(doc => doc.title === mentionName || doc.id === mentionName)
+      // Search in both workspace files and library files (if indexed)
+      const allMentionableDocs = isLibraryIndexed 
+        ? [...libraryDocuments, ...allDocuments.filter(doc => doc.folder === 'library' && doc.projectId === projectId)]
+        : libraryDocuments
+      let matchedDoc = allMentionableDocs.find(doc => doc.title === mentionName || doc.id === mentionName)
       
       if (!matchedDoc && !isLibrary) {
         const textAfterMention = text.slice(mentionEnd)
         
         // Find documents that start with the mention name (case-insensitive)
-        const potentialDocs = libraryDocuments.filter(doc => {
+        const potentialDocs = allMentionableDocs.filter(doc => {
           const docTitle = doc.title
           return docTitle.toLowerCase().startsWith(mentionName.toLowerCase())
         })
@@ -998,7 +1058,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         }
       }
       
-      const isFile = !!matchedDoc || (!isLibrary && libraryDocuments.some(doc => doc.title === mentionName || doc.id === mentionName))
+      const isFile = !!matchedDoc || (!isLibrary && allMentionableDocs.some(doc => doc.title === mentionName || doc.id === mentionName))
       
       // Add highlighted mention
       parts.push(
@@ -1007,10 +1067,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           style={{
             backgroundColor: theme === 'dark' 
               ? (isLibrary ? '#2d4a5c' : isFile ? '#3d2d4a' : '#3d3d3d')
-              : (isLibrary ? '#e8f0fe' : isFile ? '#f3e5f5' : '#f1f3f4'),
-            color: theme === 'dark' ? '#ffffff' : textColor, // White for dark theme, regular text color for light theme
+              : (isLibrary ? '#e8f0fe' : isFile ? '#e3f2fd' : '#f1f3f4'), // Pale blue for file mentions in light theme
+            color: theme === 'dark' ? '#ffffff' : textColor, // Normal text color
             padding: '2px 6px',
-            borderRadius: '6px',
+            borderRadius: '3px', // Less rounded corners
             fontWeight: 'normal', // Same weight as regular text
             fontSize: '13px'
           }}
@@ -1054,8 +1114,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       .filter(match => match[1].toLowerCase() !== 'library')
       .map(match => {
         const mentionName = match[1]
-        // Try to find matching document
-        const matchedDoc = libraryDocuments.find(
+        // Try to find matching document in both workspace files and library files (if indexed)
+        const allMentionableDocs = isLibraryIndexed 
+          ? [...libraryDocuments, ...allDocuments.filter(doc => doc.folder === 'library' && doc.projectId === projectId)]
+          : libraryDocuments
+        const matchedDoc = allMentionableDocs.find(
           doc => doc.title === mentionName || 
                  doc.id === mentionName ||
                  doc.title.toLowerCase().startsWith(mentionName.toLowerCase())
@@ -1166,44 +1229,65 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     return `Unable to process your request.${errorDetails ? ` (${errorDetails})` : ''}\n\nPlease try again or check your API keys in Settings > API Keys.`
   }
 
+  // Explicitly exit mention mode and clear all related state
+  const exitMentionMode = () => {
+    setIsInMentionMode(false)
+    setShowMentionDropdown(false)
+    setMentionQuery('')
+    mentionStartIndexRef.current = -1
+    setSelectedMentionIndex(0)
+  }
+
   // Handle @mention detection and inline autocomplete
   const detectMention = (text: string, cursorPosition: number) => {
+    // First check if there's any @ in the entire text - if not, exit mention mode
+    if (text.indexOf('@') === -1) {
+      if (isInMentionMode) {
+        exitMentionMode()
+      }
+      return
+    }
+    
     const textBeforeCursor = text.slice(0, cursorPosition)
     const lastAtIndex = textBeforeCursor.lastIndexOf('@')
     
-    // Check if @ exists
+    // Check if @ exists before cursor - if not, exit mention mode explicitly
     if (lastAtIndex === -1) {
-      setCurrentSuggestion(null)
-      setShowMentionDropdown(false)
+      if (isInMentionMode) {
+        exitMentionMode()
+      }
       return
     }
     
     const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1)
     
-    // If there's whitespace or newline immediately after @, it's not a mention
+    // If there's whitespace or newline immediately after @, exit mention mode
     if (textAfterAt.match(/^\s/)) {
-      setCurrentSuggestion(null)
-      setShowMentionDropdown(false)
+      if (isInMentionMode) {
+        exitMentionMode()
+      }
       return
     }
     
-    // Check if mention is already complete (has space after it)
+    // Check if mention is already complete (has space after it) - exit mention mode
     const mentionText = textBeforeCursor.slice(lastAtIndex + 1)
     if (mentionText.includes(' ')) {
-      setCurrentSuggestion(null)
-      setShowMentionDropdown(false)
+      if (isInMentionMode) {
+        exitMentionMode()
+      }
       return
     }
     
-    // Check if cursor is after a space that follows the mention
+    // Check if cursor is after a space that follows the mention - exit mention mode
     if (cursorPosition > 0) {
       const charBeforeCursor = text[cursorPosition - 1]
       if (charBeforeCursor === ' ') {
         const textBeforeSpace = text.slice(0, cursorPosition - 1)
         const lastAtBeforeSpace = textBeforeSpace.lastIndexOf('@')
         if (lastAtBeforeSpace !== -1 && lastAtBeforeSpace === lastAtIndex) {
-          setCurrentSuggestion(null)
-          setShowMentionDropdown(false)
+          if (isInMentionMode) {
+            exitMentionMode()
+          }
           return
         }
       }
@@ -1212,9 +1296,15 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     // Check if there's already a space or end of word before @ (valid mention context)
     const charBeforeAt = lastAtIndex > 0 ? textBeforeCursor[lastAtIndex - 1] : ' '
     if (charBeforeAt !== ' ' && charBeforeAt !== '\n' && lastAtIndex > 0) {
-      setCurrentSuggestion(null)
-      setShowMentionDropdown(false)
+      if (isInMentionMode) {
+        exitMentionMode()
+      }
       return
+    }
+    
+    // Enter mention mode explicitly
+    if (!isInMentionMode) {
+      setIsInMentionMode(true)
     }
     
     mentionStartIndexRef.current = lastAtIndex
@@ -1245,17 +1335,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       if (newSelectedIndex !== selectedMentionIndex) {
         setSelectedMentionIndex(newSelectedIndex)
       }
-      
-      // Update inline suggestion for the selected mention
-      const selectedMention = mentions[newSelectedIndex]
-      const mentionText = selectedMention.type === 'library' ? '@Library'
-        : `@${selectedMention.name}`
-      // Calculate remaining text: everything after what user has typed
-      const remainingText = mentionText.slice(textAfterAt.length + 1) // +1 for @
-      setCurrentSuggestion(remainingText)
     } else {
       setShowMentionDropdown(false)
-      setCurrentSuggestion(null)
     }
   }
 
@@ -1269,38 +1350,81 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       fileType?: 'pdf' | 'docx'
     }> = []
     
-    // Always include @Library option (only if query matches or is empty)
-    if (!query || 'library'.includes(query)) {
+    // Only include @Library option if library is indexed and query matches
+    if (isLibraryIndexed && (!query || 'library'.includes(query))) {
       mentions.push({ type: 'library', name: 'Library' })
     }
     
-    // Filter library documents: only PDF and DOCX files from current project's library folder
-    // CRITICAL: libraryDocuments already filtered by projectId in loadMentionDocuments
-    // This ensures we only see library files from the current project
-    const libraryFiles = libraryDocuments.filter((doc: Document) => {
-      // Only include files in library folder
-      if (doc.folder !== 'library') return false
+    // Only show library files if library is indexed
+    if (isLibraryIndexed) {
+      // Filter library documents from allDocuments: only PDF and DOCX files from current project's library folder
+      const libraryFiles = allDocuments.filter((doc: Document) => {
+        // Only include files in library folder
+        if (doc.folder !== 'library') return false
+        
+        // Only include files from current project
+        if (projectId && doc.projectId !== projectId) return false
+        
+        // Only include PDF and DOCX files
+        const fileName = doc.title.toLowerCase()
+        const isPDF = fileName.endsWith('.pdf')
+        const isDOCX = fileName.endsWith('.docx')
+        if (!isPDF && !isDOCX) return false
+        
+        // Only include files that are indexed (status === 'completed')
+        const indexingStatus = libraryFileIndexingStatuses.get(doc.id)
+        if (!indexingStatus || indexingStatus.status !== 'completed') {
+          return false
+        }
+        
+        // Filter by query if provided
+        if (query) {
+          const docName = doc.title.toLowerCase()
+          return docName.includes(query) || doc.id.toLowerCase().includes(query)
+        }
+        
+        return true
+      })
       
-      // Double-check: only include files from current project
-      if (projectId && doc.projectId !== projectId) return false
+      // Sort library files to match FileExplorer order
+      // Sort by order if available, otherwise by creation time (ascending)
+      const sortDocuments = (docs: Document[]) => {
+        return [...docs].sort((a, b) => {
+          if (a.order !== undefined && b.order !== undefined) {
+            return a.order - b.order
+          }
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        })
+      }
       
-      // Only include PDF and DOCX files
-      const fileName = doc.title.toLowerCase()
-      const isPDF = fileName.endsWith('.pdf')
-      const isDOCX = fileName.endsWith('.docx')
-      if (!isPDF && !isDOCX) return false
+      const sortedLibraryFiles = sortDocuments(libraryFiles)
       
+      // Add library files to mentions
+      sortedLibraryFiles.forEach((doc: Document) => {
+        const fileName = doc.title.toLowerCase()
+        const fileType = fileName.endsWith('.pdf') ? 'pdf' : 'docx'
+        mentions.push({
+          type: 'file',
+          id: doc.id,
+          name: doc.title,
+          folder: 'library',
+          fileType
+        })
+      })
+    }
+    
+    // Add workspace files (folder === 'project' or undefined/null)
+    // libraryDocuments now contains only workspace files
+    const workspaceFiles = libraryDocuments.filter((doc: Document) => {
       // Filter by query if provided
       if (query) {
         const docName = doc.title.toLowerCase()
         return docName.includes(query) || doc.id.toLowerCase().includes(query)
       }
-      
       return true
     })
     
-    // Sort library files to match FileExplorer order
-    // Sort by order if available, otherwise by creation time (ascending)
+    // Sort workspace files
     const sortDocuments = (docs: Document[]) => {
       return [...docs].sort((a, b) => {
         if (a.order !== undefined && b.order !== undefined) {
@@ -1310,18 +1434,15 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       })
     }
     
-    const sortedLibraryFiles = sortDocuments(libraryFiles)
+    const sortedWorkspaceFiles = sortDocuments(workspaceFiles)
     
-    // Add library files to mentions
-    sortedLibraryFiles.forEach((doc: Document) => {
-      const fileName = doc.title.toLowerCase()
-      const fileType = fileName.endsWith('.pdf') ? 'pdf' : 'docx'
+    // Add workspace files to mentions
+    sortedWorkspaceFiles.forEach((doc: Document) => {
       mentions.push({
         type: 'file',
         id: doc.id,
         name: doc.title,
-        folder: 'library',
-        fileType
+        folder: doc.folder || 'project',
       })
     })
     
@@ -1356,8 +1477,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       currentValue.slice(mentionEnd)
     
     setInput(newValue)
-    setCurrentSuggestion(null)
-    setShowMentionDropdown(false)
+    
+    // Exit mention mode explicitly after inserting mention
+    exitMentionMode()
     
     // Set cursor position after the mention and space (highlighting is now persistent via overlay)
     // Use requestAnimationFrame to ensure the DOM has updated
@@ -1372,8 +1494,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         }
       }, 0)
     })
-    
-    mentionStartIndexRef.current = -1
   }
 
   const handleStopGeneration = async () => {
@@ -1535,14 +1655,32 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     throw new Error(data.error)
                   }
                   if (data.chunk) {
-                    assistantMessage.content += data.chunk
-                    setMessages(prev => {
-                      const updated = [...prev]
-                      updated[updated.length - 1] = { ...assistantMessage }
-                      return updated
-                    })
-                    // Update message during streaming (debounced)
-                    await saveMessage(assistantMessage, true)
+                    // Check if this is a metadata chunk
+                    if (data.chunk.includes('__METADATA__')) {
+                      const metadataMatch = data.chunk.match(/__METADATA__(.*?)__METADATA__/)
+                      if (metadataMatch) {
+                        try {
+                          const metadata = JSON.parse(metadataMatch[1])
+                          assistantMessage.reasoningMetadata = metadata
+                          setMessages(prev => {
+                            const updated = [...prev]
+                            updated[updated.length - 1] = { ...assistantMessage }
+                            return updated
+                          })
+                        } catch (parseError) {
+                          console.warn('Failed to parse metadata:', parseError)
+                        }
+                      }
+                    } else {
+                      assistantMessage.content += data.chunk
+                      setMessages(prev => {
+                        const updated = [...prev]
+                        updated[updated.length - 1] = { ...assistantMessage }
+                        return updated
+                      })
+                      // Update message during streaming (debounced)
+                      await saveMessage(assistantMessage, true)
+                    }
                   }
                 } catch (e) {
                   // If it's an error object, throw it to be caught by outer catch
@@ -1617,6 +1755,30 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   return (
     <>
       <style>{`
+        .ai-chat-ordered-list {
+          list-style: none;
+          counter-reset: list-counter;
+          margin-bottom: 18px;
+          padding-left: 28px;
+          margin-top: 12px;
+          color: ${textColor};
+          line-height: 1.8;
+          font-size: 14px;
+        }
+        .ai-chat-ordered-list > li {
+          counter-increment: list-counter;
+          position: relative;
+          margin-bottom: 4px;
+          line-height: 1.8;
+          color: ${textColor};
+          padding-left: 24px;
+        }
+        .ai-chat-ordered-list > li::before {
+          content: counter(list-counter) '）';
+          position: absolute;
+          left: 0;
+          font-weight: 500;
+        }
         @keyframes thinkingPulse {
           0%, 60%, 100% {
             opacity: 0.3;
@@ -1626,6 +1788,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             opacity: 1;
             transform: scale(1);
           }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
         }
         textarea::placeholder {
           color: ${theme === 'dark' ? '#666666' : '#B8B8B8'};
@@ -1674,7 +1839,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               width: '100%',
               display: 'flex',
               flexDirection: 'column',
-              padding: message.role === 'assistant' ? '16px 16px' : '8px 16px',
+              padding: message.role === 'assistant' ? '12px 16px' : '8px 16px',
               backgroundColor: brighterBg,
             }}
           >
@@ -1774,6 +1939,84 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   cursor: 'text'
                 }}
               >
+                {/* Show reasoning metadata if available */}
+                {message.reasoningMetadata && message.reasoningMetadata.actions && Object.keys(message.reasoningMetadata.actions).length > 0 && (
+                  <div
+                    style={{
+                      fontSize: '12px',
+                      color: theme === 'dark' ? '#888888' : '#999999',
+                      marginBottom: '4px',
+                      opacity: 0.7,
+                      lineHeight: '1.4'
+                    }}
+                  >
+                    {message.reasoningMetadata.actions && Object.entries(message.reasoningMetadata.actions).map(([action, data], index, arr) => {
+                      const actionKey = `${message.id}:${action}`
+                      const isExpanded = expandedActions.has(actionKey)
+                      const hasFiles = data.fileIds && data.fileIds.length > 0
+                      
+                      return (
+                        <span key={action} style={{ marginRight: index < arr.length - 1 ? '12px' : '0' }}>
+                          {hasFiles ? (
+                            <>
+                              <span
+                                onClick={() => {
+                                  setExpandedActions(prev => {
+                                    const next = new Set(prev)
+                                    if (next.has(actionKey)) {
+                                      next.delete(actionKey)
+                                    } else {
+                                      next.add(actionKey)
+                                    }
+                                    return next
+                                  })
+                                }}
+                                style={{
+                                  cursor: 'pointer',
+                                  userSelect: 'none',
+                                  transition: 'color 0.2s ease'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.color = theme === 'dark' ? '#aaaaaa' : '#666666'
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.color = theme === 'dark' ? '#888888' : '#999999'
+                                }}
+                              >
+                                {action} {data.fileCount > 0 ? `${data.fileCount} ${data.fileCount === 1 ? 'file' : 'files'}` : ''}
+                              </span>
+                              {isExpanded && data.fileIds && (
+                                <div
+                                  style={{
+                                    marginTop: '4px',
+                                    marginLeft: '8px',
+                                    paddingLeft: '8px',
+                                    borderLeft: `2px solid ${theme === 'dark' ? '#444444' : '#cccccc'}`,
+                                    fontSize: '11px',
+                                    opacity: 0.8
+                                  }}
+                                >
+                                  {data.fileIds.map((fileId: string) => {
+                                    const doc = allDocuments.find((d: Document) => d.id === fileId)
+                                    return (
+                                      <div key={fileId} style={{ marginTop: '2px' }}>
+                                        {doc ? doc.title : fileId.substring(0, 8) + '...'}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <span>
+                              {action} {data.fileCount > 0 ? `${data.fileCount} ${data.fileCount === 1 ? 'file' : 'files'}` : ''}
+                            </span>
+                          )}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )}
                 {(() => {
                   const contentLower = message.content.toLowerCase()
                   const isError = contentLower.includes('api quota exceeded') ||
@@ -1845,63 +2088,64 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   remarkPlugins={[remarkGfm, remarkMath]}
                   rehypePlugins={[rehypeKatex]}
                   components={{
-                    // Headers
+                    // Headers - smaller sizes
                     h1: ({node, ...props}) => <h1 style={{ 
-                      fontSize: '26px', 
+                      fontSize: '22px', 
                       fontWeight: 700, 
-                      marginTop: '28px', 
-                      marginBottom: '16px', 
+                      marginTop: '24px', 
+                      marginBottom: '12px', 
                       color: textColor, 
                       lineHeight: '1.3',
                       letterSpacing: '-0.02em'
                     }} {...props} />,
                     h2: ({node, ...props}) => <h2 style={{ 
-                      fontSize: '22px', 
-                      fontWeight: 600, 
-                      marginTop: '24px', 
-                      marginBottom: '12px', 
+                      fontSize: '18px', 
+                      fontWeight: 650, 
+                      marginTop: '20px', 
+                      marginBottom: '10px', 
                       color: textColor, 
                       lineHeight: '1.3',
                       letterSpacing: '-0.01em'
                     }} {...props} />,
                     h3: ({node, ...props}) => <h3 style={{ 
-                      fontSize: '19px', 
-                      fontWeight: 600, 
-                      marginTop: '20px', 
-                      marginBottom: '10px', 
-                      color: textColor, 
-                      lineHeight: '1.3'
-                    }} {...props} />,
-                    h4: ({node, ...props}) => <h4 style={{ 
-                      fontSize: '17px', 
+                      fontSize: '16px', 
                       fontWeight: 600, 
                       marginTop: '18px', 
                       marginBottom: '10px', 
                       color: textColor, 
                       lineHeight: '1.3'
                     }} {...props} />,
-                    h5: ({node, ...props}) => <h5 style={{ 
-                      fontSize: '16px', 
+                    h4: ({node, ...props}) => <h4 style={{ 
+                      fontSize: '15px', 
                       fontWeight: 600, 
                       marginTop: '16px', 
                       marginBottom: '8px', 
                       color: textColor, 
                       lineHeight: '1.3'
                     }} {...props} />,
-                    h6: ({node, ...props}) => <h6 style={{ 
-                      fontSize: '15px', 
+                    h5: ({node, ...props}) => <h5 style={{ 
+                      fontSize: '14px', 
                       fontWeight: 600, 
                       marginTop: '14px', 
                       marginBottom: '8px', 
                       color: textColor, 
                       lineHeight: '1.3'
                     }} {...props} />,
-                    // Paragraphs
+                    h6: ({node, ...props}) => <h6 style={{ 
+                      fontSize: '13px', 
+                      fontWeight: 600, 
+                      marginTop: '12px', 
+                      marginBottom: '6px', 
+                      color: textColor, 
+                      lineHeight: '1.3'
+                    }} {...props} />,
+                    // Paragraphs - more spacing
                     p: ({node, ...props}) => <p style={{ 
-                      marginBottom: '14px', 
+                      marginBottom: '16px', 
                       marginTop: 0, 
-                      lineHeight: '1.7', 
-                      color: textColor 
+                      lineHeight: '1.75', 
+                      color: textColor,
+                      fontSize: '14px'
                     }} {...props} />,
                     // Code blocks - handle inline code
                     code: ({node, inline, className, children, ...props}: any) => {
@@ -1940,31 +2184,36 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         <div style={{
                           position: 'relative',
                           marginTop: '16px',
-                          marginBottom: '16px'
+                          marginBottom: '16px',
+                          width: '100%',
+                          maxWidth: '100%',
+                          boxSizing: 'border-box'
                         }}>
                           <div style={{
                             position: 'relative',
                             backgroundColor: theme === 'dark' ? '#000000' : '#f8f9fa',
                             borderRadius: '6px',
-                            overflow: 'hidden'
+                            overflowX: 'hidden',
+                            overflowY: 'visible',
+                            width: '100%',
+                            maxWidth: '100%',
+                            boxSizing: 'border-box'
                           }}>
                             {/* Language name overlay - top left */}
-                            {language && (
-                              <div style={{
-                                position: 'absolute',
-                                top: '8px',
-                                left: '12px',
-                                zIndex: 2,
-                                fontSize: '11px',
-                                color: theme === 'dark' ? '#8e8e93' : '#6e6e73',
-                                fontWeight: 500,
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.5px',
-                                pointerEvents: 'none'
-                              }}>
-                                {language}
-                              </div>
-                            )}
+                            <div style={{
+                              position: 'absolute',
+                              top: '8px',
+                              left: '12px',
+                              zIndex: 2,
+                              fontSize: '11px',
+                              color: theme === 'dark' ? '#8e8e93' : '#6e6e73',
+                              fontWeight: 500,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.5px',
+                              pointerEvents: 'none'
+                            }}>
+                              {language || 'text'}
+                            </div>
                             {/* Copy button overlay - top right */}
                             <button
                               onClick={() => handleCopyCode(codeString, blockId)}
@@ -2005,48 +2254,74 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               )}
                             </button>
                             {/* Code content */}
-                            <SyntaxHighlighter
-                              language={language || 'text'}
-                              style={theme === 'dark' ? vscDarkPlus : vs}
-                              customStyle={{
-                                margin: 0,
-                                padding: '16px',
-                                paddingTop: language ? '40px' : '16px',
-                                fontSize: '13px',
-                                lineHeight: '1.5',
-                                fontFamily: '"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace',
-                                backgroundColor: theme === 'dark' ? '#000000' : '#f8f9fa',
-                                borderRadius: '6px'
-                              }}
-                              PreTag="div"
-                            >
-                              {codeString}
-                            </SyntaxHighlighter>
+                            <div style={{
+                              width: '100%',
+                              maxWidth: '100%',
+                              overflow: 'hidden'
+                            }}>
+                              <SyntaxHighlighter
+                                language={language || 'text'}
+                                style={theme === 'dark' ? vscDarkPlus : vs}
+                                customStyle={{
+                                  margin: 0,
+                                  padding: '16px',
+                                  paddingTop: '40px',
+                                  fontSize: '13px',
+                                  lineHeight: '1.5',
+                                  fontFamily: '"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace',
+                                  backgroundColor: 'transparent',
+                                  borderRadius: '6px',
+                                  whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-word',
+                                  overflow: 'visible',
+                                  overflowX: 'hidden',
+                                  overflowY: 'visible',
+                                  width: '100%',
+                                  maxWidth: '100%',
+                                  boxSizing: 'border-box',
+                                  display: 'block',
+                                  color: theme === 'dark' ? '#e0e0e0' : '#1a1a1a'
+                                }}
+                                PreTag="div"
+                                codeTagProps={{
+                                  style: {
+                                    display: 'block',
+                                    width: '100%',
+                                    maxWidth: '100%',
+                                    overflow: 'visible',
+                                    whiteSpace: 'pre-wrap',
+                                    wordBreak: 'break-word',
+                                    boxSizing: 'border-box',
+                                    color: theme === 'dark' ? '#e0e0e0' : '#1a1a1a'
+                                  }
+                                }}
+                              >
+                                {codeString}
+                              </SyntaxHighlighter>
+                            </div>
                           </div>
                         </div>
                       )
                     },
                     // Lists
-                    ul: ({node, ...props}) => <ul style={{ 
-                      marginBottom: '14px', 
+                    ul: ({node, ...props}: any) => <ul style={{ 
+                      marginBottom: '18px', 
                       paddingLeft: '28px', 
-                      marginTop: '8px', 
+                      marginTop: '12px', 
                       listStyleType: 'disc',
                       color: textColor,
-                      lineHeight: '1.7'
+                      lineHeight: '1.8',
+                      fontSize: '14px'
                     }} {...props} />,
-                    ol: ({node, ...props}) => <ol style={{ 
-                      marginBottom: '14px', 
-                      paddingLeft: '28px', 
-                      marginTop: '8px', 
+                    ol: ({node, ...props}: any) => {
+                      // Use custom counter style for Chinese parentheses format (1) 2) 3)...)
+                      return <ol className="ai-chat-ordered-list" {...props} />
+                    },
+                    li: ({node, ...props}: any) => <li style={{ 
+                      marginBottom: '4px', 
+                      lineHeight: '1.8', 
                       color: textColor,
-                      lineHeight: '1.7'
-                    }} {...props} />,
-                    li: ({node, ...props}) => <li style={{ 
-                      marginBottom: '8px', 
-                      lineHeight: '1.7', 
-                      color: textColor,
-                      paddingLeft: '4px'
+                      paddingLeft: '6px'
                     }} {...props} />,
                     // Links
                     a: ({node, ...props}: any) => <a 
@@ -2088,13 +2363,15 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       borderTop: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`, 
                       margin: '24px 0' 
                     }} {...props} />,
-                    // Tables
+                    // Tables - better UI
                     table: ({node, ...props}) => <div style={{ 
                       overflowX: 'auto', 
-                      marginBottom: '16px', 
-                      marginTop: '12px',
+                      marginBottom: '18px', 
+                      marginTop: '14px',
                       borderRadius: '6px',
-                      border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`
+                      border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e5e5e5'}`,
+                      backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fafafa',
+                      overflow: 'hidden'
                     }}>
                       <table style={{ 
                         borderCollapse: 'collapse', 
@@ -2103,32 +2380,40 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       }} {...props} />
                     </div>,
                     thead: ({node, ...props}) => <thead style={{ 
-                      backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa' 
+                      backgroundColor: theme === 'dark' ? '#222222' : '#f5f5f5',
+                      borderBottom: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e5e5e5'}`
                     }} {...props} />,
                     tbody: ({node, ...props}) => <tbody {...props} />,
                     th: ({node, ...props}) => <th style={{ 
-                      border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`, 
-                      padding: '12px 16px', 
+                      border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e5e5e5'}`, 
+                      padding: '10px 14px', 
                       textAlign: 'left',
                       fontWeight: 600,
-                      fontSize: '14px',
-                      color: textColor,
-                      backgroundColor: theme === 'dark' ? '#252525' : '#f8f9fa'
+                      fontSize: '12px',
+                      color: theme === 'dark' ? '#d0d0d0' : '#333333',
+                      backgroundColor: theme === 'dark' ? '#222222' : '#f5f5f5',
+                      letterSpacing: '0.01em',
+                      textTransform: 'uppercase'
                     }} {...props} />,
                     td: ({node, ...props}) => <td style={{ 
-                      border: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`, 
-                      padding: '12px 16px',
+                      border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e5e5e5'}`, 
+                      padding: '10px 14px',
                       fontSize: '14px',
-                      color: textColor
+                      color: textColor,
+                      lineHeight: '1.5',
+                      backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff'
                     }} {...props} />,
-                    // Strong and emphasis
+                    // Strong and emphasis - make them much more prominent
                     strong: ({node, ...props}) => <strong style={{ 
-                      fontWeight: 600,
-                      color: textColor
+                      fontWeight: 700,
+                      color: textColor,
+                      fontSize: '14px',
+                      letterSpacing: '0.01em'
                     }} {...props} />,
                     em: ({node, ...props}) => <em style={{ 
                       fontStyle: 'italic',
-                      color: textColor
+                      color: textColor,
+                      fontWeight: 500
                     }} {...props} />,
                   }}
                 >
@@ -2152,50 +2437,29 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           }}>
             <div style={{
               display: 'flex',
-              gap: '4px',
-              alignItems: 'center'
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '16px',
+              height: '16px',
+              flexShrink: 0,
             }}>
-              <div style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                backgroundColor: theme === 'dark' ? '#666' : '#999',
-                animation: 'thinkingPulse 1.4s ease-in-out infinite',
-                animationDelay: '0s'
-              }} />
-              <div style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                backgroundColor: theme === 'dark' ? '#666' : '#999',
-                animation: 'thinkingPulse 1.4s ease-in-out infinite',
-                animationDelay: '0.2s'
-              }} />
-              <div style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                backgroundColor: theme === 'dark' ? '#666' : '#999',
-                animation: 'thinkingPulse 1.4s ease-in-out infinite',
-                animationDelay: '0.4s'
-              }} />
+              <span
+                className="indexing-spinner"
+                style={{
+                  width: '11px',
+                  height: '11px',
+                  border: `2px solid ${theme === 'dark' ? '#666666' : '#cccccc'}`,
+                  borderTopColor: theme === 'dark' ? '#999999' : '#888888',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite',
+                  opacity: 0.35,
+                }}
+              />
             </div>
             <span style={{
               color: textColor,
               fontWeight: 400
             }}>{getSearchStatusText()}</span>
-            <style>{`
-              @keyframes pulse {
-                0%, 60%, 100% {
-                  opacity: 0.3;
-                  transform: scale(0.8);
-                }
-                30% {
-                  opacity: 1;
-                  transform: scale(1);
-                }
-              }
-            `}</style>
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -2307,7 +2571,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             padding: '4px 6px',
             backgroundColor: inputBg,
             borderRadius: '6px',
-            border: `1px solid ${isInputFocused ? (theme === 'dark' ? '#3e3e42' : '#DADCE0') : borderColor}`,
+            border: `1px solid ${isInputFocused ? (theme === 'dark' ? '#3a3a3a' : '#DADCE0') : borderColor}`,
             display: 'flex',
             flexDirection: 'column',
             gap: '8px',
@@ -2348,13 +2612,15 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     return
                   }
                   setIsInputFocused(false)
-                  setCurrentSuggestion(null)
-                  setShowMentionDropdown(false)
+                  // Exit mention mode explicitly on blur
+                  if (isInMentionMode) {
+                    exitMentionMode()
+                  }
                 }}
                 onPaste={handlePaste}
                 onKeyDown={(e) => {
                   // Handle mention autocomplete navigation
-                  if (showMentionDropdown || currentSuggestion) {
+                  if (showMentionDropdown) {
                     const mentions = getFilteredMentions()
                     
                     if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && showMentionDropdown)) {
@@ -2370,14 +2636,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       e.preventDefault()
                       const newIndex = selectedMentionIndex < mentions.length - 1 ? selectedMentionIndex + 1 : 0
                       setSelectedMentionIndex(newIndex)
-                      const selectedMention = mentions[newIndex]
-                      if (selectedMention) {
-                        const mentionText = selectedMention.type === 'library' ? '@Library'
-                          : `@${selectedMention.name}`
-                        const textAfterAt = textareaRef.current?.value.slice(mentionStartIndexRef.current + 1, textareaRef.current?.selectionStart || 0) || ''
-                        const remainingText = mentionText.slice(textAfterAt.length + 1)
-                        setCurrentSuggestion(remainingText)
-                      }
                       return
                     }
                     
@@ -2385,21 +2643,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       e.preventDefault()
                       const newIndex = selectedMentionIndex > 0 ? selectedMentionIndex - 1 : mentions.length - 1
                       setSelectedMentionIndex(newIndex)
-                      const selectedMention = mentions[newIndex]
-                      if (selectedMention) {
-                        const mentionText = selectedMention.type === 'library' ? '@Library'
-                          : `@${selectedMention.name}`
-                        const textAfterAt = textareaRef.current?.value.slice(mentionStartIndexRef.current + 1, textareaRef.current?.selectionStart || 0) || ''
-                        const remainingText = mentionText.slice(textAfterAt.length + 1)
-                        setCurrentSuggestion(remainingText)
-                      }
                       return
                     }
                     
                     if (e.key === 'Escape') {
                       e.preventDefault()
-                      setCurrentSuggestion(null)
-                      setShowMentionDropdown(false)
+                      exitMentionMode()
                       return
                     }
                   }
@@ -2424,7 +2673,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         const textAfterMention = text.slice(mentionEnd)
                         
                         // Find documents that start with the mention name (case-insensitive)
-                        const potentialDocs = libraryDocuments.filter(doc => {
+                        // Search in both workspace files and library files (if indexed)
+                        const allMentionableDocs = isLibraryIndexed 
+                          ? [...libraryDocuments, ...allDocuments.filter(doc => doc.folder === 'library' && doc.projectId === projectId)]
+                          : libraryDocuments
+                        const potentialDocs = allMentionableDocs.filter(doc => {
                           const docTitle = doc.title
                           return docTitle.toLowerCase().startsWith(mentionName.toLowerCase())
                         })
@@ -2456,11 +2709,13 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         const newValue = text.slice(0, mentionStart) + text.slice(deleteEnd)
                         setInput(newValue)
                         
-                        // Set cursor position where the mention was
+                        // Set cursor position where the mention was and check if we should exit mention mode
                         setTimeout(() => {
                           if (textareaRef.current) {
                             textareaRef.current.setSelectionRange(mentionStart, mentionStart)
                             textareaRef.current.focus()
+                            // Check if we should exit mention mode after deletion
+                            detectMention(newValue, mentionStart)
                           }
                         }, 0)
                         return
@@ -2520,8 +2775,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               const mentionName = match[1]
               const isLibrary = mentionName === 'Library'
               
-              // Check for exact match first
-              let matchedDoc = libraryDocuments.find(doc => doc.title === mentionName || doc.id === mentionName)
+              // Check for exact match first in both workspace files and library files (if indexed)
+              const allMentionableDocs = isLibraryIndexed 
+                ? [...libraryDocuments, ...allDocuments.filter(doc => doc.folder === 'library' && doc.projectId === projectId)]
+                : libraryDocuments
+              let matchedDoc = allMentionableDocs.find(doc => doc.title === mentionName || doc.id === mentionName)
               let highlightEnd = match.index + match[0].length
               let highlightText = match[0]
               
@@ -2532,7 +2790,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 const textAfterMention = input.slice(highlightEnd)
                 
                 // Find documents that start with the mention name (case-insensitive)
-                const potentialDocs = libraryDocuments.filter(doc => {
+                const potentialDocs = allMentionableDocs.filter(doc => {
                   const docTitle = doc.title
                   return docTitle.toLowerCase().startsWith(mentionName.toLowerCase())
                 })
@@ -2551,15 +2809,27 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 }
               }
               
-              const isFile = !!matchedDoc || (!isLibrary && libraryDocuments.some(doc => doc.title === mentionName || doc.id === mentionName))
+              const isFile = !!matchedDoc || (!isLibrary && allMentionableDocs.some(doc => doc.title === mentionName || doc.id === mentionName))
               
-              highlights.push({
-                start: match.index,
-                end: highlightEnd,
-                text: highlightText,
-                isLibrary,
-                isFile
-              })
+              // Only highlight if the mention is complete (followed by space or at end) AND matches a valid document
+              // A mention is complete/confirmed when:
+              // 1. It's followed by a space or is at the end of the input
+              // 2. AND it matches a valid document (Library or a matched file)
+              const textAfterHighlight = input.slice(highlightEnd)
+              const isFollowedBySpaceOrEnd = textAfterHighlight.length === 0 || textAfterHighlight.startsWith(' ')
+              const matchesValidDocument = isLibrary || !!matchedDoc // Must have an exact match (Library or matchedDoc)
+              const isComplete = isFollowedBySpaceOrEnd && matchesValidDocument
+              
+              // Only add highlight if mention is complete/confirmed
+              if (isComplete) {
+                highlights.push({
+                  start: match.index,
+                  end: highlightEnd,
+                  text: highlightText,
+                  isLibrary,
+                  isFile
+                })
+              }
             }
             
             if (highlights.length === 0) return null
@@ -2604,9 +2874,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         style={{
                           backgroundColor: theme === 'dark' 
                             ? (highlight.isLibrary ? '#2d4a5c' : highlight.isFile ? '#3d2d4a' : '#3d3d3d')
-                            : (highlight.isLibrary ? '#e8f0fe' : highlight.isFile ? '#f3e5f5' : '#f1f3f4'),
-                          color: theme === 'dark' ? '#ffffff' : textColor, // White for dark theme, regular text color for light theme
-                          borderRadius: '6px',
+                            : (highlight.isLibrary ? '#e8f0fe' : highlight.isFile ? '#e3f2fd' : '#f1f3f4'), // Pale blue for confirmed file mentions in light theme
+                          color: theme === 'dark' ? '#ffffff' : textColor, // Normal text color
+                          borderRadius: '3px',
                           fontWeight: 'normal', // Same weight as regular text
                           padding: '2px 0', // Only vertical padding to avoid covering adjacent characters
                           display: 'inline',
@@ -2631,79 +2901,73 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             )
           })()}
           
-          {/* Inline Autocomplete Suggestion */}
-          {currentSuggestion && textareaRef.current && (
-            <div
-              style={{
-                position: 'absolute',
-                pointerEvents: 'none',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                padding: '4px 6px',
-                fontSize: '13px',
-                fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
-                lineHeight: '1.6',
-                color: 'transparent',
-                whiteSpace: 'pre-wrap',
-                wordWrap: 'break-word',
-                overflow: 'hidden',
-                zIndex: 2
-              }}
-            >
-              {input}
-              <span style={{
-                color: theme === 'dark' ? 'rgba(214, 214, 221, 0.4)' : 'rgba(95, 99, 104, 0.4)'
-              }}>
-                {currentSuggestion}
-              </span>
-            </div>
-          )}
-          
           {/* Mention Autocomplete Dropdown */}
           {showMentionDropdown && textareaRef.current && (() => {
             const mentions = getFilteredMentions()
             if (mentions.length === 0) return null
             
-            // Calculate dropdown position - show ABOVE the @ symbol
+            // Calculate dropdown position - show ABOVE the @ symbol using fixed positioning
             const textarea = textareaRef.current
             const textareaRect = textarea.getBoundingClientRect()
-            const containerRect = unifiedContainerRef.current?.getBoundingClientRect()
             
-            // Estimate cursor position
+            // Find the @ symbol position
             const textBeforeCursor = textarea.value.slice(0, textarea.selectionStart)
-            const lines = textBeforeCursor.split('\n')
-            const currentLine = lines.length - 1
-            const lineStart = textBeforeCursor.lastIndexOf('\n') + 1
+            const lastAtIndex = textBeforeCursor.lastIndexOf('@')
             
-            // Create a temporary span to measure text width
+            if (lastAtIndex === -1) return null
+            
+            // Get text before @ on the current line
+            const textBeforeAt = textBeforeCursor.slice(0, lastAtIndex)
+            const lines = textBeforeAt.split('\n')
+            const currentLine = lines.length - 1
+            const lineStart = textBeforeAt.lastIndexOf('\n') + 1
+            const textOnCurrentLineBeforeAt = textBeforeAt.slice(lineStart)
+            
+            // Create a temporary span to measure text width up to @ symbol
             const tempSpan = document.createElement('span')
             tempSpan.style.visibility = 'hidden'
             tempSpan.style.position = 'absolute'
             tempSpan.style.fontSize = '13px'
             tempSpan.style.fontFamily = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif'
             tempSpan.style.whiteSpace = 'pre'
-            tempSpan.textContent = textBeforeCursor.slice(lineStart, textBeforeCursor.length)
+            tempSpan.style.lineHeight = '1.6'
+            tempSpan.textContent = textOnCurrentLineBeforeAt
             document.body.appendChild(tempSpan)
-            const textWidth = tempSpan.offsetWidth
+            const textWidthToAt = tempSpan.offsetWidth
             document.body.removeChild(tempSpan)
             
-            // Calculate line height (approximate)
-            const lineHeight = 20.8 // Same as used in calculation
+            // Calculate line height (approximate, matching textarea line-height: 1.6)
+            const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 20.8
             
-            // Position dropdown ABOVE the cursor line
-            // Calculate cursor line bottom position relative to container
-            const cursorLineBottom = containerRect 
-              ? (textareaRect.top - containerRect.top + (currentLine + 1) * lineHeight)
-              : 0
+            // Calculate the @ symbol position relative to viewport
+            // Top of the line containing @ (accounting for textarea padding-top: 4px)
+            const lineTop = textareaRect.top + 4 + (currentLine * lineHeight)
+            // Left position of @ symbol (accounting for textarea padding-left: 6px)
+            const atLeft = textareaRect.left + 6 + textWidthToAt
             
-            // Position dropdown above the cursor line using bottom positioning
-            // bottom = distance from container bottom to cursor line bottom
-            const dropdownBottom = containerRect 
-              ? (containerRect.height - cursorLineBottom)
-              : 0
-            const dropdownLeft = containerRect ? (textareaRect.left - containerRect.left + textWidth + 6) : 0
+            // Position dropdown right above the @ symbol
+            let dropdownTop = lineTop - 4 // 4px gap above
+            let dropdownLeft = atLeft
+            let positionAbove = true // Track if we're positioning above or below
+            
+            // Ensure dropdown doesn't go off-screen (basic bounds checking)
+            const dropdownHeight = 180 // maxHeight
+            if (dropdownTop - dropdownHeight < 0) {
+              // If dropdown would go above viewport, position it below instead
+              dropdownTop = lineTop + lineHeight + 4
+              positionAbove = false
+            }
+            
+            // Ensure dropdown doesn't go off right edge
+            const dropdownWidth = 220 // maxWidth
+            if (dropdownLeft + dropdownWidth > window.innerWidth) {
+              dropdownLeft = window.innerWidth - dropdownWidth - 10 // 10px margin from edge
+            }
+            
+            // Ensure dropdown doesn't go off left edge
+            if (dropdownLeft < 10) {
+              dropdownLeft = 10
+            }
             
             // Match model dropdown design
             const dropdownBg = theme === 'dark' ? '#1e1e1e' : '#ffffff'
@@ -2720,31 +2984,30 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               <div
                 ref={mentionDropdownRef}
                 style={{
-                  position: 'absolute',
-                  bottom: `${dropdownBottom}px`,
+                  position: 'fixed',
+                  top: `${dropdownTop}px`,
                   left: `${dropdownLeft}px`,
                   backgroundColor: dropdownBg,
                   border: `1px solid ${dropdownBorder}`,
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   boxShadow: dropdownShadow,
-                  minWidth: '240px',
-                  maxWidth: '350px',
-                  maxHeight: '300px',
+                  minWidth: '160px',
+                  maxWidth: '220px',
+                  maxHeight: '180px',
                   overflowY: 'auto',
-                  zIndex: 1000,
-                  padding: '6px',
+                  zIndex: 10000,
+                  padding: '4px',
                   marginBottom: '4px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '2px',
-                  fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                  gap: '1px',
+                  fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  transform: positionAbove ? 'translateY(-100%)' : 'none' // Position above or below based on available space
                 }}
                 onMouseDown={(e) => e.preventDefault()} // Prevent textarea blur
               >
                 {mentions.map((mention, index) => {
                   const isSelected = index === selectedMentionIndex
-                  const mentionText = mention.type === 'library' ? '@Library'
-                    : `@${mention.name}`
                   // Display text without @ symbol in the menu
                   const displayText = mention.type === 'library' ? 'Library'
                     : mention.name
@@ -2756,23 +3019,20 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         insertMention(mention)
                       }}
                       style={{
-                        padding: '10px 14px',
-                        borderRadius: '6px',
+                        padding: '6px 10px',
+                        borderRadius: '4px',
                         cursor: 'pointer',
                         backgroundColor: isSelected ? itemSelectedBg : 'transparent',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '10px',
-                        transition: 'all 0.15s',
+                        gap: '8px',
+                        transition: 'background-color 0.1s ease',
                         border: 'none',
                         width: '100%',
                         textAlign: 'left'
                       }}
                       onMouseEnter={(e) => {
                         setSelectedMentionIndex(index)
-                        const textAfterAt = textareaRef.current?.value.slice(mentionStartIndexRef.current + 1, textareaRef.current?.selectionStart || 0) || ''
-                        const remainingText = mentionText.slice(textAfterAt.length + 1)
-                        setCurrentSuggestion(remainingText)
                         if (!isSelected) {
                           e.currentTarget.style.backgroundColor = itemHoverBg
                         }
@@ -2785,19 +3045,19 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     >
                       {/* Icon */}
                       <div style={{
-                        width: '20px',
-                        height: '20px',
+                        width: '14px',
+                        height: '14px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         flexShrink: 0
                       }}>
                         {mention.type === 'library' ? (
-                          <FolderIcon style={{ fontSize: '18px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
+                          <FolderIcon style={{ fontSize: '14px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
                         ) : mention.fileType === 'pdf' ? (
-                          <PictureAsPdfIcon style={{ fontSize: '18px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
+                          <PictureAsPdfIcon style={{ fontSize: '14px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
                         ) : (
-                          <FileCopyOutlinedIcon style={{ fontSize: '18px', color: theme === 'dark' ? '#34a853' : '#137333' }} />
+                          <InsertDriveFileOutlinedIcon style={{ fontSize: '14px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
                         )}
                       </div>
                       
@@ -2809,13 +3069,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         alignItems: 'center'
                       }}>
                         <div style={{
-                          fontSize: '13px',
-                          fontWeight: '300',
+                          fontSize: '12px',
+                          fontWeight: '400',
                           color: isSelected ? textColorSelected : textColor,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                          fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                          lineHeight: '1.4'
                         }}>
                           {displayText}
                         </div>
@@ -3875,12 +4136,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             />
           </div>
 
-          {/* Smart Indexing Option */}
+          {/* Library Indexing Option */}
           <div style={{ marginBottom: '20px' }}>
             <label
               style={{
                 display: 'flex',
-                alignItems: 'flex-start',
+                alignItems: 'center',
                 cursor: 'pointer',
                 fontSize: '13px',
                 color: theme === 'dark' ? '#e0e0e0' : '#202124',
@@ -3891,10 +4152,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               <div
                 style={{
                   position: 'relative',
-                  width: '18px',
-                  height: '18px',
+                  width: '16px',
+                  height: '16px',
                   flexShrink: 0,
-                  marginTop: '2px',
                 }}
               >
                 <input
@@ -3912,8 +4172,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   }}
                   style={{
                     position: 'absolute',
-                    width: '18px',
-                    height: '18px',
+                    width: '16px',
+                    height: '16px',
                     margin: 0,
                     cursor: 'pointer',
                     opacity: 0,
@@ -3925,12 +4185,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     position: 'absolute',
                     top: 0,
                     left: 0,
-                    width: '18px',
-                    height: '18px',
+                    width: '16px',
+                    height: '16px',
                     border: `2px solid ${smartIndexing 
                       ? (theme === 'dark' ? '#4a9eff' : '#1a73e8')
                       : (theme === 'dark' ? '#444' : '#dadce0')}`,
-                    borderRadius: '6px',
+                    borderRadius: '5px',
                     backgroundColor: smartIndexing
                       ? (theme === 'dark' ? '#4a9eff' : '#1a73e8')
                       : (theme === 'dark' ? '#252525' : '#ffffff'),
@@ -3942,8 +4202,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 >
                   {smartIndexing && (
                     <svg
-                      width="12"
-                      height="12"
+                      width="10"
+                      height="10"
                       viewBox="0 0 12 12"
                       fill="none"
                       xmlns="http://www.w3.org/2000/svg"
@@ -3966,25 +4226,34 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 <div
                   style={{
                     fontSize: '13px',
-                    fontWeight: '500',
-                    color: theme === 'dark' ? '#e0e0e0' : '#202124',
-                    marginBottom: '4px',
-                  }}
-                >
-                  Smart indexing
-                </div>
-                <p
-                  style={{
-                    fontSize: '11px',
+                    fontWeight: '400',
                     color: theme === 'dark' ? '#999' : '#666',
-                    margin: 0,
-                    lineHeight: '1.4',
                   }}
                 >
-                  Use a single API key to ensure stable AI document search.
-                </p>
+                  Library indexing
+                </div>
               </div>
             </label>
+          </div>
+
+          {/* Tip: Use single API key */}
+          <div style={{ 
+            marginTop: '12px',
+            padding: '8px 10px',
+            borderRadius: '6px',
+            backgroundColor: theme === 'dark' ? '#1e1e1e' : '#fafafa',
+            border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e8e8e8'}`,
+          }}>
+            <p
+              style={{
+                fontSize: '11px',
+                color: theme === 'dark' ? '#999' : '#666',
+                margin: 0,
+                lineHeight: '1.4',
+              }}
+            >
+              Use a single API key to ensure stable AI semantic search.
+            </p>
           </div>
         </div>
       )}

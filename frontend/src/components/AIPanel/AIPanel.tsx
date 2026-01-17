@@ -819,6 +819,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
                 fontSize: '13px',
                 fontWeight: 500,
                 color: activeChatId === chat.id ? textColor : '#6b6b6b',
+                opacity: activeChatId === chat.id ? 0.9 : 0.7,
                 overflow: 'hidden',
                 textOverflow: 'clip',
                 whiteSpace: 'nowrap',
