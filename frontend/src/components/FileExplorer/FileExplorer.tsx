@@ -511,6 +511,7 @@ function FileExplorer({
   const textColor = theme === 'dark' ? '#cccccc' : '#202124'
   const folderTextColor = theme === 'dark' ? '#b5b5b5' : '#4a4a4a' // Slightly lighter color for folder names and arrows
   const indicatorColor = theme === 'dark' ? '#999999' : '#c0c0c0' // Light grey color for drop indicator
+  const borderColor = theme === 'dark' ? '#232323' : '#ecedee' // Same as separator color
   
   // Dropdown menu colors (matching Toolbar.tsx)
   const dropdownBg = theme === 'dark' ? '#141414' : '#ffffff'
@@ -828,7 +829,7 @@ function FileExplorer({
     return null
   }
 
-  const renderFileItem = (item: FileItem, indentLevel: number = 0): JSX.Element => {
+  const renderFileItem = (item: FileItem, indentLevel: number = 0, index: number = 0): JSX.Element => {
     const isSelected = selectedId === item.id
     const isRenaming = renamingId === item.id
     const isFolder = item.type === 'folder'
@@ -846,8 +847,16 @@ function FileExplorer({
     const showIndicatorAbove = !isFolder && draggedItemId && dropTargetId === item.id && dropPosition === 'above'
     const showIndicatorBelow = !isFolder && draggedItemId && dropTargetId === item.id && dropPosition === 'below'
 
+    // Animation styles for file items (not folders) - fade in and slide down from top
+    const animationStyle = !isFolder ? {
+      animation: 'fileAppear 0.3s ease-out forwards',
+      animationDelay: `${index * 0.03}s`,
+      opacity: 0,
+      transform: 'translateY(-8px)',
+    } : {}
+
     return (
-      <div key={item.id} style={{ position: 'relative', width: '100%', boxSizing: 'border-box', margin: 0, padding: 0 }}>
+      <div key={item.id} style={{ position: 'relative', width: '100%', boxSizing: 'border-box', margin: 0, padding: 0, ...animationStyle }}>
         {/* Drop indicator line above */}
         {showIndicatorAbove && (
           <div
@@ -1182,7 +1191,7 @@ function FileExplorer({
                 width: 'auto',
                 minWidth: '60px',
                 maxWidth: 'calc(100% - 20px)',
-                border: `1.5px solid ${theme === 'dark' ? '#3a3a3a' : '#dadce0'}`,
+                border: `1px solid ${borderColor}`,
                 borderRadius: '3px',
                 padding: '2px 4px',
                 fontSize: '13px',
@@ -1194,11 +1203,11 @@ function FileExplorer({
                 animation: 'fadeInScale 0.15s ease-out'
               }}
               onFocus={(e) => {
-                e.target.style.borderColor = theme === 'dark' ? '#4a4a4a' : '#bdc1c6'
+                e.target.style.borderColor = borderColor
                 e.target.style.backgroundColor = theme === 'dark' ? '#1f1f1f' : '#ffffff'
               }}
               onBlur={(e) => {
-                e.target.style.borderColor = theme === 'dark' ? '#3a3a3a' : '#dadce0'
+                e.target.style.borderColor = borderColor
                 e.target.style.backgroundColor = theme === 'dark' ? '#1a1a1a' : '#ffffff'
                 handleRenameSubmit(item)
               }}
@@ -1295,7 +1304,7 @@ function FileExplorer({
               backgroundColor: 'transparent',
             }}
           >
-            {item.children.map(child => renderFileItem(child, indentLevel + 1))}
+            {item.children.map((child, childIndex) => renderFileItem(child, indentLevel + 1, childIndex))}
             
             {/* End drop zone for project folder only - allows dropping at the end */}
             {item.id === 'project' && (() => {
@@ -1569,7 +1578,7 @@ function FileExplorer({
                 width: 'auto',
                 minWidth: '60px',
                 maxWidth: 'calc(100% - 20px)',
-                border: `1.5px solid ${theme === 'dark' ? '#3a3a3a' : '#dadce0'}`,
+                border: `1px solid ${borderColor}`,
                 borderRadius: '3px',
                 padding: '2px 4px',
                 fontSize: '13px',
@@ -1581,11 +1590,11 @@ function FileExplorer({
                 animation: 'fadeInScale 0.15s ease-out'
               }}
               onFocus={(e) => {
-                e.target.style.borderColor = theme === 'dark' ? '#4a4a4a' : '#bdc1c6'
+                e.target.style.borderColor = borderColor
                 e.target.style.backgroundColor = theme === 'dark' ? '#1f1f1f' : '#ffffff'
               }}
               onBlur={(e) => {
-                e.target.style.borderColor = theme === 'dark' ? '#3a3a3a' : '#dadce0'
+                e.target.style.borderColor = borderColor
                 e.target.style.backgroundColor = theme === 'dark' ? '#1a1a1a' : '#ffffff'
                 if (renameValue.trim() && onDocumentRename) {
                   onDocumentRename(readmeDoc.id, renameValue.trim())
@@ -1929,6 +1938,16 @@ function FileExplorer({
             transform: scale(1);
           }
         }
+        @keyframes fileAppear {
+          from {
+            opacity: 0;
+            transform: translateY(-8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
       `}} />
       <div
         className="scrollable-container no-gutter"
@@ -1958,7 +1977,7 @@ function FileExplorer({
           <>
             {/* Render README.md at the top */}
             {renderReadmeItem()}
-            {fileTree.map(item => renderFileItem(item, 0))}
+            {fileTree.map((item, index) => renderFileItem(item, 0, index))}
           </>
         )
       })()}

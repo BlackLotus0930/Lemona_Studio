@@ -19,7 +19,6 @@ import DocumentEditor, { DocumentEditorSearchHandle } from '../Editor/DocumentEd
 import Toolbar from '../Editor/Toolbar'
 import AIPanel from '../AIPanel/AIPanel'
 import FileExplorer from '../FileExplorer/FileExplorer'
-import { FileExplorerSkeleton } from '../FileExplorer/FileExplorerSkeleton'
 import { DocumentEditorSkeleton } from '../Editor/DocumentEditorSkeleton'
 import FullScreenPDFViewer, { PDFViewerSearchHandle } from '../PDFViewer/FullScreenPDFViewer'
 import { Document, IndexingStatus, DocumentSnapshot, WorldLab } from '@shared/types'
@@ -534,7 +533,7 @@ export default function Layout(): JSX.Element {
   }, [manuallyRenamedDocs])
   
   const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
-  const borderColor = theme === 'dark' ? '#232323' : '#dadce0'
+  const borderColor = theme === 'dark' ? '#232323' : '#e8eaed'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#5f6368'
 
   // Sync loading state ref for placeholder
@@ -5873,7 +5872,7 @@ export default function Layout(): JSX.Element {
                     fontWeight: 600,
                     color: theme === 'dark' ? '#D6D6DD' : '#202124',
                     backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff',
-                    border: `1.5px solid ${theme === 'dark' ? '#3a3a3a' : '#dadce0'}`,
+                    border: `1px solid ${borderColor}`,
                     borderRadius: '3px',
                     padding: '2px 4px',
                     outline: 'none',
@@ -5887,11 +5886,11 @@ export default function Layout(): JSX.Element {
                     animation: 'fadeInScale 0.15s ease-out'
                   }}
                   onFocus={(e) => {
-                    e.target.style.borderColor = theme === 'dark' ? '#4a4a4a' : '#bdc1c6'
+                    e.target.style.borderColor = borderColor
                     e.target.style.backgroundColor = theme === 'dark' ? '#1f1f1f' : '#ffffff'
                   }}
                   onBlur={(e) => {
-                    e.target.style.borderColor = theme === 'dark' ? '#3a3a3a' : '#dadce0'
+                    e.target.style.borderColor = borderColor
                     e.target.style.backgroundColor = theme === 'dark' ? '#1a1a1a' : '#ffffff'
                     if (projectRenameValue.trim()) {
                       handleProjectRename(projectRenameValue)
@@ -5953,12 +5952,7 @@ export default function Layout(): JSX.Element {
             
             {/* File Explorer Content */}
             <div style={{ flex: 1, overflow: 'hidden', backgroundColor: bgColor, padding: 0, margin: 0 }}>
-              {(() => {
-                if (isLoadingDocuments) {
-                  return <FileExplorerSkeleton projectName={projectName} />
-                }
-                return (
-                  <FileExplorer
+              <FileExplorer
                   documents={documents}
                   currentDocumentId={document?.id || null}
                   onDocumentClick={handleDocumentClick}
@@ -6054,8 +6048,6 @@ export default function Layout(): JSX.Element {
                     }
                   }}
                 />
-                )
-              })()}
             </div>
           </div>
         </Panel>
@@ -6063,11 +6055,12 @@ export default function Layout(): JSX.Element {
         <PanelResizeHandle 
           id="file-explorer-resize-handle"
           style={{ 
-            width: '1px', 
-            backgroundColor: borderColor,
+            width: 0,
+            borderLeft: `1px solid ${borderColor}`,
             cursor: 'col-resize',
-            transition: 'background-color 0.2s',
-            flexShrink: 0
+            transition: 'border-color 0.2s',
+            flexShrink: 0,
+            boxSizing: 'border-box'
           }} 
         />
         
@@ -6173,10 +6166,11 @@ export default function Layout(): JSX.Element {
         {isAIPanelOpen && (
           <>
             <PanelResizeHandle style={{ 
-              width: '1px', 
-              backgroundColor: borderColor,
+              width: 0,
+              borderLeft: `1px solid ${borderColor}`,
               cursor: 'col-resize',
-              transition: 'background-color 0.2s'
+              transition: 'border-color 0.2s',
+              boxSizing: 'border-box'
             }} />
             <Panel 
               id="ai-panel"

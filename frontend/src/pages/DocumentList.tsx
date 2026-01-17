@@ -119,48 +119,32 @@ export default function DocumentList() {
       const defaultName = `Untitled (${nextNumber})`
       const project = await projectApi.create(defaultName.trim())
       
-      // Generate "New World X.lab" name for WorldLab file
-      // Get all existing WorldLab documents to find next available number
-      const allProjects = await projectApi.getAll()
-      const allWorldLabDocs: Document[] = []
-      for (const proj of allProjects) {
-        try {
-          const docs = await projectApi.getDocuments(proj.id)
-          const worldlabDocs = docs.filter((doc: Document) => 
-            doc.folder === 'worldlab' && 
-            (doc.title.toLowerCase().endsWith('.lab') || doc.title.toLowerCase().endsWith('.worldlab'))
-          )
-          allWorldLabDocs.push(...worldlabDocs)
-        } catch (error) {
-          console.error(`Error fetching documents for project ${proj.id}:`, error)
-        }
+      // Create a new file in workspace folder (project folder)
+      // Generate unique name "Chapter X" based on existing workspace documents in this project
+      // Get documents for this project to check for existing "Chapter X" names
+      const projectDocs = await projectApi.getDocuments(project.id)
+      const workspaceDocs = projectDocs.filter((doc: Document) => 
+        (!doc.folder || doc.folder === 'project')
+      )
+      
+      // Check existing titles to find next available "Chapter X" number
+      const existingTitles = workspaceDocs.map((doc: Document) => doc.title.toLowerCase())
+      let chapterNumber = 1
+      while (existingTitles.includes(`chapter ${chapterNumber}`)) {
+        chapterNumber++
       }
       
-      // Extract existing "New World X" numbers
-      const newWorldPattern = /^New World (\d+)(\.lab|\.worldlab)?$/i
-      const existingNumbers = allWorldLabDocs
-        .map(doc => {
-          const match = doc.title.match(newWorldPattern)
-          return match ? parseInt(match[1], 10) : 0
-        })
-        .filter(num => num > 0)
+      const newFileName = `Chapter ${chapterNumber}`
+      const workspaceDoc = await documentApi.create(newFileName, 'project')
       
-      const nextWorldNumber = existingNumbers.length > 0 
-        ? Math.max(...existingNumbers) + 1 
-        : 1
-      
-      // Create world lab file in WorldLab folder with "New world X.lab" naming
-      const worldlabFileName = `New world ${nextWorldNumber}.lab`
-      const worldlabDoc = await documentApi.create(worldlabFileName, 'worldlab')
-      
-      // Add worldlab file to project
-      await projectApi.addDocument(project.id, worldlabDoc.id, 0)
+      // Add workspace file to project
+      await projectApi.addDocument(project.id, workspaceDoc.id, 0)
       
       // Update projects list
       setProjects(prev => [project, ...prev])
       
-      // Navigate to the worldlab document
-      navigate(`/document/${worldlabDoc.id}`)
+      // Navigate to the workspace document
+      navigate(`/document/${workspaceDoc.id}`)
     } catch (error) {
       console.error('Failed to create project:', error)
       alert('Failed to create project. Please try again.')
@@ -219,7 +203,7 @@ export default function DocumentList() {
       // Get documents in project
       const documents = await projectApi.getDocuments(projectId)
       if (documents.length > 0) {
-        // Priority: 1. Last opened document, 2. README.md in project folder, 3. First document
+        // Priority: 1. Last opened document, 2. First document
         let documentToOpen: Document | null = null
         
         // First, try to restore last opened document
@@ -236,18 +220,7 @@ export default function DocumentList() {
           console.error('Failed to load last document:', error)
         }
         
-        // If no last opened document was found, try to find README.md in project folder (workspace folder)
-        if (!documentToOpen) {
-          const readmeDoc = documents.find((doc: Document) => 
-            doc.title === 'README.md' && doc.folder === 'project'
-          )
-          
-          if (readmeDoc) {
-            documentToOpen = readmeDoc
-          }
-        }
-        
-        // Fall back to first document if neither last opened nor README.md was found
+        // Fall back to first document if last opened document was not found
         if (!documentToOpen) {
           documentToOpen = documents[0]
         }
@@ -256,8 +229,22 @@ export default function DocumentList() {
           navigate(`/document/${documentToOpen.id}`)
         }
       } else {
-        // No documents, create README.md in workspace folder (project folder)
-        const document = await documentApi.create('README.md', 'project')
+        // No documents, create a new file in workspace folder (project folder)
+        // Generate unique name "Chapter X" based on existing workspace documents in this project
+        const projectDocs = await projectApi.getDocuments(projectId)
+        const workspaceDocs = projectDocs.filter((doc: Document) => 
+          (!doc.folder || doc.folder === 'project')
+        )
+        
+        // Check existing titles to find next available "Chapter X" number
+        const existingTitles = workspaceDocs.map((doc: Document) => doc.title.toLowerCase())
+        let chapterNumber = 1
+        while (existingTitles.includes(`chapter ${chapterNumber}`)) {
+          chapterNumber++
+        }
+        
+        const newFileName = `Chapter ${chapterNumber}`
+        const document = await documentApi.create(newFileName, 'project')
         await projectApi.addDocument(projectId, document.id, 0)
         navigate(`/document/${document.id}`)
       }

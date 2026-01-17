@@ -75,7 +75,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       }
     }
   }, [initialInput, input, onInputSet])
-  const [isInputFocused, setIsInputFocused] = useState(false)
   const [useWebSearch, setUseWebSearch] = useState(false)
   // Load saved model from localStorage, or use default
   const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-2.5-pro' | 'gpt-4.1-nano' | 'gpt-5-mini' | 'gpt-5.2'>(() => {
@@ -479,7 +478,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
 
   // Removed scroll position saving/loading - AI panel should maintain consistent state across files
   const inputBg = theme === 'dark' ? '#1d1d1d' : '#FEFEFE'
-  const borderColor = theme === 'dark' ? '#313131' : '#DADCE0'
+  const borderColor = theme === 'dark' ? '#232323' : '#e8eaed'
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#9aa0a6'
   const userMessageBg = theme === 'dark' ? '#1C1C1C' : '#f0f0ed'
@@ -1643,12 +1642,23 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           color: ${theme === 'dark' ? '#666666' : '#B8B8B8'};
           opacity: 1;
         }
+        @keyframes fileAppear {
+          from {
+            opacity: 0;
+            transform: translateY(-8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
       `}</style>
       <div style={{
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        backgroundColor: bgColor
+        backgroundColor: bgColor,
+        animation: 'fileAppear 0.3s ease-out forwards',
       }}>
         <div 
           ref={scrollContainerRef}
@@ -1667,7 +1677,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             MozUserSelect: 'text',
             msUserSelect: 'text'
           }}>
-        {messages.map((message) => (
+        {messages.map((message, index) => (
           <div
             key={message.id}
             style={{
@@ -1676,6 +1686,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               flexDirection: 'column',
               padding: message.role === 'assistant' ? '16px 16px' : '8px 16px',
               backgroundColor: brighterBg,
+              animation: 'fileAppear 0.3s ease-out forwards',
+              animationDelay: `${index * 0.03}s`,
+              opacity: 0,
+              transform: 'translateY(-8px)',
             }}
           >
             {message.role === 'user' && (
@@ -2307,7 +2321,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             padding: '4px 6px',
             backgroundColor: inputBg,
             borderRadius: '6px',
-            border: `1px solid ${isInputFocused ? (theme === 'dark' ? '#3e3e42' : '#DADCE0') : borderColor}`,
+            border: `1px solid ${borderColor}`,
             display: 'flex',
             flexDirection: 'column',
             gap: '8px',
@@ -2336,7 +2350,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   detectMention(e.target.value, cursorPosition)
                 }}
                 onFocus={() => {
-                  setIsInputFocused(true)
                   if (textareaRef.current) {
                     const cursorPosition = textareaRef.current.selectionStart
                     detectMention(textareaRef.current.value, cursorPosition)
@@ -2347,7 +2360,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   if (mentionDropdownRef.current?.contains(e.relatedTarget as Node)) {
                     return
                   }
-                  setIsInputFocused(false)
                   setCurrentSuggestion(null)
                   setShowMentionDropdown(false)
                 }}

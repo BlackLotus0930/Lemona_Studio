@@ -2742,7 +2742,20 @@ function WorldLabCanvasInner({
   const borderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.1)'
 
   return (
-    <PanelGroup direction="vertical" style={{ width: '100%', height: '100%' }}>
+    <>
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes fileAppear {
+          from {
+            opacity: 0;
+            transform: translateY(-8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}} />
+      <PanelGroup direction="vertical" style={{ width: '100%', height: '100%', animation: 'fileAppear 0.3s ease-out forwards' }}>
       {/* Top Panel: Canvas */}
       <Panel defaultSize={100} minSize={30}>
         <div
@@ -4015,6 +4028,7 @@ function WorldLabCanvasInner({
       </Panel>
 
     </PanelGroup>
+    </>
   )
 }
 

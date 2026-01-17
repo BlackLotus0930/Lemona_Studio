@@ -37,7 +37,7 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
     : (theme === 'dark' ? '#858585' : '#5f6368')
   // Hover color same as selection color
   const tabHoverBg = theme === 'dark' ? '#1e1e1e' : '#f6f6f6'
-  const separatorColor = theme === 'dark' ? '#1E1E1E' : '#e0e0e0' // Theme-aware separator color
+  const separatorColor = theme === 'dark' ? '#1E1E1E' : '#e3e3e3' // Theme-aware separator color
   const showCloseButton = canClose && (isActive || isHovered)
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -222,7 +222,7 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
         />
       )}
       
-      {/* Right separator line - height 20px (only between tabs, not after last, and hidden when current or next tab is active) */}
+      {/* Right separator line - height 14px (only between tabs, not after last, and hidden when current or next tab is active) */}
       {!isLast && !isActive && !nextTabIsActive && !(showDropIndicator && dropPosition === 'right') && (
         <div 
           className="tab-separator"
@@ -231,9 +231,10 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
             right: 0,
             top: '50%',
             transform: 'translateY(-50%) translateZ(0)',
-            height: '20px',
+            height: '16px',
             width: '1px',
             backgroundColor: separatorColor,
+            borderRadius: '1px',
             pointerEvents: 'none'
           }} 
         />

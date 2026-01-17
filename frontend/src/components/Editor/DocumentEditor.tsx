@@ -1235,30 +1235,44 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   }
 
   return (
-    <div style={{ 
-      height: '100%', 
-      display: 'flex', 
-      flexDirection: 'column',
-      backgroundColor: bgColor
-    }}>
-      <div 
-        ref={scrollContainerRef}
-        className={`scrollable-container ${theme === 'dark' ? 'dark-theme' : ''}`}
-        style={{ 
-          flex: 1, 
-          overflow: 'auto', 
-          paddingTop: '72px',
-          paddingBottom: '400px',
-          paddingLeft: '120px',
-          paddingRight: '120px',
-          position: 'relative',
-          backgroundColor: bgColor,
-          cursor: 'text',
-          userSelect: 'text',
-          WebkitUserSelect: 'text',
-          MozUserSelect: 'text',
-          msUserSelect: 'text'
-        }}
+    <>
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes fileAppear {
+          from {
+            opacity: 0;
+            transform: translateY(-8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}} />
+      <div style={{ 
+        height: '100%', 
+        display: 'flex', 
+        flexDirection: 'column',
+        backgroundColor: bgColor,
+        animation: 'fileAppear 0.3s ease-out forwards',
+      }}>
+        <div 
+          ref={scrollContainerRef}
+          className={`scrollable-container ${theme === 'dark' ? 'dark-theme' : ''}`}
+          style={{ 
+            flex: 1, 
+            overflow: 'auto', 
+            paddingTop: '72px',
+            paddingBottom: '400px',
+            paddingLeft: '120px',
+            paddingRight: '120px',
+            position: 'relative',
+            backgroundColor: bgColor,
+            cursor: 'text',
+            userSelect: 'text',
+            WebkitUserSelect: 'text',
+            MozUserSelect: 'text',
+            msUserSelect: 'text'
+          }}
         onMouseDown={(e) => {
           const target = e.target as HTMLElement
           
@@ -2736,7 +2750,8 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           }}
         />
       )}
-    </div>
+      </div>
+    </>
   )
 })
 

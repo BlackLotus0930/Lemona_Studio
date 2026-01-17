@@ -692,10 +692,15 @@ export default function Toolbar({
   }
 
   const dividerStyle: React.CSSProperties = {
-    width: '1px',
-    height: '24px',
-    backgroundColor: theme === 'dark' ? '#2d2d2d' : '#dadce0',
-    margin: '0 4px'
+    width: 0,
+    height: '20px',
+    borderLeft: `1px solid ${theme === 'dark' ? '#2d2d2d' : '#e3e3e3'}`,
+    margin: '0 4px',
+    flexShrink: 0,
+    boxSizing: 'border-box',
+    padding: 0,
+    display: 'block',
+    borderRadius: '1px'
   }
 
   const dropdownStyle: React.CSSProperties = {
