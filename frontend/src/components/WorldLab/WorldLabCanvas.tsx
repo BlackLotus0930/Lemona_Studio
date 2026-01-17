@@ -576,7 +576,7 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
             zIndex: 10,
             boxShadow: theme === 'dark'
               ? '0 2px 8px rgba(0, 0, 0, 0.3)'
-              : '0 2px 8px rgba(0, 0, 0, 0.15)',
+              : 'none',
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.transform = 'scale(1.15)'
@@ -916,6 +916,19 @@ function WorldLabCanvasInner({
   // Track previous node positions to detect position changes
   const prevNodePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
   
+  // Refs to store latest nodes/edges for cleanup on unmount
+  const nodesRef = useRef<Node[]>(nodes)
+  const edgesRef = useRef<Edge[]>(edges)
+  
+  // Update refs whenever nodes/edges change
+  useEffect(() => {
+    nodesRef.current = nodes
+  }, [nodes])
+  
+  useEffect(() => {
+    edgesRef.current = edges
+  }, [edges])
+  
   // Track if we've refreshed node internals after WorldLab hydrate
   const didRefreshNodeInternalsRef = useRef(false)
   
@@ -1237,8 +1250,9 @@ function WorldLabCanvasInner({
   }, [])
 
   // Auto-adjust edge handles when nodes are moved
-  // Note: saveEdges will be defined later, so we use a ref to avoid dependency issues
+  // Note: saveEdges and saveNodes will be defined later, so we use refs to avoid dependency issues
   const saveEdgesRef = useRef<((edges: Edge[], nodes?: Node[]) => void) | null>(null)
+  const saveNodesRef = useRef<((nodes: Node[]) => void) | null>(null)
   
   const adjustEdgeHandlesOnNodeMove = useCallback((updatedNodes: Node[], movedNodeIds: Set<string>) => {
     setEdges((currentEdges) => {
@@ -1334,6 +1348,12 @@ function WorldLabCanvasInner({
             setTimeout(() => {
               adjustEdgeHandlesOnNodeMove(currentNodes, movedNodeIds)
             }, 0)
+            
+            // Save nodes to persist position changes to backend
+            // This ensures positions are saved when switching away from WorldLab
+            if (saveNodesRef.current) {
+              saveNodesRef.current(currentNodes)
+            }
           }
           
           return currentNodes
@@ -1500,8 +1520,54 @@ function WorldLabCanvasInner({
     [convertToWorldLabEdges, convertToWorldLabNodes, labName, nodes, onEdgesChange]
   )
   
-  // Update ref so adjustEdgeHandlesOnNodeMove can use it
+  // Update refs so adjustEdgeHandlesOnNodeMove can use them
   saveEdgesRef.current = saveEdges
+  saveNodesRef.current = saveNodes
+
+  // Store refs for cleanup access
+  const labNameRef = useRef(labName)
+  const convertToWorldLabNodesRef = useRef(convertToWorldLabNodes)
+  const onNodesChangeRef = useRef(onNodesChange)
+  
+  // Update refs when values change
+  useEffect(() => {
+    labNameRef.current = labName
+  }, [labName])
+  
+  useEffect(() => {
+    convertToWorldLabNodesRef.current = convertToWorldLabNodes
+  }, [convertToWorldLabNodes])
+  
+  useEffect(() => {
+    onNodesChangeRef.current = onNodesChange
+  }, [onNodesChange])
+
+  // Cleanup effect: flush pending saves when component unmounts
+  // This ensures node positions are saved even if user switches away before debounce completes
+  useEffect(() => {
+    return () => {
+      // Flush any pending saves before unmounting
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+        saveTimeoutRef.current = null
+      }
+      
+      // Get current nodes from ref (always has latest values)
+      const currentNodesSnapshot = nodesRef.current
+      
+      // Save nodes immediately (no debounce) - convert and save directly
+      const worldLabNodes = convertToWorldLabNodesRef.current(currentNodesSnapshot)
+      if (onNodesChangeRef.current) {
+        onNodesChangeRef.current(worldLabNodes)
+      }
+      // Save to backend synchronously (fire and forget)
+      worldLabApi.saveNodePositions(labNameRef.current, worldLabNodes).catch((error) => {
+        console.error('[WorldLab] Failed to save nodes on unmount:', error)
+      })
+    }
+    // Empty deps - only run cleanup on unmount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Note: ReactFlow's useNodesState and useEdgesState handle changes internally
   // We sync state through onNodesChangeInner and onEdgesChangeInner callbacks

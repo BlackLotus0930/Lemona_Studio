@@ -480,7 +480,7 @@ function FileExplorer({
 
   const bgColor = theme === 'dark' ? '#141414' : '#FAFAFA'
   const hoverBg = theme === 'dark' ? '#1e1e1e' : '#F0F0ED'
-  const selectedBg = theme === 'dark' ? '#1e1e1e' : '#F2F2F0'
+  const selectedBg = hoverBg // Same color for hover and selected
   const textColor = theme === 'dark' ? '#cccccc' : '#202124'
   const folderTextColor = theme === 'dark' ? '#b5b5b5' : '#4a4a4a' // Slightly lighter color for folder names and arrows
   const indicatorColor = theme === 'dark' ? '#999999' : '#c0c0c0' // Light grey color for drop indicator
@@ -492,24 +492,9 @@ function FileExplorer({
   const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const dropdownHoverBg = theme === 'dark' ? '#3e3e42' : '#f8f9fa'
 
-  // Helper function to format display name - remove .md from README.md
-  const formatDisplayName = (title: string): string => {
-    if (title.toLowerCase() === 'readme.md') {
-      return 'README'
-    }
-    return title
-  }
-
   // Build folder structure: Library and ProjectName folders
-  // Extract README.md separately ONLY if it's NOT in project folder - it will be shown as a standalone file at the top
-  // If README.md is in project folder, it should appear in Workspace folder
-  const readmeDoc = documents.find(doc => 
-    (doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md') && 
-    doc.folder !== 'project'
-  )
   const worldlabDocs = documents.filter(doc => doc.folder === 'worldlab')
-  const libraryDocs = documents.filter(doc => doc.folder === 'library' && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
-  // Include README.md in project folder - it should appear in Workspace folder
+  const libraryDocs = documents.filter(doc => doc.folder === 'library')
   const projectDocs = documents.filter(doc => (!doc.folder || doc.folder === 'project'))
   
   // Sort documents by order if available, otherwise by creation time
@@ -1165,9 +1150,10 @@ function FileExplorer({
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
                 color: isFolder ? folderTextColor : undefined,
+                fontWeight: 370,
               }}
             >
-              {formatDisplayName(item.name)}
+              {item.name}
             </span>
           )}
         </div>
@@ -1434,138 +1420,6 @@ function FileExplorer({
       `}</style>
     </div>
   ) : null
-
-  // Render README.md as a standalone file item with outlined info icon
-  const renderReadmeItem = () => {
-    if (!readmeDoc) return null
-    
-    const isSelected = selectedId === readmeDoc.id
-    const isRenaming = renamingId === readmeDoc.id
-    const hasContextMenu = contextMenuPos && contextMenuPos.item.id === readmeDoc.id
-    
-    return (
-      <div key={readmeDoc.id} style={{ position: 'relative', width: '100%', boxSizing: 'border-box', margin: 0, padding: 0 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            paddingLeft: '32px',
-            paddingRight: '0px',
-            paddingTop: '4px',
-            paddingBottom: '4px',
-            cursor: 'pointer',
-            backgroundColor: isSelected ? selectedBg : 'transparent',
-            color: '#818181',
-            fontSize: '13px',
-            fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
-            userSelect: 'none',
-            minHeight: '22px',
-            width: '100%',
-            boxSizing: 'border-box',
-            borderRadius: '0',
-            marginLeft: '0',
-            marginRight: '0',
-            marginBottom: '0',
-            border: hasContextMenu ? `1px solid ${theme === 'dark' ? '#555555' : '#909090'}` : '1px solid transparent',
-          }}
-          onClick={() => {
-            setSelectedId(readmeDoc.id)
-            onDocumentClick(readmeDoc.id)
-          }}
-          onDoubleClick={() => {
-            if (onDocumentRename) {
-              setRenamingId(readmeDoc.id)
-              setRenameValue(readmeDoc.title)
-            }
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault()
-            const readmeItem: FileItem = {
-              id: readmeDoc.id,
-              name: readmeDoc.title,
-              type: 'file',
-              document: readmeDoc,
-            }
-            setContextMenuPos({ x: e.clientX, y: e.clientY, item: readmeItem })
-          }}
-          onMouseEnter={(e) => {
-            if (!isSelected) {
-              e.currentTarget.style.backgroundColor = hoverBg
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isSelected) {
-              e.currentTarget.style.backgroundColor = 'transparent'
-            }
-          }}
-        >
-          {/* File Name */}
-          {isRenaming ? (
-            <input
-              type="text"
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  if (renameValue.trim() && onDocumentRename) {
-                    onDocumentRename(readmeDoc.id, renameValue.trim())
-                  }
-                  setRenamingId(null)
-                  setRenameValue('')
-                } else if (e.key === 'Escape') {
-                  setRenamingId(null)
-                  setRenameValue('')
-                }
-              }}
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                width: 'auto',
-                minWidth: '60px',
-                maxWidth: 'calc(100% - 20px)',
-                border: `1px solid ${borderColor}`,
-                borderRadius: '3px',
-                padding: '2px 4px',
-                fontSize: '13px',
-                fontFamily: 'inherit',
-                backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff',
-                color: textColor,
-                outline: 'none',
-                transition: 'all 0.2s ease',
-                animation: 'fadeInScale 0.15s ease-out'
-              }}
-              onFocus={(e) => {
-                e.target.style.borderColor = borderColor
-                e.target.style.backgroundColor = theme === 'dark' ? '#1f1f1f' : '#ffffff'
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = borderColor
-                e.target.style.backgroundColor = theme === 'dark' ? '#1a1a1a' : '#ffffff'
-                if (renameValue.trim() && onDocumentRename) {
-                  onDocumentRename(readmeDoc.id, renameValue.trim())
-                }
-                setRenamingId(null)
-                setRenameValue('')
-              }}
-              autoFocus
-            />
-          ) : (
-            <span
-              style={{
-                flex: 1,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {isSearchMode && searchQuery.trim() 
-                ? highlightText(formatDisplayName(readmeDoc.title), searchQuery)
-                : formatDisplayName(readmeDoc.title)}
-            </span>
-          )}
-        </div>
-      </div>
-    )
-  }
 
   // Render search UI
   const renderSearchUI = () => {
@@ -1920,8 +1774,6 @@ function FileExplorer({
           renderSearchUI()
         ) : (
           <>
-            {/* Render README.md at the top */}
-            {renderReadmeItem()}
             {fileTree.map((item, index) => renderFileItem(item, 0, index))}
           </>
         )
@@ -1982,9 +1834,7 @@ function FileExplorer({
             Rename
           </button>
           )}
-          {(contextMenuPos.item.document || contextMenuPos.item.type === 'file') && onDocumentDelete && 
-           // Don't show delete option for README files
-           !(contextMenuPos.item.document && (contextMenuPos.item.document.title === 'README.md' || contextMenuPos.item.document.title.toLowerCase() === 'readme.md')) && (
+          {(contextMenuPos.item.document || contextMenuPos.item.type === 'file') && onDocumentDelete && (
             <button
               onClick={(e) => {
                 if (contextMenuPos.item.document && onDocumentDelete) {
