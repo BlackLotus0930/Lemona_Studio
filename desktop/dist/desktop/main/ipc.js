@@ -129,9 +129,9 @@ export function setupIPC() {
             throw error;
         }
     });
-    ipcMain.handle('chat:updateMessage', async (_, documentId, chatId, messageId, content) => {
+    ipcMain.handle('chat:updateMessage', async (_, documentId, chatId, messageId, content, reasoningMetadata) => {
         try {
-            await chatHistoryService.updateMessage(documentId, chatId, messageId, content);
+            await chatHistoryService.updateMessage(documentId, chatId, messageId, content, reasoningMetadata);
             return { success: true };
         }
         catch (error) {
@@ -722,6 +722,64 @@ Rephrased text:`;
         }
         catch (error) {
             console.error('IPC library:removeFromIndex error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('library:isIndexValid', async (_, projectId) => {
+        try {
+            const isValid = await indexingService.isIndexValid(projectId, 'library');
+            return isValid;
+        }
+        catch (error) {
+            console.error('IPC library:isIndexValid error:', error);
+            throw error;
+        }
+    });
+    // Incremental indexing for project files (Workspace folder)
+    ipcMain.handle('indexing:incrementalIndexProjectFiles', async (_, projectId, documentIds, geminiApiKey, openaiApiKey) => {
+        try {
+            if (!projectId || typeof projectId !== 'string') {
+                throw new Error('Invalid projectId provided');
+            }
+            if (!Array.isArray(documentIds)) {
+                throw new Error('documentIds must be an array');
+            }
+            const results = [];
+            for (const documentId of documentIds) {
+                try {
+                    const status = await indexingService.incrementalIndexProjectFile(documentId, geminiApiKey, openaiApiKey);
+                    results.push({ documentId, status });
+                }
+                catch (error) {
+                    // If quota error, stop processing remaining files
+                    if (error.message?.includes('quota') || error.message?.includes('Quota')) {
+                        console.error(`[IPC] Quota error detected while indexing ${documentId}, stopping:`, error.message);
+                        results.push({
+                            documentId,
+                            status: {
+                                documentId,
+                                status: 'error',
+                                error: `API quota exceeded: ${error.message}`,
+                            },
+                        });
+                        break;
+                    }
+                    // For other errors, continue with next file
+                    console.error(`[IPC] Failed to incrementally index ${documentId}:`, error.message);
+                    results.push({
+                        documentId,
+                        status: {
+                            documentId,
+                            status: 'error',
+                            error: error.message || 'Unknown error',
+                        },
+                    });
+                }
+            }
+            return results;
+        }
+        catch (error) {
+            console.error('IPC indexing:incrementalIndexProjectFiles error:', error);
             throw error;
         }
     });

@@ -64,7 +64,7 @@ export const chatHistoryService = {
     /**
      * Update an existing message (useful for streaming updates)
      */
-    async updateMessage(documentId, chatId, messageId, content) {
+    async updateMessage(documentId, chatId, messageId, content, reasoningMetadata) {
         const projectId = await this.getProjectIdFromDocument(documentId);
         if (!projectId) {
             throw new Error('Document must belong to a project to update chat history');
@@ -84,6 +84,10 @@ export const chatHistoryService = {
         // Update the message content
         messages[messageIndex].content = content;
         messages[messageIndex].timestamp = new Date().toISOString();
+        // Preserve reasoningMetadata if provided, or keep existing if not provided
+        if (reasoningMetadata !== undefined) {
+            messages[messageIndex].reasoningMetadata = reasoningMetadata;
+        }
         // Save the updated chat history
         await this.saveChatHistory(projectId, project.chatHistory);
     },

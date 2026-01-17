@@ -270,11 +270,181 @@ export function getChunkStats(chunks: Chunk[]): {
   }
 }
 
+/**
+ * Semantic block for Workspace documents (paragraph-level indexing)
+ * Represents a heading + following paragraphs until next heading
+ */
+export interface SemanticBlock {
+  paragraphId: string // UUID, unique identifier (identity)
+  fileId: string // Document ID
+  text: string // Semantic block text content (heading + paragraphs combined)
+  hash: string // SHA-256 hash of block text (for change detection)
+  paragraphIndex: number // Position index in document (attribute, not identity)
+  headingText?: string // Heading text (if has heading)
+  headingLevel?: number // Heading level (if has heading)
+  paragraphCount: number // Number of paragraph nodes in this block
+  tokenCount: number // Estimated token count
+}
+
+/**
+ * Extract text from TipTap node (for semantic blocks)
+ */
+function extractTextFromTipTapNode(node: any): string {
+  if (typeof node === 'string') {
+    return node
+  }
+  
+  if (node.type === 'text') {
+    return node.text || ''
+  }
+  
+  if (node.content && Array.isArray(node.content)) {
+    return node.content.map(extractTextFromTipTapNode).join(' ')
+  }
+  
+  return ''
+}
+
+/**
+ * Chunk TipTap JSON content into semantic blocks
+ * Semantic block = heading + following paragraphs (until next heading)
+ * 
+ * This function is specifically for Workspace documents (folder === 'project')
+ * Library documents continue to use token-based chunking (chunkTipTap)
+ * 
+ * @param tipTapContent - TipTap JSON document content
+ * @param fileId - Document ID
+ * @returns Array of semantic blocks
+ */
+export function chunkTipTapToSemanticBlocks(
+  tipTapContent: any,
+  fileId: string
+): SemanticBlock[] {
+  if (!tipTapContent || !tipTapContent.content || !Array.isArray(tipTapContent.content)) {
+    return []
+  }
+
+  const blocks: SemanticBlock[] = []
+  interface CurrentBlockType {
+    headingText?: string
+    headingLevel?: number
+    paragraphs: string[]
+    paragraphCount: number
+  }
+  let currentBlock: CurrentBlockType | null = null
+  let paragraphIndex = 0
+
+  /**
+   * Traverse TipTap nodes and group into semantic blocks
+   */
+  function traverse(nodes: any[]) {
+    for (const node of nodes) {
+      if (node.type === 'heading') {
+        // Save current block if exists
+        if (currentBlock !== null && currentBlock.paragraphs.length > 0) {
+          const block: CurrentBlockType = currentBlock // Type assertion for clarity
+          const blockText = [
+            block.headingText ? `#${'#'.repeat((block.headingLevel || 1) - 1)} ${block.headingText}` : '',
+            ...block.paragraphs
+          ].filter(Boolean).join('\n\n')
+          
+          if (blockText.trim()) {
+            const hash = generateHash(blockText)
+            const tokenCount = estimateTokens(blockText)
+            
+            blocks.push({
+              paragraphId: crypto.randomUUID(),
+              fileId,
+              text: blockText,
+              hash,
+              paragraphIndex: paragraphIndex++,
+              headingText: block.headingText,
+              headingLevel: block.headingLevel,
+              paragraphCount: block.paragraphCount,
+              tokenCount,
+            })
+          }
+        }
+        
+        // Start new block with heading
+        const headingText = extractTextFromTipTapNode(node)
+        const headingLevel = node.attrs?.level || 1
+        
+        if (headingText.trim()) {
+          currentBlock = {
+            headingText: headingText.trim(),
+            headingLevel,
+            paragraphs: [],
+            paragraphCount: 0,
+          }
+        } else {
+          currentBlock = {
+            paragraphs: [],
+            paragraphCount: 0,
+          }
+        }
+      } else if (node.type === 'paragraph') {
+        const paragraphText = extractTextFromTipTapNode(node)
+        
+        if (paragraphText.trim()) {
+          // Initialize current block if doesn't exist (document starts with paragraphs)
+          if (!currentBlock) {
+            currentBlock = {
+              paragraphs: [],
+              paragraphCount: 0,
+            }
+          }
+          
+          currentBlock.paragraphs.push(paragraphText.trim())
+          currentBlock.paragraphCount++
+        }
+      } else if (node.content && Array.isArray(node.content)) {
+        // Recursively traverse nested content
+        traverse(node.content)
+      }
+    }
+  }
+
+  // Start traversal
+  traverse(tipTapContent.content)
+
+  // Save last block if exists
+  if (currentBlock !== null) {
+    const block: CurrentBlockType = currentBlock
+    if (block.paragraphs.length > 0) {
+      const blockText = [
+        block.headingText ? `#${'#'.repeat((block.headingLevel || 1) - 1)} ${block.headingText}` : '',
+        ...block.paragraphs
+      ].filter(Boolean).join('\n\n')
+      
+      if (blockText.trim()) {
+        const hash = generateHash(blockText)
+        const tokenCount = estimateTokens(blockText)
+        
+        blocks.push({
+          paragraphId: crypto.randomUUID(),
+          fileId,
+          text: blockText,
+          hash,
+          paragraphIndex: paragraphIndex++,
+          headingText: block.headingText,
+          headingLevel: block.headingLevel,
+          paragraphCount: block.paragraphCount,
+          tokenCount,
+        })
+      }
+    }
+  }
+
+  return blocks
+}
+
 export const chunkingService = {
   chunkText,
   chunkPDF,
   chunkDocx,
   chunkTipTap,
+  chunkTipTapToSemanticBlocks,
   getChunkStats,
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,

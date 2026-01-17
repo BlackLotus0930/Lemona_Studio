@@ -3,7 +3,7 @@ import { Document } from '../../../shared/types.js'
 import { documentService } from './documentService.js'
 import { extractPDFText } from './pdfTextExtractor.js'
 import { parseDocx } from './docxParser.js'
-import { chunkPDF, chunkDocx, chunkTipTap, Chunk, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from './chunkingService.js'
+import { chunkPDF, chunkDocx, chunkTipTap, chunkTipTapToSemanticBlocks, Chunk, SemanticBlock, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from './chunkingService.js'
 import { generateEmbeddingsBatch, EMBEDDING_DIMENSION, isQuotaError } from './embeddingService.js'
 import { getVectorStore, ChunkMetadata, getProjectIndexDirectory, getProjectLockManager, IndexManifest } from './vectorStore.js'
 import { app } from 'electron'
@@ -1030,6 +1030,302 @@ export async function migrateLibraryIndex(
   return result
 }
 
+/**
+ * Incrementally index a project file (Workspace folder)
+ * Only re-indexes modified paragraphs, updates positions for moved paragraphs
+ * 
+ * @param documentId - Document ID to index
+ * @param geminiApiKey - Optional Gemini API key
+ * @param openaiApiKey - Optional OpenAI API key
+ * @returns Indexing status
+ */
+export async function incrementalIndexProjectFile(
+  documentId: string,
+  geminiApiKey?: string,
+  openaiApiKey?: string
+): Promise<IndexingStatus> {
+  const hasGeminiKey = geminiApiKey && geminiApiKey.trim().length > 0
+  const hasOpenaiKey = openaiApiKey && openaiApiKey.trim().length > 0
+  
+  if (!hasGeminiKey && !hasOpenaiKey) {
+    const errorStatus: IndexingStatus = {
+      documentId,
+      status: 'error',
+      error: 'No embedding API key available. Please configure Gemini or OpenAI API key in Settings > API Keys.',
+    }
+    await saveIndexingStatus(errorStatus)
+    return errorStatus
+  }
+
+  // Load document
+  const document = await documentService.getById(documentId)
+  if (!document) {
+    throw new Error(`Document ${documentId} not found`)
+  }
+
+  // Only index project files
+  if (document.folder !== 'project') {
+    throw new Error(`Document ${documentId} is not in project folder`)
+  }
+
+  if (!document.projectId) {
+    throw new Error(`Document ${documentId} must have projectId set`)
+  }
+
+  const projectId = document.projectId
+
+  // Update status to indexing
+  let status: IndexingStatus = {
+    documentId,
+    status: 'indexing',
+    progress: {
+      totalChunks: 0,
+      processedChunks: 0,
+    },
+  }
+  await saveIndexingStatus(status)
+
+  try {
+    // Acquire write lock
+    const projectLockManager = getProjectLockManager()
+    const releaseLock = await projectLockManager.acquireWriteLock(projectId)
+    
+    try {
+      // Double-check document wasn't deleted while waiting for lock
+      const documentAfterLock = await documentService.getById(documentId)
+      if (!documentAfterLock || documentAfterLock.deleted === true) {
+        console.log(`[Indexing] Document ${documentId} was deleted while waiting for lock, skipping indexing`)
+        const skippedStatus: IndexingStatus = {
+          documentId,
+          status: 'error',
+          error: 'Document was deleted',
+        }
+        await saveIndexingStatus(skippedStatus)
+        return skippedStatus
+      }
+      
+      const vectorStore = getVectorStore(projectId, 'project')
+      await vectorStore.loadIndexUnsafe()
+
+      // Parse TipTap content to semantic blocks
+      let currentBlocks: SemanticBlock[] = []
+      try {
+        const content = JSON.parse(document.content)
+        currentBlocks = chunkTipTapToSemanticBlocks(content, documentId)
+      } catch (parseError: any) {
+        throw new Error(`Failed to parse TipTap content: ${parseError.message}`)
+      }
+
+      if (currentBlocks.length === 0) {
+        // No blocks to index
+        status = {
+          documentId,
+          status: 'completed',
+          chunksCount: 0,
+          indexedAt: new Date().toISOString(),
+          contentHash: document.metadata?.contentHash,
+        }
+        await saveIndexingStatus(status)
+        return status
+      }
+
+      // Load existing blocks from index for this file
+      const existingBlocks = vectorStore.getChunksByFileIdUnsafe(documentId).filter(m => m.paragraphId)
+
+      // Create maps for matching
+      const currentBlocksByHash = new Map<string, SemanticBlock>()
+      const existingBlocksByHash = new Map<string, ChunkMetadata>()
+      const existingBlocksByParagraphId = new Map<string, ChunkMetadata>()
+
+      // Index current blocks by hash
+      for (const block of currentBlocks) {
+        currentBlocksByHash.set(block.hash, block)
+      }
+
+      // Index existing blocks by hash and paragraphId
+      for (const existing of existingBlocks) {
+        const hash = existing.paragraphHash || existing.hash
+        if (hash) {
+          existingBlocksByHash.set(hash, existing)
+        }
+        if (existing.paragraphId) {
+          existingBlocksByParagraphId.set(existing.paragraphId, existing)
+        }
+      }
+
+      // Classify blocks: new, modified, moved, deleted
+      const blocksToAdd: SemanticBlock[] = []
+      const blocksToUpdate: { block: SemanticBlock; existingParagraphId: string }[] = []
+      const blocksToMove: { block: SemanticBlock; existingParagraphId: string }[] = []
+      const paragraphIdsToDelete: string[] = []
+
+      for (const block of currentBlocks) {
+        const existingByHash = existingBlocksByHash.get(block.hash)
+        
+        if (!existingByHash) {
+          // Hash doesn't match - new block or modified block
+          // For incremental indexing, we treat hash mismatches as new blocks
+          // (modified blocks will get new paragraphId and new embedding)
+          blocksToAdd.push(block)
+        } else {
+          // Hash matches - same content, check if position changed
+          const existingParagraphId = existingByHash.paragraphId
+          if (existingParagraphId) {
+            // Create a copy of block with preserved paragraphId
+            const blockWithPreservedId: SemanticBlock = {
+              ...block,
+              paragraphId: existingParagraphId, // Preserve existing UUID
+            }
+            
+            const existingByParagraphId = existingBlocksByParagraphId.get(existingParagraphId)
+            if (existingByParagraphId) {
+              if (existingByParagraphId.paragraphIndex !== block.paragraphIndex) {
+                // Position changed - move (update position only, no re-embedding)
+                blocksToMove.push({ block: blockWithPreservedId, existingParagraphId })
+              }
+              // Position unchanged - no action needed (block already indexed correctly)
+            } else {
+              // paragraphId exists but not found in index - treat as new
+              blocksToAdd.push(block)
+            }
+          } else {
+            // No paragraphId in existing block - this is a legacy block
+            // Treat as new block (will get new paragraphId)
+            blocksToAdd.push(block)
+          }
+        }
+      }
+
+      // Find deleted blocks (exist in index but not in current document)
+      for (const existing of existingBlocks) {
+        const hash = existing.paragraphHash || existing.hash
+        if (hash && !currentBlocksByHash.has(hash)) {
+          if (existing.paragraphId) {
+            paragraphIdsToDelete.push(existing.paragraphId)
+          }
+        }
+      }
+
+      // Update progress
+      const totalBlocksToProcess = blocksToAdd.length + blocksToUpdate.length
+      status.progress = {
+        totalChunks: totalBlocksToProcess,
+        processedChunks: 0,
+      }
+      await saveIndexingStatus(status)
+
+      // Generate embeddings for new and modified blocks
+      const blocksNeedingEmbeddings = [...blocksToAdd, ...blocksToUpdate.map(b => b.block)]
+      const embeddings: number[][] = []
+
+      if (blocksNeedingEmbeddings.length > 0) {
+        const batchSize = 10
+        try {
+          for (let i = 0; i < blocksNeedingEmbeddings.length; i += batchSize) {
+            const batch = blocksNeedingEmbeddings.slice(i, i + batchSize)
+            const batchTexts = batch.map(block => block.text)
+            
+            const batchResults = await generateEmbeddingsBatch(
+              batchTexts,
+              geminiApiKey,
+              openaiApiKey,
+              batchSize
+            )
+            
+            const batchEmbeddings = batchResults.map(result => result.embedding)
+            embeddings.push(...batchEmbeddings)
+
+            // Update progress
+            status.progress = {
+              totalChunks: totalBlocksToProcess,
+              processedChunks: Math.min(i + batchSize, blocksNeedingEmbeddings.length),
+            }
+            await saveIndexingStatus(status)
+          }
+        } catch (embeddingError: any) {
+          if (isQuotaError(embeddingError)) {
+            status = {
+              documentId,
+              status: 'error',
+              error: `API quota exceeded: ${embeddingError.message}`,
+            }
+            await saveIndexingStatus(status)
+            throw embeddingError
+          }
+          throw embeddingError
+        }
+      }
+
+      // Delete removed blocks
+      for (const paragraphId of paragraphIdsToDelete) {
+        await vectorStore.removeChunkByParagraphIdUnsafe(paragraphId, false) // Don't auto-save
+      }
+
+      // Update positions for moved blocks
+      for (const { block, existingParagraphId } of blocksToMove) {
+        await vectorStore.updateChunkPositionUnsafe(
+          existingParagraphId,
+          block.paragraphIndex,
+          false // Don't auto-save
+        )
+      }
+
+      // Add new and modified blocks
+      if (blocksNeedingEmbeddings.length > 0) {
+        await vectorStore.addSemanticBlocksUnsafe(
+          blocksNeedingEmbeddings,
+          embeddings,
+          projectId
+        )
+      }
+
+      // Save index
+      await vectorStore.saveIndexUnsafe()
+
+      // Update manifest
+      const manifest: IndexManifest = {
+        projectId: projectId,
+        folder: 'project',
+        embeddingModel: geminiApiKey ? 'gemini-embedding-001' : (openaiApiKey ? 'text-embedding-3-small' : 'unknown'),
+        embeddingDimension: EMBEDDING_DIMENSION,
+        chunkSize: DEFAULT_CHUNK_SIZE,
+        chunkOverlap: DEFAULT_CHUNK_OVERLAP,
+        indexVersion: '1.0.0',
+        appVersion: app.getVersion(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      await vectorStore.saveManifest(manifest)
+
+      // Update status
+      status = {
+        documentId,
+        status: 'completed',
+        chunksCount: currentBlocks.length,
+        indexedAt: new Date().toISOString(),
+        contentHash: document.metadata?.contentHash,
+      }
+      await saveIndexingStatus(status)
+
+      console.log(`[Indexing] ✓ Incrementally indexed ${documentId}: ${blocksToAdd.length} added, ${blocksToMove.length} moved, ${paragraphIdsToDelete.length} deleted`)
+      return status
+    } finally {
+      releaseLock()
+    }
+  } catch (error: any) {
+    console.error(`[Indexing] Failed to incrementally index ${documentId}:`, error)
+    
+    status = {
+      documentId,
+      status: 'error',
+      error: error.message || 'Unknown error',
+    }
+    await saveIndexingStatus(status)
+    
+    throw error
+  }
+}
+
 export const indexingService = {
   indexLibraryFile,
   reindexFile,
@@ -1040,5 +1336,6 @@ export const indexingService = {
   isIndexValid,
   shouldReindexFile,
   migrateLibraryIndex,
+  incrementalIndexProjectFile,
 }
 

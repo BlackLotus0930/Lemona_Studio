@@ -81,7 +81,8 @@ export const chatHistoryService = {
     documentId: string,
     chatId: string,
     messageId: string,
-    content: string
+    content: string,
+    reasoningMetadata?: AIChatMessage['reasoningMetadata']
   ): Promise<void> {
     const projectId = await this.getProjectIdFromDocument(documentId)
     if (!projectId) {
@@ -107,6 +108,11 @@ export const chatHistoryService = {
     // Update the message content
     messages[messageIndex].content = content
     messages[messageIndex].timestamp = new Date().toISOString()
+    
+    // Preserve reasoningMetadata if provided, or keep existing if not provided
+    if (reasoningMetadata !== undefined) {
+      messages[messageIndex].reasoningMetadata = reasoningMetadata
+    }
 
     // Save the updated chat history
     await this.saveChatHistory(projectId, project.chatHistory)

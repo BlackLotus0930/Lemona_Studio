@@ -230,49 +230,16 @@ async function getReadmeContent(projectId: string): Promise<string | null> {
   }
 }
 
-async function buildContext(documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], style?: string, cursorPosition?: number, apiKey?: string, userMessage?: string, geminiApiKey?: string): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[] }> {
+async function buildContext(documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], style?: string, cursorPosition?: number, apiKey?: string, userMessage?: string, geminiApiKey?: string): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: { actions?: { [key: string]: { fileCount: number; fileIds?: string[] } } } }> {
   let systemInstruction = `You are Lemona's AI writing companion.
 
-You are supportive, curious, and engaged, like a thoughtful collaborator sitting beside the user while they write.
-
-Your primary goal is to help the user think clearly without taking over their thinking.
-
-You care about:
-
-preserving the user's voice
-
-keeping ideas open rather than prematurely settled
-
-supporting confidence, not replacing authorship
-
-By default:
-
-You do not write full passages for the user.
-
-You do not assume access to the entire project.
-
-You do not introduce outside knowledge unless asked.
-
-Instead, you:
-
-reflect what the user seems to be doing
-
-gently point out tensions, assumptions, or unclear moves
-
-ask questions that help the user decide their next step
-
-When the user explicitly asks for it, you may:
-
-help rephrase a sentence
-
-outline possible directions
-
-bring in external references or examples
-
-Keep your tone warm, human, and encouraging.
-Avoid sounding like a reviewer, judge, or authority.
-
-Your role is not to finish the work, but to help the user stay in the work.`
+Keep responses concise. 
+Use rich markdown formatting to make information visually clear:
+- Use ## headings for main sections (not just bold text)
+- Use ### for subsections
+- Use **bold** for emphasis and key points
+- Use bullet lists for multiple items
+- Use code blocks for technical content`
 
   // 1️⃣ Add project context FIRST (README, project overview, intent)
   // This gives AI the background about "what project am I working on"
@@ -393,33 +360,102 @@ Your role is not to finish the work, but to help the user stay in the work.`
     contextHistory = [summaryMessage, ...contextHistory]
   }
 
-  // 4️⃣ Add library search results if @mentions detected
+  // 4️⃣ Add search results using reasoning service (system-controlled retrieval)
+  let reasoningMetadata: { actions?: { [key: string]: { fileCount: number; fileIds?: string[] } } } | undefined = undefined
+  
   if (userMessage && (geminiApiKey || apiKey)) {
     try {
-      // CRITICAL: projectId is required for library search
-      // Library index is project-isolated: {projectId}/library
+      // CRITICAL: projectId is required for search
       if (!projectId) {
-        console.warn('[OpenAI] Cannot search library: projectId is not provided')
+        console.warn('[OpenAI] Cannot search: projectId is not provided')
       } else {
-        const searchResult = await searchLibraryWithMentions(
+        // Use reasoning service for intelligent retrieval
+        // System controls the flow, AI evaluates relevance
+        const { reason } = await import('./aiReasoningService.js')
+        const reasoningResult = await reason(
           userMessage,
-          projectId, // Required: Current project ID
+          projectId,
           geminiApiKey, // Prefer Gemini
           apiKey, // Fallback to OpenAI
-          6 // top-k
+          10 // max steps
         )
 
-        if (searchResult.results.length > 0 && searchResult.formattedResults) {
-          systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`
+        // Collect metadata: actions and file counts
+        const actions: { [key: string]: { fileCount: number; fileIds?: string[] } } = {}
+        const searchedFiles = new Set<string>()
+        
+        // Count files searched
+        for (const step of reasoningResult.steps) {
+          if (step.action === 'search' && step.results) {
+            for (const result of step.results) {
+              if (result.chunk.fileId) {
+                searchedFiles.add(result.chunk.fileId)
+              }
+            }
+          }
+        }
+        
+        if (searchedFiles.size > 0) {
+          actions['Searched'] = { fileCount: searchedFiles.size, fileIds: Array.from(searchedFiles) }
+        }
+        
+        if (Object.keys(actions).length > 0) {
+          reasoningMetadata = { actions }
+        }
+
+        if (reasoningResult.finalResults.length > 0 && reasoningResult.formattedResults) {
+          const folderLabel = reasoningResult.finalResults.some(r => r.chunk.paragraphType === 'semantic-block')
+            ? 'Workspace and Library'
+            : 'Library'
+          
+          systemInstruction += `\n\n## ${folderLabel.toUpperCase()} REFERENCES\n\nRelevant excerpts from ${folderLabel.toLowerCase()} documents:\n\n${reasoningResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information.`
         }
       }
     } catch (error: any) {
-      // Don't fail the entire request if library search fails
-      console.warn('[OpenAI] Library search failed:', error.message)
+      // Fallback to existing search logic if reasoning service fails
+      console.warn('[OpenAI] Reasoning service failed, falling back to direct search:', error.message)
+      
+      try {
+        if (projectId) {
+          const { searchLibraryWithMentions } = await import('./semanticSearchService.js')
+          const searchResult = await searchLibraryWithMentions(
+            userMessage,
+            projectId,
+            geminiApiKey,
+            apiKey,
+            6
+          )
+
+          // Collect metadata from fallback search
+          if (searchResult.results.length > 0) {
+            const searchedFiles = new Set<string>()
+            
+            for (const result of searchResult.results) {
+              if (result.chunk.fileId) {
+                searchedFiles.add(result.chunk.fileId)
+              }
+            }
+            
+            if (searchedFiles.size > 0) {
+              reasoningMetadata = {
+                actions: {
+                  'Searched': { fileCount: searchedFiles.size, fileIds: Array.from(searchedFiles) }
+                }
+              }
+            }
+          }
+
+          if (searchResult.results.length > 0 && searchResult.formattedResults) {
+            systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`
+          }
+        }
+      } catch (fallbackError: any) {
+        console.warn('[OpenAI] Fallback search also failed:', fallbackError.message)
+      }
     }
   }
 
-  return { systemInstruction, chatHistory: contextHistory }
+  return { systemInstruction, chatHistory: contextHistory, reasoningMetadata }
 }
 
 // Summarize old chat history to preserve context without using too many tokens
@@ -620,12 +656,15 @@ export const openaiService = {
       }
 
       // gpt-5 models only support default temperature (1), not custom values
+      // gpt-5 models use max_completion_tokens instead of max_tokens
       const completionParams: any = {
         model,
         messages,
-        max_tokens: getMaxOutputTokens(modelName),
       }
-      if (!isGpt5Model(model)) {
+      if (isGpt5Model(model)) {
+        completionParams.max_completion_tokens = getMaxOutputTokens(modelName)
+      } else {
+        completionParams.max_tokens = getMaxOutputTokens(modelName)
         completionParams.temperature = 0.7
       }
       
@@ -658,7 +697,24 @@ export const openaiService = {
   ): AsyncGenerator<string> {
     const client = getClient(apiKey)
     const model = getModelName(modelName || 'gpt-4.1-nano', attachments && attachments.length > 0)
-    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey)
+    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey)
+    
+    // Send metadata first (if available) as a special chunk
+    if (reasoningMetadata) {
+      // Add web_search action if enabled
+      if (useWebSearch) {
+        if (!reasoningMetadata.actions) {
+          reasoningMetadata.actions = {}
+        }
+        reasoningMetadata.actions['Web search'] = { fileCount: 0 }
+      }
+      
+      // Send metadata as JSON string in special format
+      yield `__METADATA__${JSON.stringify(reasoningMetadata)}__METADATA__`
+    } else if (useWebSearch) {
+      // Only web search, no other actions
+      yield `__METADATA__${JSON.stringify({ actions: { 'Web search': { fileCount: 0 } } })}__METADATA__`
+    }
     
     try {
       // If web search is enabled, use OpenAI's Responses API with native web_search tool
@@ -860,13 +916,16 @@ export const openaiService = {
 
       // Stream using Chat Completions API (no web search tools here since we handle it above)
       // gpt-5 models only support default temperature (1), not custom values
+      // gpt-5 models use max_completion_tokens instead of max_tokens
       const streamParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
         model,
         messages,
         stream: true,
-        max_tokens: getMaxOutputTokens(modelName),
-      }
-      if (!isGpt5Model(model)) {
+      } as any
+      if (isGpt5Model(model)) {
+        streamParams.max_completion_tokens = getMaxOutputTokens(modelName)
+      } else {
+        streamParams.max_tokens = getMaxOutputTokens(modelName)
         streamParams.temperature = 0.7
       }
       
@@ -917,9 +976,11 @@ export const openaiService = {
       const completionParams: any = {
         model,
         messages,
-        max_tokens: getMaxOutputTokens(modelName),
       }
-      if (!isGpt5Model(model)) {
+      if (isGpt5Model(model)) {
+        completionParams.max_completion_tokens = getMaxOutputTokens(modelName)
+      } else {
+        completionParams.max_tokens = getMaxOutputTokens(modelName)
         completionParams.temperature = 0.7
       }
 

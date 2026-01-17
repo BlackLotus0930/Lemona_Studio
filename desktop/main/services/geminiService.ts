@@ -41,48 +41,14 @@ function getModel(apiKey: string, modelName: string = 'gemini-3-flash-preview'):
   })
 }
 
-const SYSTEM_PROMPT = `You are Lemona's AI writing companion.
+  let systemInstruction = `You are Lemona's AI writing companion.
 
-You are supportive, curious, and engaged, like a thoughtful collaborator sitting beside the user while they write.
-
-Your primary goal is to help the user think clearly without taking over their thinking.
-
-You care about:
-
-preserving the user's voice
-
-keeping ideas open rather than prematurely settled
-
-supporting confidence, not replacing authorship
-
-By default:
-
-You do not write full passages for the user.
-
-You do not assume access to the entire project.
-
-You do not introduce outside knowledge unless asked.
-
-Instead, you:
-
-reflect what the user seems to be doing
-
-gently point out tensions, assumptions, or unclear moves
-
-ask questions that help the user decide their next step
-
-When the user explicitly asks for it, you may:
-
-help rephrase a sentence
-
-outline possible directions
-
-bring in external references or examples
-
-Keep your tone warm, human, and encouraging.
-Avoid sounding like a reviewer, judge, or authority.
-
-Your role is not to finish the work, but to help the user stay in the work.`
+  Keep responses concise. Use rich markdown formatting to make information visually clear:
+  - Use ## headings for main sections (not just bold text)
+  - Use ### for subsections
+  - Use **bold** for emphasis and key points
+  - Use bullet lists for multiple items
+  - Use code blocks for technical content`
 
 async function getReadmeContent(projectId: string): Promise<string | null> {
   try {
@@ -193,8 +159,16 @@ async function buildContext(
   apiKey?: string,
   userMessage?: string,
   openaiApiKey?: string
-): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[] }> {
-  let systemInstruction = SYSTEM_PROMPT
+): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: { actions?: { [key: string]: { fileCount: number; fileIds?: string[] } } } }> {
+  let systemInstruction = `You are Lemona's AI writing companion.
+
+Keep responses concise. 
+Use rich markdown formatting to make information visually clear:
+- Use ## headings for main sections (not just bold text)
+- Use ### for subsections
+- Use **bold** for emphasis and key points
+- Use bullet lists for multiple items
+- Use code blocks for technical content`
 
   // 1️⃣ Add project context FIRST (README, project overview, intent)
   // This gives AI the background about "what project am I working on"
@@ -297,33 +271,105 @@ async function buildContext(
     contextHistory = [summaryMessage, ...contextHistory]
   }
 
-  // 4️⃣ Add library search results if @mentions detected
+  // 4️⃣ Add search results using reasoning service (system-controlled retrieval)
+  let reasoningMetadata: { actions?: { [key: string]: { fileCount: number; fileIds?: string[] } } } | undefined = undefined
+  
   if (userMessage && (apiKey || openaiApiKey)) {
     try {
-      // CRITICAL: projectId is required for library search
-      // Library index is project-isolated: {projectId}/library
+      // CRITICAL: projectId is required for search
       if (!projectId) {
-        console.warn('[Gemini] Cannot search library: projectId is not provided')
+        console.warn('[Gemini] Cannot search: projectId is not provided')
       } else {
-        const searchResult = await searchLibraryWithMentions(
+        // Use reasoning service for intelligent retrieval
+        // System controls the flow, AI evaluates relevance
+        const { reason } = await import('./aiReasoningService.js')
+        const reasoningResult = await reason(
           userMessage,
-          projectId, // Required: Current project ID
+          projectId,
           apiKey, // geminiApiKey
           openaiApiKey,
-          6 // top-k
+          10 // max steps
         )
 
-        if (searchResult.results.length > 0 && searchResult.formattedResults) {
-          systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`
+        // Collect metadata: actions and file counts
+        const actions: { [key: string]: { fileCount: number; fileIds?: string[] } } = {}
+        const searchedFiles = new Set<string>()
+        
+        // Count files searched
+        for (const step of reasoningResult.steps) {
+          if (step.action === 'search' && step.results) {
+            for (const result of step.results) {
+              if (result.chunk.fileId) {
+                searchedFiles.add(result.chunk.fileId)
+              }
+            }
+          }
+        }
+        
+        if (searchedFiles.size > 0) {
+          actions['Searched'] = { fileCount: searchedFiles.size, fileIds: Array.from(searchedFiles) }
+        }
+        
+        if (Object.keys(actions).length > 0) {
+          reasoningMetadata = { actions }
+        }
+
+        if (reasoningResult.finalResults.length > 0 && reasoningResult.formattedResults) {
+          const folderLabel = reasoningResult.finalResults.some(r => r.chunk.paragraphType === 'semantic-block')
+            ? 'Workspace and Library'
+            : 'Library'
+          
+          systemInstruction += `\n\n## ${folderLabel.toUpperCase()} REFERENCES\n\nRelevant excerpts from ${folderLabel.toLowerCase()} documents:\n\n${reasoningResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information.`
         }
       }
     } catch (error: any) {
-      // Don't fail the entire request if library search fails
-      console.warn('[Gemini] Library search failed:', error.message)
+      // Fallback to existing search logic if reasoning service fails
+      console.warn('[Gemini] Reasoning service failed, falling back to direct search:', error.message)
+      
+      try {
+        if (projectId) {
+          const { searchLibraryWithMentions } = await import('./semanticSearchService.js')
+          const searchResult = await searchLibraryWithMentions(
+            userMessage,
+            projectId,
+            apiKey,
+            openaiApiKey,
+            6
+          )
+
+          // Collect metadata from fallback search
+          if (searchResult.results.length > 0) {
+            const searchedFiles = new Set<string>()
+            
+            for (const result of searchResult.results) {
+              if (result.chunk.fileId) {
+                searchedFiles.add(result.chunk.fileId)
+              }
+            }
+            
+            if (searchedFiles.size > 0) {
+              reasoningMetadata = {
+                actions: {
+                  'Searched': { fileCount: searchedFiles.size, fileIds: Array.from(searchedFiles) }
+                }
+              }
+            }
+          }
+
+          if (searchResult.results.length > 0 && searchResult.formattedResults) {
+            systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`
+          }
+        }
+      } catch (fallbackError: any) {
+        console.warn('[Gemini] Fallback search also failed:', fallbackError.message)
+      }
     }
   }
+  
+  // Add web search tool to metadata if enabled
+  // Note: web search is handled by Gemini API, so we'll add it in streamChat
 
-  return { systemInstruction, chatHistory: contextHistory }
+  return { systemInstruction, chatHistory: contextHistory, reasoningMetadata }
 }
 
 // Summarize old chat history to preserve context without using too many tokens
@@ -446,7 +492,24 @@ export const geminiService = {
     openaiApiKey?: string
   ): AsyncGenerator<string> {
     const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview')
-    const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey)
+    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey)
+    
+    // Send metadata first (if available) as a special chunk
+    if (reasoningMetadata) {
+      // Add web_search action if enabled
+      if (useWebSearch) {
+        if (!reasoningMetadata.actions) {
+          reasoningMetadata.actions = {}
+        }
+        reasoningMetadata.actions['Web search'] = { fileCount: 0 }
+      }
+      
+      // Send metadata as JSON string in special format
+      yield `__METADATA__${JSON.stringify(reasoningMetadata)}__METADATA__`
+    } else if (useWebSearch) {
+      // Only web search, no other actions
+      yield `__METADATA__${JSON.stringify({ actions: { 'Web search': { fileCount: 0 } } })}__METADATA__`
+    }
     const conversationHistory = [...(history || [])]
     conversationHistory.push({
       id: `msg_${Date.now()}`,

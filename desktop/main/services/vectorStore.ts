@@ -112,6 +112,13 @@ export interface ChunkMetadata {
   endChar: number
   tokenCount: number
   projectId?: string // Optional: Project ID this chunk belongs to (for library files scoped to projects)
+  // Workspace paragraph-level indexing fields (only for folder === 'project')
+  paragraphId?: string // UUID, unique identifier (identity)
+  paragraphIndex?: number // Position index (attribute, can be updated)
+  paragraphHash?: string // Paragraph hash (for change detection)
+  paragraphType?: 'semantic-block' // Paragraph type
+  headingText?: string // Heading text (if has heading)
+  headingLevel?: number // Heading level (if has heading)
 }
 
 /**
@@ -407,11 +414,6 @@ class VectorStore {
    * @param folder - Folder type: 'library' or 'project'
    */
   setProjectId(projectId: string, folder: 'library' | 'project'): void {
-    // Fail fast if project index is not supported yet
-    if (folder === 'project') {
-      throw new Error('Project vector index is not supported yet')
-    }
-    
     if (this.currentProjectId === projectId && this.currentFolder === folder) {
       return // No change
     }
@@ -1197,6 +1199,107 @@ class VectorStore {
   }
 
   /**
+   * Add semantic blocks (for Workspace paragraph-level indexing)
+   * Similar to addChunksUnsafe but handles SemanticBlock with paragraphId
+   * 📌 UNSAFE: Assumes caller already holds write lock
+   */
+  async addSemanticBlocksUnsafe(
+    blocks: Array<{ paragraphId: string; fileId: string; text: string; hash: string; paragraphIndex: number; headingText?: string; headingLevel?: number; paragraphCount: number; tokenCount: number }>,
+    embeddings: number[][],
+    projectId?: string
+  ): Promise<void> {
+    // Check if index needs to be loaded first
+    if (!this.isInitialized || !this.index) {
+      console.log(`[VectorStore] Index not initialized, loading...`)
+      await this.loadIndexUnsafe()
+      if (!this.index) {
+        throw new Error('Index not initialized after loadIndex()')
+      }
+    }
+
+    // Verify index capacity (same logic as addChunksUnsafe)
+    const maxElements = this.index.getMaxElements()
+    if (maxElements === 0) {
+      console.error(`[VectorStore] Index has zero capacity! Reinitializing...`)
+      await this.initialize()
+      if (!this.index) {
+        throw new Error('Failed to reinitialize index')
+      }
+    }
+
+    if (blocks.length !== embeddings.length) {
+      throw new Error(`Blocks and embeddings length mismatch: ${blocks.length} vs ${embeddings.length}`)
+    }
+
+    const currentCount = this.index.getCurrentCount()
+    const neededCapacity = currentCount + blocks.length
+    const currentMaxElements = this.index.getMaxElements()
+    
+    if (neededCapacity > currentMaxElements) {
+      throw new Error(`Index capacity exceeded: need ${neededCapacity}, have ${currentMaxElements}`)
+    }
+
+    // Add each block with its embedding
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i]
+      const embedding = embeddings[i]
+
+      if (embedding.length !== this.dimension) {
+        throw new Error(
+          `Embedding dimension mismatch: expected ${this.dimension}, got ${embedding.length}`
+        )
+      }
+
+      // Check if block already exists by paragraphId
+      let existingLabel: number | undefined
+      for (const [label, metadata] of this.metadata.entries()) {
+        if (metadata.paragraphId === block.paragraphId) {
+          existingLabel = label
+          break
+        }
+      }
+
+      if (existingLabel !== undefined) {
+        // Remove old block first
+        await this.removeChunkByParagraphIdUnsafe(block.paragraphId, false) // Don't auto-save, save once at the end
+      }
+
+      // Generate chunk ID (for compatibility with existing system)
+      const chunkId = `${block.fileId}_para_${block.paragraphIndex}`
+
+      // Get next label
+      const label = this.nextLabel++
+      
+      // Add point to index
+      this.index.addPoint(embedding, label, false)
+
+      // Store metadata with paragraph-level fields
+      const metadata: ChunkMetadata = {
+        id: chunkId,
+        fileId: block.fileId,
+        chunkIndex: block.paragraphIndex, // Use paragraphIndex as chunkIndex
+        text: block.text,
+        hash: block.hash, // Keep hash for backward compatibility
+        startChar: 0, // Not applicable for semantic blocks
+        endChar: block.text.length,
+        tokenCount: block.tokenCount,
+        projectId: projectId,
+        // Paragraph-level fields
+        paragraphId: block.paragraphId,
+        paragraphIndex: block.paragraphIndex,
+        paragraphHash: block.hash,
+        paragraphType: 'semantic-block',
+        headingText: block.headingText,
+        headingLevel: block.headingLevel,
+      }
+
+      this.metadata.set(label, metadata)
+      this.idToLabel.set(chunkId, label)
+      this.labelToId.set(label, chunkId)
+    }
+  }
+
+  /**
    * Remove a chunk from the index
    */
   async removeChunk(chunkId: string): Promise<void> {
@@ -1298,6 +1401,130 @@ class VectorStore {
         throw new Error(`Failed to save index after removing chunks: ${saveError.message}`)
       }
     }
+  }
+
+  /**
+   * Remove a chunk by paragraphId (for Workspace paragraph-level indexing)
+   * 📌 UNSAFE: Assumes caller already holds write lock
+   * 
+   * @param paragraphId - The paragraph UUID to remove
+   * @param autoSave - Whether to automatically save the index after removal (default: true)
+   */
+  async removeChunkByParagraphIdUnsafe(paragraphId: string, autoSave: boolean = true): Promise<void> {
+    // Find chunk by paragraphId
+    let chunkId: string | undefined
+    for (const [label, metadata] of this.metadata.entries()) {
+      if (metadata.paragraphId === paragraphId) {
+        chunkId = metadata.id
+        break
+      }
+    }
+
+    if (!chunkId) {
+      console.log(`[VectorStore] No chunk found with paragraphId ${paragraphId}`)
+      return
+    }
+
+    await this.removeChunk(chunkId)
+
+    if (autoSave) {
+      try {
+        await this.saveIndexUnsafe()
+      } catch (saveError: any) {
+        console.error(`[VectorStore] Failed to save index after removing chunk by paragraphId ${paragraphId}:`, saveError)
+        throw new Error(`Failed to save index after removing chunk: ${saveError.message}`)
+      }
+    }
+  }
+
+  /**
+   * Update paragraph position (paragraphIndex) by paragraphId
+   * Used when a paragraph is moved but content unchanged (hash matches)
+   * 📌 UNSAFE: Assumes caller already holds write lock
+   * 
+   * @param paragraphId - The paragraph UUID
+   * @param newParagraphIndex - New position index
+   * @param autoSave - Whether to automatically save the index after update (default: true)
+   */
+  async updateChunkPositionUnsafe(
+    paragraphId: string,
+    newParagraphIndex: number,
+    autoSave: boolean = true
+  ): Promise<void> {
+    // Find chunk by paragraphId
+    let label: number | undefined
+    for (const [l, metadata] of this.metadata.entries()) {
+      if (metadata.paragraphId === paragraphId) {
+        label = l
+        break
+      }
+    }
+
+    if (label === undefined) {
+      throw new Error(`Chunk with paragraphId ${paragraphId} not found`)
+    }
+
+    // Update metadata
+    const metadata = this.metadata.get(label)
+    if (!metadata) {
+      throw new Error(`Metadata not found for label ${label}`)
+    }
+
+    metadata.paragraphIndex = newParagraphIndex
+    this.metadata.set(label, metadata)
+
+    if (autoSave) {
+      try {
+        await this.saveIndexUnsafe()
+      } catch (saveError: any) {
+        console.error(`[VectorStore] Failed to save index after updating chunk position for paragraphId ${paragraphId}:`, saveError)
+        throw new Error(`Failed to save index after updating chunk position: ${saveError.message}`)
+      }
+    }
+  }
+
+  /**
+   * Find chunks by hash (for incremental indexing)
+   * Returns all chunks matching the given hash
+   * 📌 UNSAFE: Assumes caller already holds read lock
+   * 
+   * @param hash - The paragraph hash to search for
+   * @param fileId - Optional: Filter by file ID
+   * @returns Array of matching chunk metadata
+   */
+  findChunksByHashUnsafe(hash: string, fileId?: string): ChunkMetadata[] {
+    const results: ChunkMetadata[] = []
+
+    for (const metadata of this.metadata.values()) {
+      // Check paragraphHash first (for Workspace), fallback to hash (for Library)
+      const matchesHash = metadata.paragraphHash === hash || metadata.hash === hash
+      const matchesFile = !fileId || metadata.fileId === fileId
+
+      if (matchesHash && matchesFile) {
+        results.push(metadata)
+      }
+    }
+
+    return results
+  }
+
+  /**
+   * Get all chunks for a file (for incremental indexing)
+   * 📌 UNSAFE: Assumes caller already holds read lock
+   * 
+   * @param fileId - The file ID
+   * @returns Array of chunk metadata for the file
+   */
+  getChunksByFileIdUnsafe(fileId: string): ChunkMetadata[] {
+    const results: ChunkMetadata[] = []
+
+    for (const metadata of this.metadata.values()) {
+      if (metadata.fileId === fileId) {
+        results.push(metadata)
+      }
+    }
+
+    return results
   }
 
   /**
@@ -1452,11 +1679,6 @@ const vectorStoreInstances: Map<string, VectorStore> = new Map()
  * @param folder - Folder type: 'library' or 'project'
  */
 export function getVectorStore(projectId: string, folder: 'library' | 'project'): VectorStore {
-  // Fail fast if project index is not supported yet
-  if (folder === 'project') {
-    throw new Error('Project vector index is not supported yet')
-  }
-
   if (!projectId) {
     throw new Error('Project ID is required')
   }

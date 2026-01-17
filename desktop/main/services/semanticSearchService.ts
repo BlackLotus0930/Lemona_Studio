@@ -325,10 +325,162 @@ export async function getLibraryFiles(): Promise<Array<{ id: string; name: strin
   }))
 }
 
+/**
+ * Search project files (Workspace folder)
+ * @param query - Search query
+ * @param projectId - Project ID
+ * @param geminiApiKey - Optional Gemini API key
+ * @param openaiApiKey - Optional OpenAI API key
+ * @param fileIds - Optional: filter by specific file IDs
+ * @param k - Number of results to return (default: 6)
+ */
+export async function searchProjectFiles(
+  query: string,
+  projectId: string,
+  geminiApiKey?: string,
+  openaiApiKey?: string,
+  fileIds?: string[],
+  k: number = 6
+): Promise<SearchResult[]> {
+  return searchLibrary(query, projectId, 'project', geminiApiKey, openaiApiKey, fileIds, k)
+}
+
+/**
+ * Resolve file mentions to document IDs (workspace + library)
+ * Supports both workspace and library files
+ */
+export async function resolveFileMentionsAll(
+  mentions: string[],
+  projectId: string
+): Promise<{ workspaceIds: string[]; libraryIds: string[] }> {
+  if (mentions.length === 0) {
+    return { workspaceIds: [], libraryIds: [] }
+  }
+
+  const allDocuments = await documentService.getAll()
+  const projectDocuments = allDocuments.filter(
+    doc => doc.projectId === projectId && (doc.folder === 'project' || doc.folder === 'library')
+  )
+  
+  const workspaceIds: string[] = []
+  const libraryIds: string[] = []
+
+  for (const mention of mentions) {
+    const exactMatch = projectDocuments.find(
+      doc => doc.title.toLowerCase() === mention.toLowerCase() || doc.id === mention
+    )
+
+    if (exactMatch) {
+      if (exactMatch.folder === 'project') {
+        workspaceIds.push(exactMatch.id)
+      } else if (exactMatch.folder === 'library') {
+        libraryIds.push(exactMatch.id)
+      }
+      continue
+    }
+
+    // Try partial match
+    const mentionLower = mention.toLowerCase()
+    const partialMatch = projectDocuments.find(doc => {
+      const fileName = doc.title.toLowerCase()
+      const nameWithoutExt = fileName.substring(0, fileName.lastIndexOf('.'))
+      return nameWithoutExt === mentionLower || fileName.includes(mentionLower)
+    })
+
+    if (partialMatch) {
+      if (partialMatch.folder === 'project') {
+        workspaceIds.push(partialMatch.id)
+      } else if (partialMatch.folder === 'library') {
+        libraryIds.push(partialMatch.id)
+      }
+    }
+  }
+
+  return { workspaceIds, libraryIds }
+}
+
+/**
+ * Search workspace and library folders together
+ * System-controlled search strategy:
+ * - No @mentions: Search all documents (workspace + library), sorted by relevance
+ * - With @mentions: Prioritize @mentioned documents, but also search others
+ * 
+ * @param query - Search query
+ * @param projectId - Project ID
+ * @param geminiApiKey - Optional Gemini API key
+ * @param openaiApiKey - Optional OpenAI API key
+ * @param fileIds - Optional: @mentioned file IDs (will be prioritized)
+ * @param k - Number of results per folder (default: 6)
+ */
+export async function searchWorkspaceAndLibrary(
+  query: string,
+  projectId: string,
+  geminiApiKey?: string,
+  openaiApiKey?: string,
+  fileIds?: string[],
+  k: number = 6
+): Promise<SearchResult[]> {
+  if (!query || query.trim().length === 0) {
+    return []
+  }
+
+  const hasGeminiKey = geminiApiKey && geminiApiKey.trim().length > 0
+  const hasOpenaiKey = openaiApiKey && openaiApiKey.trim().length > 0
+  
+  if (!hasGeminiKey && !hasOpenaiKey) {
+    console.warn('[SemanticSearch] No API keys available for search, returning empty results')
+    return []
+  }
+
+  // Search both folders
+  const [workspaceResults, libraryResults] = await Promise.all([
+    searchProjectFiles(query, projectId, geminiApiKey, openaiApiKey, fileIds, k).catch(() => [] as SearchResult[]),
+    searchLibrary(query, projectId, 'library', geminiApiKey, openaiApiKey, fileIds, k).catch(() => [] as SearchResult[]),
+  ])
+
+  // Merge results and prioritize @mentioned files
+  const allResults: SearchResult[] = []
+  const mentionedFileIds = new Set(fileIds || [])
+
+  // Separate results into mentioned and non-mentioned
+  const mentionedResults: SearchResult[] = []
+  const otherResults: SearchResult[] = []
+
+  for (const result of [...workspaceResults, ...libraryResults]) {
+    if (mentionedFileIds.has(result.chunk.fileId)) {
+      mentionedResults.push(result)
+    } else {
+      otherResults.push(result)
+    }
+  }
+
+  // Sort each group by score (lower distance = better)
+  mentionedResults.sort((a, b) => a.distance - b.distance)
+  otherResults.sort((a, b) => a.distance - b.distance)
+
+  // Combine: mentioned files first, then others
+  // Boost mentioned results by reducing their effective distance
+  const mentionedBoosted = mentionedResults.map(result => ({
+    ...result,
+    distance: result.distance * 0.5, // Boost by halving distance
+    score: result.score * 0.5, // Lower score is better
+  }))
+
+  allResults.push(...mentionedBoosted, ...otherResults)
+
+  // Re-sort all results by boosted score
+  allResults.sort((a, b) => a.distance - b.distance)
+
+  // Return top k results
+  return allResults.slice(0, k)
+}
+
 export const semanticSearchService = {
   parseMentions,
   searchLibrary,
   searchLibraryWithMentions,
+  searchProjectFiles,
+  searchWorkspaceAndLibrary,
   formatSearchResults,
   getLibraryFiles,
 }
