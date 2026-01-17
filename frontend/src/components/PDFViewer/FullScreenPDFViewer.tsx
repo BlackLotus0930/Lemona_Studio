@@ -861,9 +861,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                   }}
                   style={{
                     display: 'block',
-                    boxShadow: theme === 'dark' 
-                      ? '0 4px 12px rgba(0, 0, 0, 0.5)' 
-                      : '0 2px 8px rgba(0, 0, 0, 0.12)',
+                    boxShadow: 'none',
                     backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fff',
                     filter: theme === 'dark' ? 'brightness(0.85)' : 'none',
                   }}
@@ -889,9 +887,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                 ref={canvasRef}
                 style={{
                   display: 'block',
-                  boxShadow: theme === 'dark' 
-                    ? '0 4px 12px rgba(0, 0, 0, 0.5)' 
-                    : '0 4px 16px rgba(0, 0, 0, 0.25)',
+                  boxShadow: 'none',
                   backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fff',
                   filter: theme === 'dark' ? 'brightness(0.85)' : 'none',
                 }}

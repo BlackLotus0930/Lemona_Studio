@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { Document, IndexingStatus } from '@shared/types'
+import { Document } from '@shared/types'
 import { useTheme } from '../../contexts/ThemeContext'
 import { documentApi } from '../../services/api'
-import { indexingApi } from '../../services/desktop-api'
 import { memo } from 'react'
 // @ts-ignore
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
@@ -73,14 +72,12 @@ function FileExplorer({
   const [dropTargetId, setDropTargetId] = useState<string | null>(null) // Track which item we're dropping relative to
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['worldlab', 'library', 'project'])) // Default all folders expanded
   
-  // Indexing status state - track indexing status for library files
-  const [indexingStatuses, setIndexingStatuses] = useState<Map<string, IndexingStatus | null>>(new Map())
-  
   // Upload queue state - use ref to avoid re-renders and manage queue properly
   const uploadQueueRef = useRef<Array<{ file: File; folderId: 'library' | 'project' | 'worldlab' }>>([])
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; currentFile: string } | null>(null)
   const [uploadQueueTrigger, setUploadQueueTrigger] = useState(0) // Trigger to re-run useEffect when queue changes
   const processingRef = useRef(false)
+  const uploadedLibraryFilesRef = useRef<Set<string>>(new Set()) // Track uploaded library files to hide progress
   const MAX_CONCURRENT_UPLOADS = 3 // Process max 3 files at a time
   
   // Search state
@@ -102,61 +99,6 @@ function FileExplorer({
     }
   }, [searchQueryProp])
 
-  // Fetch indexing status for library files
-  useEffect(() => {
-    const libraryDocs = documents.filter(doc => doc.folder === 'library')
-    if (libraryDocs.length === 0) {
-      setIndexingStatuses(new Map())
-      return
-    }
-
-    let isMounted = true
-
-    const fetchStatuses = async () => {
-      const promises = libraryDocs.map(async (doc) => {
-        try {
-          const status = await indexingApi.getIndexingStatus(doc.id)
-          return { docId: doc.id, status }
-        } catch (error) {
-          console.error(`Failed to get indexing status for ${doc.id}:`, error)
-          return { docId: doc.id, status: null }
-        }
-      })
-
-      const results = await Promise.all(promises)
-      if (isMounted) {
-        const newStatusMap = new Map<string, IndexingStatus | null>()
-        results.forEach(({ docId, status }) => {
-          newStatusMap.set(docId, status)
-        })
-        setIndexingStatuses(newStatusMap)
-      }
-    }
-
-    fetchStatuses()
-
-    // Poll for status updates every 2 seconds if any file is indexing
-    const interval = setInterval(() => {
-      if (!isMounted) return
-      
-      // Check current statuses to see if any are indexing
-      setIndexingStatuses((currentStatuses) => {
-        const hasIndexing = Array.from(currentStatuses.values()).some(
-          status => status?.status === 'indexing' || status?.status === 'pending'
-        )
-        if (hasIndexing && isMounted) {
-          fetchStatuses()
-        }
-        return currentStatuses
-      })
-    }, 2000)
-
-    return () => {
-      isMounted = false
-      clearInterval(interval)
-    }
-  }, [documents])
-  
   // Extract text from TipTap JSON content
   const extractTextFromTipTap = (node: any): string => {
     if (typeof node === 'string') return node
@@ -682,11 +624,15 @@ function FileExplorer({
           processedCount++
 
           try {
-            setUploadProgress({
-              current: processedCount,
-              total: totalFiles,
-              currentFile: file.name,
-            })
+            // Only show upload progress for non-library files
+            // Library files will show indexing completion notification instead
+            if (folderId !== 'library') {
+              setUploadProgress({
+                current: processedCount,
+                total: totalFiles,
+                currentFile: file.name
+              })
+            }
 
             if (!isSupportedFileType(file.name)) {
               console.warn(`File type not supported: ${file.name}`)
@@ -728,8 +674,13 @@ function FileExplorer({
             if (document && onFileUploaded) {
               const isBatchUpload = totalFiles > 1
               onFileUploaded(document, isBatchUpload)
+              
+              // Track library files that have been uploaded
+              if (folderId === 'library') {
+                uploadedLibraryFilesRef.current.add(document.id)
+              }
             }
-            return { success: true, document }
+            return { success: true, document, folderId }
           } catch (error) {
             console.error('Failed to upload file:', error)
             return {
@@ -750,6 +701,15 @@ function FileExplorer({
             console.error(result.value.error)
           }
         })
+        
+        // Check if all remaining files in queue are library files
+        const remainingLibraryFiles = uploadQueueRef.current.filter(item => item.folderId === 'library').length
+        const remainingNonLibraryFiles = uploadQueueRef.current.length - remainingLibraryFiles
+        
+        // Hide upload progress if only library files remain (they'll show indexing notification instead)
+        if (remainingNonLibraryFiles === 0 && uploadQueueRef.current.length > 0) {
+          setUploadProgress(null)
+        }
 
         // Small delay between batches to prevent overwhelming the system
         if (uploadQueueRef.current.length > 0) {
@@ -759,6 +719,7 @@ function FileExplorer({
 
       processingRef.current = false
       setUploadProgress(null)
+      uploadedLibraryFilesRef.current.clear() // Clear tracking after all uploads complete
     }
 
     processUploads()
@@ -835,9 +796,7 @@ function FileExplorer({
     const isFolder = item.type === 'folder'
     const isExpanded = isFolder && expandedFolders.has(item.id)
     // Folders have 12px padding, files inside folders have 32px (12 + 20 for arrow/indent)
-    // Library files have 12px padding (same as folder) because circle div takes the arrow space
-    const isLibraryFile = !isFolder && item.document && item.document.folder === 'library'
-    const paddingLeft = isFolder ? 12 : (isLibraryFile ? 12 : 32)
+    const paddingLeft = isFolder ? 12 : 32 // All files (library and workspace) have 32px padding
     // File items have different text color (#818181), folders keep original color
     const itemTextColor = isFolder ? textColor : '#818181'
     // Check if this item has the context menu open
@@ -1126,52 +1085,6 @@ function FileExplorer({
               )}
             </span>
           )}
-          
-          {/* Indexing Status Icon - only for library files, in separate div aligned with folder arrow */}
-          {!isFolder && item.document && item.document.folder === 'library' && (() => {
-            const status = indexingStatuses.get(item.document!.id)
-            const isIndexing = status?.status === 'indexing' || status?.status === 'pending'
-            
-            if (isIndexing) {
-              return (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    marginRight: '4px',
-                    width: '16px',
-                    height: '16px',
-                    flexShrink: 0,
-                  }}
-                >
-                  <span
-                    className="indexing-spinner"
-                    style={{
-                      width: '11px',
-                      height: '11px',
-                      border: `2px solid ${theme === 'dark' ? '#666666' : '#cccccc'}`,
-                      borderTopColor: theme === 'dark' ? '#999999' : '#888888',
-                      borderRadius: '50%',
-                      animation: 'spin 1s linear infinite',
-                      opacity: 0.35,
-                    }}
-                  />
-                </div>
-              )
-            }
-            // When indexed or no status, show placeholder div to maintain alignment
-            return (
-              <div
-                style={{
-                  width: '16px',
-                  height: '16px',
-                  marginRight: '4px',
-                  flexShrink: 0,
-                }}
-              />
-            )
-          })()}
           
           {/* File Name */}
           {isRenaming ? (

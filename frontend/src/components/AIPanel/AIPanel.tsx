@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, memo } from 'react'
 import { Document } from '@shared/types'
 import ChatInterface from './ChatInterface'
 import ChatHistoryDropdown from './ChatHistoryDropdown'
@@ -84,7 +84,7 @@ function saveOpenChatTabs(document: Document | null, chatIds: string[]): void {
   }
 }
 
-export default function AIPanel({ document, onClose }: AIPanelProps) {
+function AIPanel({ document, onClose }: AIPanelProps) {
   const { theme } = useTheme()
   const [chats, setChats] = useState<Chat[]>([
     { id: 'chat_default', name: 'Chat 1', messages: [] }
@@ -98,6 +98,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
   const previousActiveChatIdRef = useRef<string>(savedActiveChatId || 'chat_default') // Track previous activeChatId to maintain across file switches
   const chatsRef = useRef<Chat[]>([]) // Track current chats to preserve new chats when switching files
   const isNavigatingAwayRef = useRef<boolean>(false) // Track if we're navigating away to prevent persisting 'chat_default'
+  const lastLoadedDocumentIdRef = useRef<string | null>(null) // Track last loaded document ID to prevent unnecessary reloads
   const [isStreaming, setIsStreaming] = useState(false)
   const [showMenu, setShowMenu] = useState(false)
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
@@ -125,7 +126,6 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
   
   const bgColor = theme === 'dark' ? '#141414' : '#fafafa'
   const brighterBg = theme === 'dark' ? '#141414' : '#fafafa'
-  const borderColor = theme === 'dark' ? '#232323' : '#dadce0'
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const activeChatBg = theme === 'dark' ? '#212121' : '#f0f0f0'
   const hoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5' // Brighter for chat tabs
@@ -157,7 +157,13 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
       setChats([{ id: 'chat_default', name: 'Chat 1', messages: [] }])
       const defaultChatId = 'chat_default'
       setActiveChatId(defaultChatId)
+      lastLoadedDocumentIdRef.current = null
       // Don't reset previousActiveChatIdRef here - preserve it for when we return
+      return
+    }
+    
+    // Skip reload if we already loaded chats for this document
+    if (lastLoadedDocumentIdRef.current === document.id) {
       return
     }
     
@@ -191,6 +197,8 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
           previousActiveChatIdRef.current = chatIdToUse
           saveActiveChatId(document, chatIdToUse)
           saveOpenChatTabs(document, [chatIdToUse])
+          // Mark this document as loaded
+          lastLoadedDocumentIdRef.current = document.id
         } else {
           // Load existing chats
           const allLoadedChats: Chat[] = chatEntries.map(([chatId, messages], index) => {
@@ -282,6 +290,9 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
             saveActiveChatId(document, chatIdToUse)
           }
         }
+        
+        // Mark this document as loaded to prevent unnecessary reloads
+        lastLoadedDocumentIdRef.current = document.id
       } catch (error) {
         console.error('Failed to load chat history:', error)
         // Fallback to default chat on error
@@ -291,6 +302,8 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         previousActiveChatIdRef.current = defaultChatId
         saveActiveChatId(document, defaultChatId)
         saveOpenChatTabs(document, [defaultChatId])
+        // Still mark as loaded even on error to prevent retry loops
+        lastLoadedDocumentIdRef.current = document.id
       }
     }
 
@@ -696,8 +709,7 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        backgroundColor: bgColor,
-        borderRight: `1px solid ${borderColor}`
+        backgroundColor: bgColor
       }}>
       {/* Header - Chat Containers */}
       <div 
@@ -1153,3 +1165,8 @@ export default function AIPanel({ document, onClose }: AIPanelProps) {
     </div>
   )
 }
+
+export default memo(AIPanel, (prevProps, nextProps) => {
+  // Only re-render if document ID actually changes
+  return prevProps.document?.id === nextProps.document?.id && prevProps.onClose === nextProps.onClose
+})

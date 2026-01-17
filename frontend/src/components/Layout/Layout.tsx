@@ -365,6 +365,7 @@ export default function Layout(): JSX.Element {
   const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | null>(null) // Track export format
   const [showCommitSuccessNotification, setShowCommitSuccessNotification] = useState<{ fileCount: number } | null>(null) // Track commit success notification
   const [restoredCommitParentId, setRestoredCommitParentId] = useState<string | null>(null) // Track restored commit ID for branch creation
+  const [indexingCompletionNotifications, setIndexingCompletionNotifications] = useState<Map<string, { fileName: string; completedAt: number }>>(new Map()) // Track indexing completion notifications
   // WorldLab state
   const [isWorldLabMode, setIsWorldLabMode] = useState(false) // Track if current document is a WorldLab
   const [worldLabData, setWorldLabData] = useState<WorldLab | null>(null) // WorldLab data
@@ -6061,6 +6062,64 @@ export default function Layout(): JSX.Element {
                       })
                     }
                     
+                    // Monitor indexing status for library files
+                    if (newDoc.folder === 'library') {
+                      // Check if file type supports indexing (PDF or DOCX)
+                      const fileExt = newDoc.title.toLowerCase().split('.').pop() || ''
+                      if (fileExt === 'pdf' || fileExt === 'docx') {
+                        // Start monitoring indexing status
+                        const checkIndexingStatus = async () => {
+                          try {
+                            // Wait a bit for indexing to start
+                            await new Promise(resolve => setTimeout(resolve, 1000))
+                            
+                            let status = await indexingApi.getIndexingStatus(newDoc.id)
+                            let checkCount = 0
+                            const maxChecks = 300 // Check for up to 10 minutes (300 * 2 seconds)
+                            
+                            // Poll until indexing completes or times out
+                            while (checkCount < maxChecks) {
+                              if (status?.status === 'completed') {
+                                // Show notification when indexing completes
+                                setIndexingCompletionNotifications(prev => {
+                                  const newMap = new Map(prev)
+                                  newMap.set(newDoc.id, {
+                                    fileName: newDoc.title,
+                                    completedAt: Date.now()
+                                  })
+                                  return newMap
+                                })
+                                
+                                // Auto-remove notification after 3 seconds
+                                setTimeout(() => {
+                                  setIndexingCompletionNotifications(prev => {
+                                    const newMap = new Map(prev)
+                                    newMap.delete(newDoc.id)
+                                    return newMap
+                                  })
+                                }, 3000)
+                                break
+                              } else if (status?.status === 'error') {
+                                // Don't show notification for errors, just log
+                                console.error(`Indexing failed for ${newDoc.title}:`, status.error)
+                                break
+                              }
+                              
+                              // Wait 2 seconds before next check
+                              await new Promise(resolve => setTimeout(resolve, 2000))
+                              status = await indexingApi.getIndexingStatus(newDoc.id)
+                              checkCount++
+                            }
+                          } catch (error) {
+                            console.error(`Failed to check indexing status for ${newDoc.title}:`, error)
+                          }
+                        }
+                        
+                        // Start monitoring in background (don't await)
+                        checkIndexingStatus()
+                      }
+                    }
+                    
                     // Only navigate to the newly uploaded file if it's a single file upload
                     // This prevents flashing when uploading multiple PDFs
                     if (!isBatchUpload) {
@@ -6211,7 +6270,7 @@ export default function Layout(): JSX.Element {
           <>
             <PanelResizeHandle style={{ 
               width: 0,
-              borderLeft: `1px solid ${borderColor}`,
+              borderRight: `1px solid ${borderColor}`,
               cursor: 'col-resize',
               transition: 'border-color 0.2s',
               boxSizing: 'border-box'
@@ -6402,7 +6461,7 @@ export default function Layout(): JSX.Element {
                 color: theme === 'dark' ? '#999' : '#666',
               }}
             >
-              {showCommitSuccessNotification.fileCount} file{showCommitSuccessNotification.fileCount !== 1 ? 's' : ''} versioned
+              {showCommitSuccessNotification.fileCount} file{showCommitSuccessNotification.fileCount !== 1 ? 's' : ''} indexed
             </div>
           </div>
           <style>{`
@@ -6419,7 +6478,84 @@ export default function Layout(): JSX.Element {
           `}</style>
         </div>
       )}
+
+      {/* Indexing Completion Notifications */}
+      {Array.from(indexingCompletionNotifications.entries()).map(([docId, notification], index) => (
+        <div
+          key={docId}
+          style={{
+            position: 'fixed',
+            bottom: `${20 + index * 80}px`,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+            border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+            borderRadius: '6px',
+            padding: '12px 20px',
+            boxShadow: theme === 'dark'
+              ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
+              : '0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1)',
+            zIndex: 10030,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            minWidth: '300px',
+            animation: 'slideUp 0.3s ease-out'
+          }}
+        >
+          <div
+            style={{
+              width: '20px',
+              height: '20px',
+              borderRadius: '50%',
+              backgroundColor: theme === 'dark' ? '#4caf50' : '#34a853',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                fontSize: '13px',
+                fontWeight: '500',
+                color: theme === 'dark' ? '#ffffff' : '#202124',
+                marginBottom: '2px',
+              }}
+            >
+              File indexed successfully
+            </div>
+            <div
+              style={{
+                fontSize: '11px',
+                color: theme === 'dark' ? '#999' : '#666',
+              }}
+            >
+              {notification.fileName}
+            </div>
+          </div>
+          <style>{`
+            @keyframes slideUp {
+              from {
+                transform: translateX(-50%) translateY(20px);
+                opacity: 0;
+              }
+              to {
+                transform: translateX(-50%) translateY(0);
+                opacity: 1;
+              }
+            }
+          `}</style>
+        </div>
+      ))}
       </div>
     </>
   )
 }
+

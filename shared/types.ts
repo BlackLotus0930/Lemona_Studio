@@ -64,6 +64,15 @@ export interface AIChatMessage {
   content: string;
   timestamp: string;
   attachments?: ChatAttachment[]; // Optional attachments (images or PDFs)
+  choices?: Array<{id: string; label: string; text: string}>; // Multiple choice options (A, B, C, etc.)
+  reasoningMetadata?: {
+    actions?: {
+      [action: string]: {
+        fileCount: number; // Number of files accessed by this action
+        fileIds?: string[]; // File IDs accessed by this action
+      };
+    };
+  };
 }
 
 export interface AIQuestion {
@@ -169,3 +178,15 @@ export interface WorldLab {
   edges: WorldLabEdge[];
 }
 
+// AI Reasoning Types
+export interface ReasoningStep {
+  step: number;
+  action: 'search' | 'read' | 'browse';
+  query?: string;
+  results?: any[]; // SearchResult[] - using any to avoid circular dependency
+  documentId?: string;
+  budgetRemaining: number;
+  relevanceScore?: number; // AI-assessed relevance score (0-1)
+  needsMoreContext?: boolean; // AI assessment: whether more context is needed
+  informationGap?: string; // AI-identified information gap (if any)
+}

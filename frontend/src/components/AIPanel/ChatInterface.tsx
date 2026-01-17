@@ -57,7 +57,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [expandedActions, setExpandedActions] = useState<Set<string>>(new Set()) // Track expanded actions by messageId:action
   const [input, setInput] = useState(initialInput || '')
   const [isLoading, setIsLoading] = useState(false)
-  const [lastUserMessageForSearch, setLastUserMessageForSearch] = useState<string>('')
   
   // Handle initial input from external source (e.g., "Add to Chat" from editor)
   useEffect(() => {
@@ -1090,50 +1089,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     return parts.length > 0 ? <>{parts}</> : text
   }
 
-  // Get search status text based on @mentions in last user message
-  const getSearchStatusText = (): string => {
-    if (!lastUserMessageForSearch) {
-      return 'Generating response...'
-    }
-
-    const mentionRegex = /@(Library|[^\s@]+)/g
-    const matches = Array.from(lastUserMessageForSearch.matchAll(mentionRegex))
-    
-    if (matches.length === 0) {
-      return 'Generating response...'
-    }
-
-    // Check for @Library mention first
-    const hasLibraryMention = matches.some(match => match[1].toLowerCase() === 'library')
-    if (hasLibraryMention) {
-      return 'Searching Library'
-    }
-
-    // Check for file mentions
-    const fileMentions = matches
-      .filter(match => match[1].toLowerCase() !== 'library')
-      .map(match => {
-        const mentionName = match[1]
-        // Try to find matching document in both workspace files and library files (if indexed)
-        const allMentionableDocs = isLibraryIndexed 
-          ? [...libraryDocuments, ...allDocuments.filter(doc => doc.folder === 'library' && doc.projectId === projectId)]
-          : libraryDocuments
-        const matchedDoc = allMentionableDocs.find(
-          doc => doc.title === mentionName || 
-                 doc.id === mentionName ||
-                 doc.title.toLowerCase().startsWith(mentionName.toLowerCase())
-        )
-        return matchedDoc ? matchedDoc.title : mentionName
-      })
-
-    if (fileMentions.length > 0) {
-      // Show first file mention
-      return `Searching ${fileMentions[0]}`
-    }
-
-    return 'Generating response...'
-  }
-
   // Helper function to format error messages in a user-friendly way
   const formatErrorMessage = (error: any): string => {
     let errorMessage = error instanceof Error ? error.message : String(error)
@@ -1523,7 +1478,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     
     setIsLoading(false)
     setIsStreaming(false)
-    setLastUserMessageForSearch('')
   }
 
   const handleSend = async () => {
@@ -1586,7 +1540,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
     setIsLoading(true)
     setIsStreaming(true)
-    setLastUserMessageForSearch(userMessage.content)
 
     // Notify parent about first message for chat naming (only when message is actually being sent)
     if (!hasNotifiedFirstMessage.current && onFirstMessage && messageContent) {
@@ -1744,7 +1697,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     } finally {
       setIsLoading(false)
       setIsStreaming(false)
-      setLastUserMessageForSearch('')
       currentAssistantMessageIdRef.current = null
       streamReaderRef.current = null
       abortControllerRef.current = null
@@ -1759,17 +1711,25 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           list-style: none;
           counter-reset: list-counter;
           margin-bottom: 18px;
-          padding-left: 28px;
+          padding-left: 20px;
           margin-top: 12px;
           color: ${textColor};
           line-height: 1.8;
           font-size: 14px;
         }
+        .ai-chat-unordered-list ul,
+        .ai-chat-ordered-list ol,
+        .ai-chat-unordered-list ol,
+        .ai-chat-ordered-list ul {
+          padding-left: 16px;
+          margin-top: 2px;
+          margin-bottom: 4px;
+        }
         .ai-chat-ordered-list > li {
           counter-increment: list-counter;
           position: relative;
-          margin-bottom: 4px;
-          line-height: 1.8;
+          margin-bottom: 2px;
+          line-height: 1.6;
           color: ${textColor};
           padding-left: 24px;
         }
@@ -1936,7 +1896,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   WebkitUserSelect: 'text',
                   MozUserSelect: 'text',
                   msUserSelect: 'text',
-                  cursor: 'text'
+                  cursor: 'text',
+                  WebkitFontSmoothing: 'antialiased',
+                  MozOsxFontSmoothing: 'grayscale',
+                  textRendering: 'optimizeLegibility'
                 }}
               >
                 {/* Show reasoning metadata if available */}
@@ -2068,11 +2031,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         ul: ({node, ...props}) => <ul style={{ 
                           marginTop: '8px', 
                           marginBottom: '8px', 
-                          paddingLeft: '20px' 
+                          paddingLeft: '10px' 
                         }} {...props} />,
                         li: ({node, ...props}) => <li style={{ 
                           marginBottom: '6px',
-                          lineHeight: '1.6'
+                          lineHeight: '1.6',
+                          paddingLeft: '4px'
                         }} {...props} />,
                         strong: ({node, ...props}) => <strong style={{ 
                           fontWeight: 600,
@@ -2088,76 +2052,76 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   remarkPlugins={[remarkGfm, remarkMath]}
                   rehypePlugins={[rehypeKatex]}
                   components={{
-                    // Headers - smaller sizes
+                    // Headers - professional, subtle hierarchy
                     h1: ({node, ...props}) => <h1 style={{ 
-                      fontSize: '22px', 
-                      fontWeight: 700, 
+                      fontSize: '20px', 
+                      fontWeight: 600, 
+                      marginTop: '28px', 
+                      marginBottom: '14px', 
+                      color: textColor, 
+                      lineHeight: '1.4',
+                      letterSpacing: '-0.01em'
+                    }} {...props} />,
+                    h2: ({node, ...props}) => <h2 style={{ 
+                      fontSize: '17px', 
+                      fontWeight: 600, 
                       marginTop: '24px', 
                       marginBottom: '12px', 
                       color: textColor, 
-                      lineHeight: '1.3',
-                      letterSpacing: '-0.02em'
+                      lineHeight: '1.4',
+                      letterSpacing: '-0.005em'
                     }} {...props} />,
-                    h2: ({node, ...props}) => <h2 style={{ 
-                      fontSize: '18px', 
-                      fontWeight: 650, 
+                    h3: ({node, ...props}) => <h3 style={{ 
+                      fontSize: '15px', 
+                      fontWeight: 600, 
                       marginTop: '20px', 
                       marginBottom: '10px', 
                       color: textColor, 
-                      lineHeight: '1.3',
-                      letterSpacing: '-0.01em'
-                    }} {...props} />,
-                    h3: ({node, ...props}) => <h3 style={{ 
-                      fontSize: '16px', 
-                      fontWeight: 600, 
-                      marginTop: '18px', 
-                      marginBottom: '10px', 
-                      color: textColor, 
-                      lineHeight: '1.3'
+                      lineHeight: '1.4'
                     }} {...props} />,
                     h4: ({node, ...props}) => <h4 style={{ 
-                      fontSize: '15px', 
+                      fontSize: '14px', 
                       fontWeight: 600, 
-                      marginTop: '16px', 
+                      marginTop: '18px', 
                       marginBottom: '8px', 
                       color: textColor, 
-                      lineHeight: '1.3'
+                      lineHeight: '1.4'
                     }} {...props} />,
                     h5: ({node, ...props}) => <h5 style={{ 
                       fontSize: '14px', 
                       fontWeight: 600, 
-                      marginTop: '14px', 
+                      marginTop: '16px', 
                       marginBottom: '8px', 
                       color: textColor, 
-                      lineHeight: '1.3'
+                      lineHeight: '1.4'
                     }} {...props} />,
                     h6: ({node, ...props}) => <h6 style={{ 
                       fontSize: '13px', 
                       fontWeight: 600, 
-                      marginTop: '12px', 
+                      marginTop: '14px', 
                       marginBottom: '6px', 
                       color: textColor, 
-                      lineHeight: '1.3'
+                      lineHeight: '1.4'
                     }} {...props} />,
-                    // Paragraphs - more spacing
+                    // Paragraphs - professional spacing
                     p: ({node, ...props}) => <p style={{ 
-                      marginBottom: '16px', 
+                      marginBottom: '14px', 
                       marginTop: 0, 
-                      lineHeight: '1.75', 
+                      lineHeight: '1.7', 
                       color: textColor,
                       fontSize: '14px'
                     }} {...props} />,
-                    // Code blocks - handle inline code
+                    // Code blocks - handle inline code with subtle styling
                     code: ({node, inline, className, children, ...props}: any) => {
                       if (inline) {
                         return <code style={{ 
-                          backgroundColor: theme === 'dark' ? '#2d2d2d' : '#f1f3f4', 
-                          padding: '3px 6px', 
-                          borderRadius: '6px', 
+                          backgroundColor: theme === 'dark' ? '#2a2a2a' : '#f5f5f5', 
+                          padding: '2px 5px', 
+                          borderRadius: '3px', 
                           fontSize: '13px',
                           fontFamily: '"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace',
-                          color: theme === 'dark' ? '#ce9178' : '#c5221f',
-                          fontWeight: 500
+                          color: theme === 'dark' ? '#d4a574' : '#8b4513',
+                          fontWeight: 400
                         }} {...props}>{children}</code>
                       }
                       // For code blocks, return the code element as-is (will be wrapped in pre)
@@ -2183,16 +2147,17 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       return (
                         <div style={{
                           position: 'relative',
-                          marginTop: '16px',
-                          marginBottom: '16px',
+                          marginTop: '18px',
+                          marginBottom: '18px',
                           width: '100%',
                           maxWidth: '100%',
                           boxSizing: 'border-box'
                         }}>
                           <div style={{
                             position: 'relative',
-                            backgroundColor: theme === 'dark' ? '#000000' : '#f8f9fa',
-                            borderRadius: '6px',
+                            backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fafafa',
+                            borderRadius: '4px',
+                            border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e5e5e5'}`,
                             overflowX: 'hidden',
                             overflowY: 'visible',
                             width: '100%',
@@ -2202,15 +2167,16 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                             {/* Language name overlay - top left */}
                             <div style={{
                               position: 'absolute',
-                              top: '8px',
-                              left: '12px',
+                              top: '6px',
+                              left: '10px',
                               zIndex: 2,
-                              fontSize: '11px',
-                              color: theme === 'dark' ? '#8e8e93' : '#6e6e73',
+                              fontSize: '10px',
+                              color: theme === 'dark' ? '#666666' : '#999999',
                               fontWeight: 500,
                               textTransform: 'uppercase',
                               letterSpacing: '0.5px',
-                              pointerEvents: 'none'
+                              pointerEvents: 'none',
+                              opacity: 0.7
                             }}>
                               {language || 'text'}
                             </div>
@@ -2219,26 +2185,29 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               onClick={() => handleCopyCode(codeString, blockId)}
                               style={{
                                 position: 'absolute',
-                                top: '8px',
-                                right: '14px',
+                                top: '6px',
+                                right: '10px',
                                 zIndex: 2,
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '4px',
-                                padding: 0,
+                                padding: '2px 6px',
                                 backgroundColor: 'transparent',
                                 border: 'none',
-                                color: theme === 'dark' ? '#d1d1d6' : secondaryTextColor,
+                                color: theme === 'dark' ? '#999999' : '#666666',
                                 cursor: 'pointer',
-                                fontSize: '12px',
+                                fontSize: '11px',
                                 fontFamily: 'inherit',
-                                transition: 'opacity 0.2s'
+                                transition: 'all 0.2s ease',
+                                borderRadius: '3px'
                               }}
                               onMouseEnter={(e) => {
-                                e.currentTarget.style.opacity = '0.7'
+                                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
+                                e.currentTarget.style.color = theme === 'dark' ? '#cccccc' : '#333333'
                               }}
                               onMouseLeave={(e) => {
-                                e.currentTarget.style.opacity = '1'
+                                e.currentTarget.style.backgroundColor = 'transparent'
+                                e.currentTarget.style.color = theme === 'dark' ? '#999999' : '#666666'
                               }}
                             >
                               {isCopied ? (
@@ -2264,13 +2233,13 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                                 style={theme === 'dark' ? vscDarkPlus : vs}
                                 customStyle={{
                                   margin: 0,
-                                  padding: '16px',
-                                  paddingTop: '40px',
+                                  padding: '14px',
+                                  paddingTop: '36px',
                                   fontSize: '13px',
-                                  lineHeight: '1.5',
+                                  lineHeight: '1.6',
                                   fontFamily: '"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace',
                                   backgroundColor: 'transparent',
-                                  borderRadius: '6px',
+                                  borderRadius: '4px',
                                   whiteSpace: 'pre-wrap',
                                   wordBreak: 'break-word',
                                   overflow: 'visible',
@@ -2303,74 +2272,83 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         </div>
                       )
                     },
-                    // Lists
-                    ul: ({node, ...props}: any) => <ul style={{ 
-                      marginBottom: '18px', 
-                      paddingLeft: '28px', 
-                      marginTop: '12px', 
+                    // Lists - professional, subtle styling
+                    ul: ({node, ...props}: any) => <ul className="ai-chat-unordered-list" style={{ 
+                      marginBottom: '14px', 
+                      paddingLeft: '20px', 
+                      marginTop: '8px', 
                       listStyleType: 'disc',
                       color: textColor,
-                      lineHeight: '1.8',
+                      lineHeight: '1.7',
                       fontSize: '14px'
                     }} {...props} />,
                     ol: ({node, ...props}: any) => {
                       // Use custom counter style for Chinese parentheses format (1) 2) 3)...)
-                      return <ol className="ai-chat-ordered-list" {...props} />
+                      return <ol className="ai-chat-ordered-list" style={{
+                        marginBottom: '14px',
+                        paddingLeft: '20px',
+                        marginTop: '8px',
+                        color: textColor,
+                        lineHeight: '1.7',
+                        fontSize: '14px'
+                      }} {...props} />
                     },
                     li: ({node, ...props}: any) => <li style={{ 
                       marginBottom: '4px', 
-                      lineHeight: '1.8', 
+                      lineHeight: '1.7', 
                       color: textColor,
-                      paddingLeft: '6px'
+                      paddingLeft: '4px'
                     }} {...props} />,
-                    // Links
+                    // Links - subtle, professional styling
                     a: ({node, ...props}: any) => <a 
                       style={{ 
-                        color: theme === 'dark' ? '#4a9eff' : '#1a73e8', 
-                        textDecoration: 'none',
-                        borderBottom: `1px solid ${theme === 'dark' ? 'rgba(74, 158, 255, 0.3)' : 'rgba(26, 115, 232, 0.3)'}`,
-                        transition: 'all 0.2s'
+                        color: theme === 'dark' ? '#5ba3ff' : '#1967d2', 
+                        textDecoration: 'underline',
+                        textDecorationColor: theme === 'dark' ? 'rgba(91, 163, 255, 0.4)' : 'rgba(25, 103, 210, 0.4)',
+                        textUnderlineOffset: '2px',
+                        transition: 'color 0.2s ease'
                       }} 
                       target="_blank" 
                       rel="noopener noreferrer"
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.borderBottomColor = theme === 'dark' ? '#4a9eff' : '#1a73e8'
+                        e.currentTarget.style.color = theme === 'dark' ? '#6eb3ff' : '#1557b8'
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.borderBottomColor = theme === 'dark' ? 'rgba(74, 158, 255, 0.3)' : 'rgba(26, 115, 232, 0.3)'
+                        e.currentTarget.style.color = theme === 'dark' ? '#5ba3ff' : '#1967d2'
                       }}
                       {...props} 
                     />,
-                    // Blockquotes
+                    // Blockquotes - subtle, professional styling
                     blockquote: ({node, ...props}) => <blockquote style={{
-                      borderLeft: `4px solid ${theme === 'dark' ? '#4a9eff' : '#1a73e8'}`,
-                      paddingLeft: '20px',
+                      borderLeft: `3px solid ${theme === 'dark' ? '#4a4a4a' : '#d0d0d0'}`,
+                      paddingLeft: '18px',
                       paddingRight: '16px',
-                      paddingTop: '8px',
-                      paddingBottom: '8px',
+                      paddingTop: '6px',
+                      paddingBottom: '6px',
                       marginLeft: 0,
                       marginRight: 0,
-                      marginTop: '16px',
-                      marginBottom: '16px',
-                      backgroundColor: theme === 'dark' ? 'rgba(74, 158, 255, 0.05)' : 'rgba(26, 115, 232, 0.05)',
+                      marginTop: '14px',
+                      marginBottom: '14px',
+                      backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.02)',
                       color: textColor,
                       fontStyle: 'normal',
-                      borderRadius: '0 6px 6px 0'
+                      borderRadius: '0 3px 3px 0'
                     }} {...props} />,
-                    // Horizontal rule
+                    // Horizontal rule - subtle divider
                     hr: ({node, ...props}) => <hr style={{ 
                       border: 'none', 
-                      borderTop: `1px solid ${theme === 'dark' ? '#3e3e3e' : '#e0e0e0'}`, 
-                      margin: '24px 0' 
+                      borderTop: `1px solid ${theme === 'dark' ? '#3a3a3a' : '#e5e5e5'}`, 
+                      margin: '20px 0',
+                      opacity: 0.5
                     }} {...props} />,
-                    // Tables - better UI
+                    // Tables - professional, subtle styling
                     table: ({node, ...props}) => <div style={{ 
                       overflowX: 'auto', 
-                      marginBottom: '18px', 
-                      marginTop: '14px',
-                      borderRadius: '6px',
-                      border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e5e5e5'}`,
-                      backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fafafa',
+                      marginBottom: '16px', 
+                      marginTop: '12px',
+                      borderRadius: '4px',
+                      border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e0e0e0'}`,
+                      backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff',
                       overflow: 'hidden'
                     }}>
                       <table style={{ 
@@ -2380,40 +2358,38 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       }} {...props} />
                     </div>,
                     thead: ({node, ...props}) => <thead style={{ 
-                      backgroundColor: theme === 'dark' ? '#222222' : '#f5f5f5',
-                      borderBottom: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e5e5e5'}`
+                      backgroundColor: theme === 'dark' ? '#222222' : '#f8f8f8',
+                      borderBottom: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e0e0e0'}`
                     }} {...props} />,
                     tbody: ({node, ...props}) => <tbody {...props} />,
                     th: ({node, ...props}) => <th style={{ 
-                      border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e5e5e5'}`, 
+                      border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e0e0e0'}`, 
                       padding: '10px 14px', 
                       textAlign: 'left',
                       fontWeight: 600,
-                      fontSize: '12px',
+                      fontSize: '13px',
                       color: theme === 'dark' ? '#d0d0d0' : '#333333',
-                      backgroundColor: theme === 'dark' ? '#222222' : '#f5f5f5',
-                      letterSpacing: '0.01em',
-                      textTransform: 'uppercase'
+                      backgroundColor: theme === 'dark' ? '#222222' : '#f8f8f8',
+                      letterSpacing: '0.005em'
                     }} {...props} />,
                     td: ({node, ...props}) => <td style={{ 
-                      border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e5e5e5'}`, 
+                      border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e0e0e0'}`, 
                       padding: '10px 14px',
                       fontSize: '14px',
                       color: textColor,
-                      lineHeight: '1.5',
+                      lineHeight: '1.6',
                       backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff'
                     }} {...props} />,
-                    // Strong and emphasis - make them much more prominent
+                    // Strong and emphasis - professional, subtle emphasis
                     strong: ({node, ...props}) => <strong style={{ 
-                      fontWeight: 700,
+                      fontWeight: 600,
                       color: textColor,
-                      fontSize: '14px',
-                      letterSpacing: '0.01em'
+                      fontSize: '14px'
                     }} {...props} />,
                     em: ({node, ...props}) => <em style={{ 
                       fontStyle: 'italic',
                       color: textColor,
-                      fontWeight: 500
+                      fontWeight: 400
                     }} {...props} />,
                   }}
                 >
@@ -2424,44 +2400,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             )}
           </div>
         ))}
-        {isLoading && (
-          <div style={{
-            width: '100%',
-            padding: '0px 16px 16px 16px',
-            marginTop: '-8px',
-            color: secondaryTextColor,
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '16px',
-              height: '16px',
-              flexShrink: 0,
-            }}>
-              <span
-                className="indexing-spinner"
-                style={{
-                  width: '11px',
-                  height: '11px',
-                  border: `2px solid ${theme === 'dark' ? '#666666' : '#cccccc'}`,
-                  borderTopColor: theme === 'dark' ? '#999999' : '#888888',
-                  borderRadius: '50%',
-                  animation: 'spin 1s linear infinite',
-                  opacity: 0.35,
-                }}
-              />
-            </div>
-            <span style={{
-              color: textColor,
-              fontWeight: 400
-            }}>{getSearchStatusText()}</span>
-          </div>
-        )}
         <div ref={messagesEndRef} />
       </div>
       

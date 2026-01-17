@@ -452,7 +452,6 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         if (!scrollContainerRef.current || !editor || editor.isDestroyed || !editor.view) return
         
         // Re-read selection positions inside requestAnimationFrame to ensure they're still valid
-        // This prevents "Position out of range" errors when document changes during async operations
         const currentSelection = editor.state.selection
         const currentFrom = currentSelection.from
         const currentTo = currentSelection.to
@@ -460,49 +459,25 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         // Validate positions are within document bounds
         const docSize = editor.state.doc.content.size
         if (currentFrom < 0 || currentTo < 0 || currentFrom > docSize || currentTo > docSize) {
-          // Selection is invalid, hide popup
           setShowRephrasePopup(false)
           return
         }
         
         if (currentFrom === currentTo) {
-          // Selection became empty, hide popup
           setShowRephrasePopup(false)
           return
         }
         
         try {
-          // Get ProseMirror coordinates first (more reliable for text selections)
+          // Use ProseMirror coordinates - simple and reliable
           const startCoords = editor.view.coordsAtPos(currentFrom)
           const endCoords = editor.view.coordsAtPos(currentTo)
           
-          // Try DOM selection, but validate it's not suspiciously wide (drag selection edge case)
-          const domSelection = window.getSelection()
-          if (domSelection && domSelection.rangeCount > 0) {
-            const domRange = domSelection.getRangeAt(0)
-            const rect = domRange.getBoundingClientRect()
-            
-            // Check if DOM selection rect is valid and not suspiciously wide
-            // If rect.right is too close to screen edge (within 50px), it's likely a drag selection
-            // spanning full width, so prefer ProseMirror coordinates instead
-            const screenWidth = window.innerWidth
-            const isNearRightEdge = rect.right >= screenWidth - 50
-            const isSuspiciouslyWide = rect.width > screenWidth * 0.8 // More than 80% of screen width
-            
-            if ((rect.width > 0 || rect.height > 0) && !isNearRightEdge && !isSuspiciouslyWide) {
-              // DOM selection looks good, use it
-              setPopupPosition({ x: rect.right + 8, y: rect.top - 4 })
-              return
-            }
-          }
-          
-          // Use ProseMirror coordinates (more reliable, especially for drag selections)
           if (startCoords && endCoords) {
-            setPopupPosition({ x: endCoords.right + 8, y: startCoords.top - 4 })
+            // Position popup right next to the selected text (4px gap for visual separation)
+            setPopupPosition({ x: endCoords.right + 4, y: startCoords.top - 4 })
           }
         } catch (error) {
-          // Handle position out of range errors gracefully
-          // This can happen during paste operations or document updates
           console.warn('[DocumentEditor] Error updating popup position:', error)
           setShowRephrasePopup(false)
         }
@@ -615,7 +590,8 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
             const startCoords = currentEditor.view.coordsAtPos(from)
             const endCoords = currentEditor.view.coordsAtPos(to)
             if (startCoords && endCoords) {
-              setPopupPosition({ x: endCoords.right + 8, y: startCoords.top - 4 })
+              // Position popup right next to the selected text (4px gap for visual separation)
+              setPopupPosition({ x: endCoords.right + 4, y: startCoords.top - 4 })
             }
           }
         } catch (error) {
@@ -1236,24 +1212,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
 
   return (
     <>
-      <style dangerouslySetInnerHTML={{__html: `
-        @keyframes fileAppear {
-          from {
-            opacity: 0;
-            transform: translateY(-8px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-      `}} />
       <div style={{ 
         height: '100%', 
         display: 'flex', 
         flexDirection: 'column',
         backgroundColor: bgColor,
-        animation: 'fileAppear 0.3s ease-out forwards',
       }}>
         <div 
           ref={scrollContainerRef}
@@ -1265,6 +1228,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
             paddingBottom: '400px',
             paddingLeft: '120px',
             paddingRight: '120px',
+            marginRight: isAIPanelOpen ? '1px' : '0px', // Add margin when AI panel is open to prevent scrollbar overlap with resize handle
             position: 'relative',
             backgroundColor: bgColor,
             cursor: 'text',
