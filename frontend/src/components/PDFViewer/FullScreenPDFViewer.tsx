@@ -98,6 +98,10 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     const inlineSearchInputRef = useRef<HTMLInputElement>(null)
     const [rightOffset, setRightOffset] = useState(20)
     
+    // Scrollbar visibility state
+    const [isScrolling, setIsScrolling] = useState(false)
+    const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+    
     // Page position tracking
     const previousDocIdRef = useRef<string | null>(null)
     
@@ -737,6 +741,35 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
       return () => window.removeEventListener('resize', handleResize)
     }, [isAIPanelOpen, aiPanelWidth])
 
+    // Handle scrollbar visibility on scroll
+    useEffect(() => {
+      const container = containerRef.current
+      if (!container) return
+
+      const handleScroll = () => {
+        setIsScrolling(true)
+        
+        // Clear existing timeout
+        if (scrollTimeoutRef.current) {
+          clearTimeout(scrollTimeoutRef.current)
+        }
+        
+        // Hide scrollbar after scrolling stops (1 second delay)
+        scrollTimeoutRef.current = setTimeout(() => {
+          setIsScrolling(false)
+        }, 1000)
+      }
+
+      container.addEventListener('scroll', handleScroll, { passive: true })
+      
+      return () => {
+        container.removeEventListener('scroll', handleScroll)
+        if (scrollTimeoutRef.current) {
+          clearTimeout(scrollTimeoutRef.current)
+        }
+      }
+    }, [])
+
     // Update navigation bar position based on container width
     // Use useLayoutEffect to calculate position synchronously before paint to prevent flashing
     useLayoutEffect(() => {
@@ -833,6 +866,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     return (
       <div
         ref={containerRef}
+        className={`scrollable-container ${isScrolling ? 'scrolling' : ''}`}
         style={{
           width: '100%',
           height: '100%',
@@ -925,7 +959,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                 backgroundColor: theme === 'dark' ? 'rgba(30, 30, 30, 0.30)' : 'rgba(255, 255, 255, 0.90)',
                 borderRadius: '6px',
                 padding: '4px 8px',
-                boxShadow: theme === 'dark' ? 'none' : '0 2px 8px rgba(0, 0, 0, 0.15)',
+                boxShadow: 'none',
                 border: theme === 'dark' ? 'none' : '1px solid rgba(0, 0, 0, 0.1)',
                 display: 'flex',
                 alignItems: 'center',

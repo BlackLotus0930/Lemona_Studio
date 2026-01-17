@@ -219,7 +219,8 @@ code {
 /* Global scrollbar styling for all elements */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-color-thumb) transparent;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.3s ease;
 }
 
 *::-webkit-scrollbar {
@@ -232,22 +233,37 @@ code {
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-color-thumb);
+  background-color: transparent;
   border-radius: 6px;
   border: 0;
+  opacity: 0;
+  transition: opacity 0.3s ease, background-color 0.2s ease;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:active::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-color-thumb);
+  opacity: 0.6;
 }
 
 *::-webkit-scrollbar-thumb:hover {
   background-color: var(--scrollbar-color-thumb);
-  opacity: 0.8;
+  opacity: 0.9;
 }
 
 .dark-theme *::-webkit-scrollbar-thumb {
   background-color: #3e3e42;
 }
 
+.dark-theme *:hover::-webkit-scrollbar-thumb,
+.dark-theme *:active::-webkit-scrollbar-thumb {
+  background-color: #3e3e42;
+  opacity: 0.6;
+}
+
 .dark-theme *::-webkit-scrollbar-thumb:hover {
   background-color: #4e4e52;
+  opacity: 0.9;
 }
 
 /* ProseMirror Editor Styling */
@@ -512,16 +528,31 @@ code {
 .scrollable-container.no-gutter::-webkit-scrollbar-thumb {
   background-color: transparent;
   border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease;
 }
 
 .scrollable-container.no-gutter:hover::-webkit-scrollbar-thumb,
-.scrollable-container.no-gutter:active::-webkit-scrollbar-thumb {
+.scrollable-container.no-gutter:active::-webkit-scrollbar-thumb,
+.scrollable-container.no-gutter.scrolling::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-color-thumb);
+  opacity: 0.7;
+}
+
+.scrollable-container.no-gutter::-webkit-scrollbar-thumb:hover {
+  opacity: 0.9;
 }
 
 .dark-theme .scrollable-container.no-gutter:hover::-webkit-scrollbar-thumb,
-.dark-theme .scrollable-container.no-gutter:active::-webkit-scrollbar-thumb {
+.dark-theme .scrollable-container.no-gutter:active::-webkit-scrollbar-thumb,
+.dark-theme .scrollable-container.no-gutter.scrolling::-webkit-scrollbar-thumb {
   background-color: #3e3e42;
+  opacity: 0.7;
+}
+
+.dark-theme .scrollable-container.no-gutter::-webkit-scrollbar-thumb:hover {
+  background-color: #4e4e52;
+  opacity: 0.9;
 }
 
 /* Modern browsers with standardized scrollbar-* properties (Chrome 121+, Firefox 64+) */
@@ -536,11 +567,19 @@ code {
   /* Show scrollbar thumb when hovering near edge or scrolling */
   .scrollable-container.show-scrollbar {
     scrollbar-color: var(--scrollbar-color-thumb) var(--scrollbar-color-track);
+    transition: scrollbar-color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
   
   /* Show scrollbar when element is scrolling */
   .scrollable-container.scrolling {
     scrollbar-color: var(--scrollbar-color-thumb) var(--scrollbar-color-track);
+    transition: scrollbar-color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  /* Hide scrollbar when not scrolling or hovering */
+  .scrollable-container:not(.show-scrollbar):not(.scrolling) {
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
 
@@ -562,7 +601,7 @@ code {
     border: 0;
     background-clip: padding-box;
     min-height: 30px;
-    transition: background-color 0.4s ease, opacity 0.4s ease;
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease;
     opacity: 0;
   }
 
@@ -586,30 +625,37 @@ code {
   .scrollable-container.show-scrollbar::-webkit-scrollbar-thumb,
   .scrollable-container.scrolling::-webkit-scrollbar-thumb {
     background-color: var(--scrollbar-color-thumb);
-    opacity: 1;
+    opacity: 0.7;
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease;
   }
   
   .scrollable-container.show-scrollbar::-webkit-scrollbar-thumb:hover,
   .scrollable-container.scrolling::-webkit-scrollbar-thumb:hover {
     background-color: #bdc1c6;
-    opacity: 1;
+    opacity: 0.9;
+    transition: opacity 0.15s ease, background-color 0.15s ease;
   }
   
   .scrollable-container.show-scrollbar::-webkit-scrollbar-thumb:active,
   .scrollable-container.scrolling::-webkit-scrollbar-thumb:active {
     background-color: #80868b;
     opacity: 1;
+    transition: opacity 0.1s ease, background-color 0.1s ease;
   }
   
   /* Dark mode scrollbar hover */
   .dark-theme .scrollable-container.show-scrollbar::-webkit-scrollbar-thumb:hover,
   .dark-theme .scrollable-container.scrolling::-webkit-scrollbar-thumb:hover {
     background-color: #4e4e52;
+    opacity: 0.9;
+    transition: opacity 0.15s ease, background-color 0.15s ease;
   }
   
   .dark-theme .scrollable-container.show-scrollbar::-webkit-scrollbar-thumb:active,
   .dark-theme .scrollable-container.scrolling::-webkit-scrollbar-thumb:active {
     background-color: #5e5e62;
+    opacity: 1;
+    transition: opacity 0.1s ease, background-color 0.1s ease;
   }
 }
 

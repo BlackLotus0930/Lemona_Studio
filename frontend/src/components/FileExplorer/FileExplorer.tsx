@@ -91,6 +91,8 @@ function FileExplorer({
   const [expandedSearchFiles, setExpandedSearchFiles] = useState<Set<string>>(new Set()) // Track which search result files are expanded
   const searchInputRef = useRef<HTMLInputElement>(null)
   const isNavigatingFromSearch = useRef(false) // Track if we're navigating from search results to prevent auto-focus
+  const fileExplorerScrollRef = useRef<HTMLDivElement>(null)
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   
   // Sync local searchQuery with prop from parent (Layout)
   useEffect(() => {
@@ -98,6 +100,35 @@ function FileExplorer({
       setSearchQuery(searchQueryProp)
     }
   }, [searchQueryProp])
+
+  // Handle scrollbar visibility on scroll
+  useEffect(() => {
+    const container = fileExplorerScrollRef.current
+    if (!container) return
+
+    const handleScroll = () => {
+      container.classList.add('scrolling')
+      
+      // Clear existing timeout
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+      
+      // Hide scrollbar after scrolling stops (1 second delay)
+      scrollTimeoutRef.current = setTimeout(() => {
+        container.classList.remove('scrolling')
+      }, 1000)
+    }
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    
+    return () => {
+      container.removeEventListener('scroll', handleScroll)
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+    }
+  }, [])
 
   // Extract text from TipTap JSON content
   const extractTextFromTipTap = (node: any): string => {
@@ -1863,6 +1894,7 @@ function FileExplorer({
         }
       `}} />
       <div
+        ref={fileExplorerScrollRef}
         className="scrollable-container no-gutter"
         style={{
           width: '100%',
