@@ -482,7 +482,7 @@ function FileExplorer({
   const hoverBg = theme === 'dark' ? '#1e1e1e' : '#F0F0ED'
   const selectedBg = hoverBg // Same color for hover and selected
   const textColor = theme === 'dark' ? '#cccccc' : '#202124'
-  const folderTextColor = theme === 'dark' ? '#b5b5b5' : '#4a4a4a' // Slightly lighter color for folder names and arrows
+  const folderTextColor = theme === 'dark' ? '#b5b5b5' : '#333333' // Darker color for folder names and arrows in light theme
   const indicatorColor = theme === 'dark' ? '#999999' : '#c0c0c0' // Light grey color for drop indicator
   const borderColor = theme === 'dark' ? '#232323' : '#ecedee' // Same as separator color
   
