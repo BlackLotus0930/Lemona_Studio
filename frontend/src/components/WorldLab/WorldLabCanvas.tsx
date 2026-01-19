@@ -483,65 +483,32 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
 
   // Prevent default context menu on handles during right-click drag
   const handleNodeContextMenu = (e: React.MouseEvent) => {
-    console.log('[RightClick Debug] handleNodeContextMenu called', {
-      target: e.target,
-      nodeId: id,
-    })
     const target = e.target as HTMLElement
     // Check if right-click was on a handle (React Flow handles have specific classes)
     const isHandle = target.closest('.react-flow__handle')
-    console.log('[RightClick Debug] handleNodeContextMenu - isHandle:', isHandle)
     if (isHandle) {
       e.preventDefault()
       e.stopPropagation()
-      console.log('[RightClick Debug] handleNodeContextMenu - prevented default on handle')
     }
   }
 
   // Handle right-click down on handles
   const handleNodeMouseDown = (e: React.MouseEvent) => {
-    console.log('[RightClick Debug] handleNodeMouseDown called', {
-      button: e.button,
-      nodeId: id,
-      target: e.target,
-    })
     // Detect right-click (button === 2) on handles
     if (e.button === 2) {
-      console.log('[RightClick Debug] Right-click detected (button === 2)')
       const target = e.target as HTMLElement
       const handleElement = target.closest('.react-flow__handle')
-      console.log('[RightClick Debug] handleElement found:', handleElement, {
-        handleId: handleElement?.id,
-        className: handleElement?.className,
-      })
       if (handleElement) {
         e.preventDefault()
         e.stopPropagation()
         // React Flow handles use data-handleid attribute
         const rawHandleId = handleElement.getAttribute('data-handleid') || ''
         if (!rawHandleId) {
-          console.log('[RightClick Debug] Missing data-handleid on handle element')
           return
         }
         const handleId = rawHandleId.replace(/-(target|source)$/, '-source')
-        if (handleId !== rawHandleId) {
-          console.log('[RightClick Debug] Normalized source handle:', {
-            rawHandleId,
-            handleId,
-          })
-        }
-        console.log('[RightClick Debug] Calling onHandleRightClick with:', {
-          nodeId: id,
-          handleId,
-          clientX: e.clientX,
-          clientY: e.clientY,
-        })
         onHandleRightClick(id, handleId, e.clientX, e.clientY)
-      } else {
-        console.log('[RightClick Debug] No handle element found, target:', target)
       }
-    } else {
-      console.log('[RightClick Debug] Not a right-click, button:', e.button)
     }
   }
 
@@ -1518,18 +1485,23 @@ function WorldLabCanvasInner({
       }))
       setNodes(newNodes)
 
-      const newEdges = initialEdgesRef.current.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: edge.type || 'smoothstep',
-        label: edge.label,
-        animated: edge.animated,
-        style: edge.style,
-        data: (edge as any).data,
-        sourceHandle: edge.sourceHandle,
-        targetHandle: edge.targetHandle,
-      }))
+      const newEdges = initialEdgesRef.current.map((edge) => {
+        const edgeData = (edge as any).data || {}
+        const sourceHandle = edge.sourceHandle ?? edgeData.sourceHandle
+        const targetHandle = edge.targetHandle ?? edgeData.targetHandle
+        return {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          type: edge.type || 'smoothstep',
+          label: edge.label,
+          animated: edge.animated,
+          style: edge.style,
+          data: edgeData,
+          sourceHandle: sourceHandle?.replace(/-target$/, '-source'),
+          targetHandle: targetHandle?.replace(/-source$/, '-target'),
+        }
+      })
       setEdges(newEdges)
     }
     // Only depend on labName - do NOT depend on initialNodes/initialEdges/edges
@@ -1860,26 +1832,14 @@ function WorldLabCanvasInner({
     [onNodeClick]
   )
 
-  // Handle node context menu (right-click)
-  const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
+  // Handle node context menu (right-click) - disabled, just prevent default
+  const handleNodeContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault()
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      type: 'node',
-      nodeId: node.id,
-    })
   }, [])
 
-  // Handle edge context menu (right-click)
-  const handleEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
+  // Handle edge context menu (right-click) - disabled, just prevent default
+  const handleEdgeContextMenu = useCallback((event: React.MouseEvent) => {
     event.preventDefault()
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY,
-      type: 'edge',
-      edgeId: edge.id,
-    })
   }, [])
 
   // Handle edge double-click - show inline input for label editing
@@ -2306,87 +2266,6 @@ function WorldLabCanvasInner({
     [setNodes, setEdges, saveNodes, edges, addToHistory, editingNodeId, onCloseNodeEditor, inlineEditingEdgeId]
   )
 
-  // Context menu actions
-  const handleDeleteNode = useCallback(
-    async (nodeId: string) => {
-      const newNodes = nodes.filter((n) => n.id !== nodeId)
-      const newEdges = edges.filter((e) => e.source !== nodeId && e.target !== nodeId)
-      
-      // Store original state for rollback if deletion fails
-      const originalNodes = nodes
-      const originalEdges = edges
-      
-      setNodes(newNodes)
-      setEdges(newEdges)
-      addToHistory(newNodes, newEdges)
-      
-      saveNodes(newNodes)
-      saveEdges(newEdges, newNodes)
-      
-      // Delete node file from backend
-      try {
-        const result = await worldLabApi.deleteNode(labName, nodeId)
-        if (!result) {
-          // Rollback: restore original state (don't add to history - this is error recovery, not user action)
-          setNodes(originalNodes as any)
-          setEdges(originalEdges as any)
-          saveNodes(originalNodes)
-          saveEdges(originalEdges, originalNodes)
-          alert(`Failed to delete node. Changes have been rolled back.`)
-          return
-        }
-      } catch (error) {
-          // Rollback on error (don't add to history - this is error recovery, not user action)
-          setNodes(originalNodes as any)
-          setEdges(originalEdges as any)
-        saveNodes(originalNodes)
-        saveEdges(originalEdges, originalNodes)
-        alert(`Failed to delete node: ${error}. Changes have been rolled back.`)
-        return
-      }
-      
-      setContextMenu(null)
-      if (renamingNodeId === nodeId) {
-        setRenamingNodeId(null)
-      }
-    },
-    [nodes, edges, setNodes, setEdges, addToHistory, saveNodes, saveEdges, renamingNodeId, labName]
-  )
-
-  const handleDuplicateNode = useCallback(
-    (nodeId: string) => {
-      const nodeToDuplicate = nodes.find((n) => n.id === nodeId)
-      if (nodeToDuplicate) {
-        const newNodeId = `node_${Date.now()}`
-        const newNode = {
-          ...nodeToDuplicate,
-          id: newNodeId,
-          position: {
-            x: nodeToDuplicate.position.x + 50,
-            y: nodeToDuplicate.position.y + 50,
-          },
-          selected: false,
-        }
-        const newNodes = [...nodes, newNode]
-        setNodes(newNodes)
-        addToHistory(newNodes, edges)
-        saveNodes(newNodes)
-        setContextMenu(null)
-      }
-    },
-    [nodes, edges, setNodes, addToHistory, saveNodes]
-  )
-
-  const handleDeleteEdge = useCallback(
-    (edgeId: string) => {
-      const newEdges = edges.filter((e) => e.id !== edgeId)
-      setEdges(newEdges)
-      addToHistory(nodes, newEdges)
-      saveEdges(newEdges)
-      setContextMenu(null)
-    },
-    [edges, nodes, setEdges, addToHistory, saveEdges]
-  )
 
   // Handle edge property update
   const handleEdgePropertyUpdate = useCallback(
@@ -2808,19 +2687,15 @@ function WorldLabCanvasInner({
   // Find nearest handle at screen coordinates using geometric hit testing
   const findNearestHandleAtScreenCoords = useCallback((clientX: number, clientY: number): { nodeId: string; handleId: string } | null => {
     if (!reactFlowInstance.current) {
-      console.log('[RightClick Debug] No reactFlowInstance available')
       return null
     }
 
     const sourceNodeId = rightClickDragStateRef.current.sourceNodeId
-    console.log('[RightClick Debug] findNearestHandleAtScreenCoords - sourceNodeId:', sourceNodeId)
 
     // Convert screen coordinates to flow coordinates
     const flowPosition = reactFlowInstance.current.screenToFlowPosition({ x: clientX, y: clientY })
-    console.log('[RightClick Debug] Flow position:', flowPosition, 'from screen:', { clientX, clientY })
 
     const currentNodes = reactFlowInstance.current.getNodes()
-    console.log('[RightClick Debug] Total nodes:', currentNodes.length, 'node IDs:', currentNodes.map(n => n.id))
     
     // Use same threshold as React Flow's connectionRadius (40px) for consistency
     // Convert to flow coordinates considering zoom level
@@ -2829,16 +2704,11 @@ function WorldLabCanvasInner({
     const HANDLE_HIT_THRESHOLD = 40 / zoom // Adjust for zoom level, matching React Flow's connectionRadius
 
     let nearestHandle: { nodeId: string; handleId: string; distance: number } | null = null
-    const allDistances: Array<{ nodeId: string; handleId: string; distance: number; isSourceNode: boolean }> = []
 
     // Check all nodes and their handles
     for (const node of currentNodes) {
-      const isSourceNode = node.id === sourceNodeId
-      console.log('[RightClick Debug] Checking node:', node.id, 'isSourceNode:', isSourceNode)
-      
       // Skip source node (can't connect to itself)
-      if (isSourceNode) {
-        console.log('[RightClick Debug] Skipping source node:', node.id)
+      if (node.id === sourceNodeId) {
         continue
       }
 
@@ -2847,13 +2717,6 @@ function WorldLabCanvasInner({
       const nodeHeight = (node as any).measured?.height || (node as any).height || 100
       const nodeX = node.position.x
       const nodeY = node.position.y
-
-      console.log('[RightClick Debug] Node dimensions:', {
-        nodeId: node.id,
-        position: { x: nodeX, y: nodeY },
-        width: nodeWidth,
-        height: nodeHeight,
-      })
 
       // Calculate handle positions (target handles only)
       const handleConfigs = [
@@ -2869,22 +2732,7 @@ function WorldLabCanvasInner({
         const dy = flowPosition.y - handleConfig.y
         const distance = Math.sqrt(dx * dx + dy * dy)
 
-        allDistances.push({
-          nodeId: node.id,
-          handleId: handleConfig.id,
-          distance,
-          isSourceNode: false,
-        })
-
         if (distance < HANDLE_HIT_THRESHOLD) {
-          console.log('[RightClick Debug] Handle within threshold:', {
-            nodeId: node.id,
-            handleId: handleConfig.id,
-            distance,
-            handlePos: { x: handleConfig.x, y: handleConfig.y },
-            flowPos: flowPosition,
-          })
-          
           if (!nearestHandle || distance < nearestHandle.distance) {
             nearestHandle = {
               nodeId: node.id,
@@ -2896,40 +2744,21 @@ function WorldLabCanvasInner({
       }
     }
 
-    // Log all distances sorted
-    const sortedDistances = [...allDistances].sort((a, b) => a.distance - b.distance)
-    console.log('[RightClick Debug] All handle distances (sorted, top 10):', sortedDistances.slice(0, 10))
-    console.log('[RightClick Debug] Threshold:', HANDLE_HIT_THRESHOLD)
-
     if (nearestHandle) {
-      console.log('[RightClick Debug] Found nearest handle:', nearestHandle)
       return {
         nodeId: nearestHandle.nodeId,
         handleId: nearestHandle.handleId,
       }
     }
 
-    console.log('[RightClick Debug] No handle found within threshold', {
-      threshold: HANDLE_HIT_THRESHOLD,
-      minDistance: sortedDistances.length > 0 ? sortedDistances[0].distance : 'N/A',
-      closestHandle: sortedDistances.length > 0 ? sortedDistances[0] : 'N/A',
-    })
     return null
   }, [])
 
   // Handle right-click on handle to initiate directed edge creation
   const handleHandleRightClick = useCallback((nodeId: string, handleId: string, clientX: number, clientY: number) => {
-    console.log('[RightClick Debug] handleHandleRightClick called', {
-      nodeId,
-      handleId,
-      clientX,
-      clientY,
-    })
-    
     // Find source node and calculate handle position
     const sourceNode = nodes.find((n) => n.id === nodeId)
     if (!sourceNode || !reactFlowInstance.current || !canvasContainerRef.current) {
-      console.log('[RightClick Debug] Cannot initialize drag - missing node or refs')
       return
     }
     
@@ -2950,7 +2779,6 @@ function WorldLabCanvasInner({
         x: handleRect.left + handleRect.width / 2 - containerRect.left,
         y: handleRect.top + handleRect.height / 2 - containerRect.top,
       }
-      console.log('[RightClick Debug] Using handle DOM element position:', sourceScreen)
     } else {
       // Fallback: calculate handle position using flow coordinates
       const sourceNodeWidth = (sourceNode as any).measured?.width || (sourceNode as any).width || 200
@@ -2989,7 +2817,6 @@ function WorldLabCanvasInner({
         // Fallback: assume flowToScreenPosition is already relative to container
         sourceScreen = flowScreen
       }
-      console.log('[RightClick Debug] Using calculated position (fallback):', sourceScreen)
     }
     
     rightClickDragStateRef.current = {
@@ -2999,14 +2826,12 @@ function WorldLabCanvasInner({
       startX: clientX - containerRect.left,
       startY: clientY - containerRect.top,
     }
-    console.log('[RightClick Debug] Set rightClickDragStateRef:', rightClickDragStateRef.current)
     
     // Set initial drag preview position to source handle position (relative to canvasContainerRef)
     setDragPreviewPosition(sourceScreen)
     setIsDirectingEdge(true)
     setIsConnecting(true)
     setConnectingFromNodeId(nodeId)
-    console.log('[RightClick Debug] State updated: isDirectingEdge=true, isConnecting=true, dragPreviewPosition=', sourceScreen)
   }, [nodes])
 
   // Handle right-click drag preview (mousemove)
@@ -3033,32 +2858,13 @@ function WorldLabCanvasInner({
   // Handle right-click drag end to create directed edge
   useEffect(() => {
     const handleMouseUp = (e: MouseEvent) => {
-      console.log('[RightClick Debug] handleMouseUp called', {
-        button: e.button,
-        isDragging: rightClickDragStateRef.current.isDragging,
-        state: rightClickDragStateRef.current,
-        clientX: e.clientX,
-        clientY: e.clientY,
-        target: e.target,
-      })
-      
       if (rightClickDragStateRef.current.isDragging && e.button === 2) {
-        console.log('[RightClick Debug] Right-click drag end detected')
         const state = rightClickDragStateRef.current
         
         // Use geometric hit testing to find nearest handle at coordinates
         const nearestHandle = findNearestHandleAtScreenCoords(e.clientX, e.clientY)
         
         if (nearestHandle && state.sourceNodeId && nearestHandle.nodeId !== state.sourceNodeId) {
-          console.log('[RightClick Debug] Edge creation check:', {
-            targetNodeId: nearestHandle.nodeId,
-            sourceNodeId: state.sourceNodeId,
-            targetHandleId: nearestHandle.handleId,
-            sourceHandleId: state.sourceHandleId,
-            willCreate: true,
-          })
-          
-          console.log('[RightClick Debug] Creating directed edge')
           const sourceNode = nodes.find((n) => n.id === state.sourceNodeId)
           const targetNode = nodes.find((n) => n.id === nearestHandle.nodeId)
           const optimalHandles = sourceNode && targetNode
@@ -3089,26 +2895,16 @@ function WorldLabCanvasInner({
             },
           }
           
-          console.log('[RightClick Debug] New edge created:', newEdge)
-          
           setEdges((eds) => {
             const normalizedEdge = normalizeEdge(newEdge)
             const updatedEdges = [...eds, normalizedEdge]
-            console.log('[RightClick Debug] Updated edges count:', updatedEdges.length, 'normalized edge data.directed:', (normalizedEdge as any).data?.directed)
             addToHistory(nodes, updatedEdges)
             saveEdges(updatedEdges)
             return updatedEdges
           })
-        } else {
-          console.log('[RightClick Debug] Edge creation skipped', {
-            foundHandle: !!nearestHandle,
-            hasSourceNodeId: !!state.sourceNodeId,
-            differentNodes: nearestHandle ? nearestHandle.nodeId !== state.sourceNodeId : false,
-          })
         }
         
         // Reset state
-        console.log('[RightClick Debug] Resetting drag state')
         rightClickDragStateRef.current = {
           isDragging: false,
           sourceNodeId: null,
@@ -3120,31 +2916,19 @@ function WorldLabCanvasInner({
         setIsConnecting(false)
         setConnectingFromNodeId(null)
         setDragPreviewPosition(null)
-      } else {
-        console.log('[RightClick Debug] Mouseup ignored - not dragging or wrong button', {
-          isDragging: rightClickDragStateRef.current.isDragging,
-          button: e.button,
-        })
       }
     }
 
     const handleContextMenu = (e: MouseEvent) => {
-      console.log('[RightClick Debug] handleContextMenu (document) called', {
-        isDragging: rightClickDragStateRef.current.isDragging,
-        target: e.target,
-      })
       if (rightClickDragStateRef.current.isDragging) {
-        console.log('[RightClick Debug] Preventing context menu')
         e.preventDefault()
       }
     }
 
-    console.log('[RightClick Debug] Adding event listeners')
     document.addEventListener('mouseup', handleMouseUp)
     document.addEventListener('contextmenu', handleContextMenu)
     
     return () => {
-      console.log('[RightClick Debug] Removing event listeners')
       document.removeEventListener('mouseup', handleMouseUp)
       document.removeEventListener('contextmenu', handleContextMenu)
     }
@@ -3964,137 +3748,6 @@ function WorldLabCanvasInner({
             )
           })()}
 
-          {/* Context Menu */}
-          {contextMenu && contextMenu.type !== 'pane' && (
-            <div
-              style={{
-                position: 'fixed',
-                top: contextMenu.y,
-                left: contextMenu.x,
-                background: theme === 'dark' ? 'rgba(30, 30, 30, 0.98)' : 'rgba(255, 255, 255, 0.98)',
-                border: `1px solid ${borderColor}`,
-                borderRadius: '8px',
-                boxShadow: theme === 'dark' ? '0 8px 32px rgba(0, 0, 0, 0.4)' : '0 8px 32px rgba(0, 0, 0, 0.15)',
-                zIndex: 10000,
-                minWidth: '180px',
-                padding: '4px',
-                backdropFilter: 'blur(20px)',
-                fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif",
-              }}
-            >
-              {contextMenu.type === 'node' && contextMenu.nodeId && (
-                <>
-                  <div
-                    onClick={() => {
-                      setRenamingNodeId(contextMenu.nodeId!)
-                      setContextMenu(null)
-                    }}
-                    style={{
-                      padding: '10px 14px',
-                      cursor: 'pointer',
-                      color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                      fontSize: '14px',
-                      borderRadius: '6px',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent'
-                    }}
-                  >
-                    ✏️ Rename
-                  </div>
-                  <div
-                    onClick={() => handleDuplicateNode(contextMenu.nodeId!)}
-                    style={{
-                      padding: '10px 14px',
-                      cursor: 'pointer',
-                      color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                      fontSize: '14px',
-                      borderRadius: '6px',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent'
-                    }}
-                  >
-                    📋 Duplicate
-                  </div>
-                  <div style={{ height: '1px', background: borderColor, margin: '4px 0' }} />
-                  <div
-                    onClick={() => handleDeleteNode(contextMenu.nodeId!)}
-                    style={{
-                      padding: '10px 14px',
-                      cursor: 'pointer',
-                      color: '#FF6B6B',
-                      fontSize: '14px',
-                      borderRadius: '6px',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 107, 107, 0.1)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent'
-                    }}
-                  >
-                    🗑️ Delete
-                  </div>
-                </>
-              )}
-              {contextMenu.type === 'edge' && contextMenu.edgeId && (
-                <>
-                  <div
-                    onClick={() => {
-                      setEditingEdgeId(contextMenu.edgeId!)
-                      setContextMenu(null)
-                    }}
-                    style={{
-                      padding: '10px 14px',
-                      cursor: 'pointer',
-                      color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                      fontSize: '14px',
-                      borderRadius: '6px',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent'
-                    }}
-                  >
-                    ✏️ Edit Properties
-                  </div>
-                  <div style={{ height: '1px', background: borderColor, margin: '4px 0' }} />
-                  <div
-                    onClick={() => handleDeleteEdge(contextMenu.edgeId!)}
-                    style={{
-                      padding: '10px 14px',
-                      cursor: 'pointer',
-                      color: '#FF6B6B',
-                      fontSize: '14px',
-                      borderRadius: '6px',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(255, 107, 107, 0.1)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent'
-                    }}
-                  >
-                    🗑️ Delete Connection
-                  </div>
-                </>
-              )}
-            </div>
-          )}
 
           {/* Edge Properties Panel */}
           {editingEdgeId && (() => {

@@ -122,7 +122,7 @@ export default function Tab({ documentId, title, isActive, onClick, onClose, isL
         height: '36px', // Match topbar height exactly
         backgroundColor: currentBg,
         color: tabTextColor,
-        cursor: isDragging ? 'grabbing' : 'grab',
+        cursor: isDragging ? 'grabbing' : 'pointer',
         borderTop: 'none', // Remove blue indicator
         borderLeft: 'none', // Remove left border - will use pseudo-element for shorter separator
         borderRight: 'none', // Remove right border - will use pseudo-element for shorter separator

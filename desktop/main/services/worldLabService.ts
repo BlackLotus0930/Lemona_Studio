@@ -304,6 +304,7 @@ export const worldLabService = {
           style: edge.style,
           sourceHandle: edge.sourceHandle,
           targetHandle: edge.targetHandle,
+          data: edge.data,
         }))
       } catch {
         // edges.json doesn't exist, return empty array
