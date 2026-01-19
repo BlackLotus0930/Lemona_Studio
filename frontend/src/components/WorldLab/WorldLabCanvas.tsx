@@ -3246,7 +3246,7 @@ function WorldLabCanvasInner({
               return !!(connection.source && connection.target && connection.source !== connection.target)
             }}
             connectionRadius={40}
-            panOnDrag={false}
+            panOnDrag={true}
             panOnScroll={true}
             style={{ background: bgColor }}
             defaultEdgeOptions={{

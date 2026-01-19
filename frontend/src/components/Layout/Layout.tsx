@@ -26,6 +26,7 @@ import { documentApi, exportApi, projectApi } from '../../services/api'
 import { indexingApi, versionApi, worldLabApi } from '../../services/desktop-api'
 import { settingsApi } from '../../services/desktop-api'
 import WorldLabCanvas from '../WorldLab/WorldLabCanvas'
+import WorldLabTerminal from '../WorldLab/WorldLabTerminal'
 import { FontSize } from '../Editor/FontSize'
 import { FontFamily } from '../Editor/FontFamily'
 import { LineHeight } from '../Editor/LineHeight'
@@ -370,6 +371,7 @@ export default function Layout(): JSX.Element {
   const [isWorldLabMode, setIsWorldLabMode] = useState(false) // Track if current document is a WorldLab
   const [worldLabData, setWorldLabData] = useState<WorldLab | null>(null) // WorldLab data
   const [_editingNodeId, setEditingNodeId] = useState<string | null>(null) // Node ID currently being edited (setter used by WorldLabCanvas)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null) // Currently selected node ID for Terminal
   const [nodeDocumentContent, setNodeDocumentContent] = useState<string | null>(null) // Content for the floating node editor
   const lastContentRef = useRef<string>('') // Track last set content to avoid unnecessary updates
   const currentDocIdRef = useRef<string | null>(null) // Track current document ID
@@ -1651,9 +1653,15 @@ export default function Layout(): JSX.Element {
 
   // WorldLab node interaction handlers
   const handleNodeSingleClick = useCallback((nodeId: string) => {
-    // Single click - edit node properties (handled by WorldLabCanvas)
-    // This is mainly for logging/debugging
+    // Single click - update selected node for Terminal
+    setSelectedNodeId(nodeId)
     console.log('[WorldLab] Node clicked:', nodeId)
+  }, [])
+
+  // Handle node selection from Terminal (focus on canvas)
+  const handleTerminalNodeSelect = useCallback((nodeId: string | null) => {
+    setSelectedNodeId(nodeId)
+    // TODO: Focus on the node in canvas (can be enhanced later)
   }, [])
 
   // Helper function to convert markdown text to TipTap JSON
@@ -6283,7 +6291,24 @@ export default function Layout(): JSX.Element {
               minSize={15}
               onResize={handleAIPanelResize}
             >
-              <AIPanel document={document} onClose={handleAIPanelClose} />
+              {isWorldLabMode && worldLabData ? (
+                <WorldLabTerminal
+                  labName={worldLabData.labName}
+                  worldLabData={worldLabData}
+                  selectedNodeId={selectedNodeId}
+                  onNodeSelect={handleTerminalNodeSelect}
+                  onNodesChange={(nodes) => {
+                    setWorldLabData({ ...worldLabData, nodes })
+                  }}
+                  onEdgesChange={(edges) => {
+                    setWorldLabData({ ...worldLabData, edges })
+                  }}
+                  projectId={document?.projectId}
+                  onClose={handleAIPanelClose}
+                />
+              ) : (
+                <AIPanel document={document} onClose={handleAIPanelClose} />
+              )}
             </Panel>
           </>
         )}
