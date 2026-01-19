@@ -958,14 +958,14 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               transition: 'background-color 0.15s',
               transform: 'translateY(0.5px)',
               marginLeft: '0px',
-              minWidth: '27px',
-              minHeight: '27px'
+              minWidth: '28px',
+              minHeight: '28px'
             }}
             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = buttonHoverBg}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
             title="Close AI Panel"
           >
-            <CloseIcon style={{ fontSize: '17px', fontWeight: 200 }} />
+            <CloseIcon style={{ fontSize: '18px', fontWeight: 200 }} />
           </button>
           
           <div ref={menuRef} style={{ position: 'relative', display: 'none' }}>
