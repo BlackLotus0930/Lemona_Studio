@@ -3889,6 +3889,98 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             API Keys
           </h2>
 
+          {/* OpenAI API Key section */}
+          <div style={{ marginBottom: '20px' }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: '400',
+                color: theme === 'dark' ? '#b0b0b0' : '#777',
+                marginBottom: '8px',
+              }}
+            >
+              OpenAI API Key
+            </label>
+            <p
+              style={{
+                fontSize: '12px',
+                color: theme === 'dark' ? '#999' : '#666',
+                margin: '0 0 12px 0',
+                lineHeight: '1.5',
+              }}
+            >
+              Put your{' '}
+              <a
+                href="https://platform.openai.com/api-keys"
+                onClick={(e) => {
+                  e.preventDefault()
+                  const url = 'https://platform.openai.com/api-keys'
+                  // Check if running in Electron
+                  const isElectron = typeof window !== 'undefined' && window.electron !== undefined
+                  if (isElectron && window.electron) {
+                    // Open in external browser via IPC
+                    window.electron.invoke('openExternal', url).catch((error) => {
+                      console.error('Failed to open external URL:', error)
+                      // Fallback to window.open if IPC fails
+                      window.open(url, '_blank')
+                    })
+                  } else {
+                    // Fallback for web
+                    window.open(url, '_blank')
+                  }
+                }}
+                style={{
+                  color: theme === 'dark' ? '#4a9eff' : '#1a73e8',
+                  textDecoration: 'none',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.textDecoration = 'underline'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.textDecoration = 'none'
+                }}
+              >
+                your OpenAI key
+              </a>
+              {' '}here.
+            </p>
+            <input
+              type="password"
+              value={openaiApiKey}
+              onChange={(e) => handleOpenaiApiKeyChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  // Save the API key (already handled by handleOpenaiApiKeyChange, but ensure it's saved)
+                  handleOpenaiApiKeyChange(openaiApiKey)
+                  // Defocus the input
+                  e.currentTarget.blur()
+                }
+              }}
+              placeholder="Enter your OpenAI API key"
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
+                borderRadius: '6px',
+                backgroundColor: theme === 'dark' ? '#252525' : '#ffffff',
+                color: theme === 'dark' ? '#e0e0e0' : '#202124',
+                fontSize: '13px',
+                outline: 'none',
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                transition: 'border-color 0.2s',
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = theme === 'dark' ? '#555' : '#1a73e8'
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = theme === 'dark' ? '#333' : '#dadce0'
+              }}
+            />
+          </div>
+
           {/* Google API Key section */}
           <div style={{ marginBottom: '20px' }}>
             <label
@@ -3961,98 +4053,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 }
               }}
               placeholder="Enter your Google API key"
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
-                borderRadius: '6px',
-                backgroundColor: theme === 'dark' ? '#252525' : '#ffffff',
-                color: theme === 'dark' ? '#e0e0e0' : '#202124',
-                fontSize: '13px',
-                outline: 'none',
-                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                transition: 'border-color 0.2s',
-              }}
-              onFocus={(e) => {
-                e.target.style.borderColor = theme === 'dark' ? '#555' : '#1a73e8'
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = theme === 'dark' ? '#333' : '#dadce0'
-              }}
-            />
-          </div>
-
-          {/* OpenAI API Key section */}
-          <div style={{ marginBottom: '20px' }}>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '12px',
-                fontWeight: '400',
-                color: theme === 'dark' ? '#b0b0b0' : '#777',
-                marginBottom: '8px',
-              }}
-            >
-              OpenAI API Key
-            </label>
-            <p
-              style={{
-                fontSize: '12px',
-                color: theme === 'dark' ? '#999' : '#666',
-                margin: '0 0 12px 0',
-                lineHeight: '1.5',
-              }}
-            >
-              Put your{' '}
-              <a
-                href="https://platform.openai.com/api-keys"
-                onClick={(e) => {
-                  e.preventDefault()
-                  const url = 'https://platform.openai.com/api-keys'
-                  // Check if running in Electron
-                  const isElectron = typeof window !== 'undefined' && window.electron !== undefined
-                  if (isElectron && window.electron) {
-                    // Open in external browser via IPC
-                    window.electron.invoke('openExternal', url).catch((error) => {
-                      console.error('Failed to open external URL:', error)
-                      // Fallback to window.open if IPC fails
-                      window.open(url, '_blank')
-                    })
-                  } else {
-                    // Fallback for web
-                    window.open(url, '_blank')
-                  }
-                }}
-                style={{
-                  color: theme === 'dark' ? '#4a9eff' : '#1a73e8',
-                  textDecoration: 'none',
-                  cursor: 'pointer',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.textDecoration = 'underline'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.textDecoration = 'none'
-                }}
-              >
-                your OpenAI key
-              </a>
-              {' '}here.
-            </p>
-            <input
-              type="password"
-              value={openaiApiKey}
-              onChange={(e) => handleOpenaiApiKeyChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  // Save the API key (already handled by handleOpenaiApiKeyChange, but ensure it's saved)
-                  handleOpenaiApiKeyChange(openaiApiKey)
-                  // Defocus the input
-                  e.currentTarget.blur()
-                }
-              }}
-              placeholder="Enter your OpenAI API key"
               style={{
                 width: '100%',
                 padding: '8px 12px',
