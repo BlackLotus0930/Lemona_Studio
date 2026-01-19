@@ -20,6 +20,7 @@ import {
   BaseEdge,
   EdgeTypes,
   SelectionMode,
+  MarkerType,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Panel, PanelGroup } from 'react-resizable-panels'
@@ -153,7 +154,7 @@ function getCategoryColor(category: string, theme: 'dark' | 'light'): {
         badgeBg: 'rgba(123, 31, 162, 0.1)',
       },
     },
-    Idea: {
+    Question: {
       dark: {
         primary: '#66D9EF',
         secondary: '#4DD0E1',
@@ -201,7 +202,7 @@ function getCategoryColor(category: string, theme: 'dark' | 'light'): {
 }
 
 // Category list
-const CATEGORIES = ['Character', 'Event', 'Concept', 'Place', 'Idea']
+const CATEGORIES = ['Character', 'Concept', 'Event', 'Place', 'Question']
 
 // Beautiful custom node component representing "existences in the world"
 // Helper function to extract preview text from content (markdown or TipTap JSON)
@@ -299,6 +300,7 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
   // Get connection state from data
   const isConnecting = data.isConnecting || false
   const connectingFromNodeId = data.connectingFromNodeId || null
+  const onHandleRightClick = data.onHandleRightClick || (() => {})
   
   // Update node internals when handles are rendered
   useEffect(() => {
@@ -479,6 +481,70 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
     setIsHovered(false)
   }
 
+  // Prevent default context menu on handles during right-click drag
+  const handleNodeContextMenu = (e: React.MouseEvent) => {
+    console.log('[RightClick Debug] handleNodeContextMenu called', {
+      target: e.target,
+      nodeId: id,
+    })
+    const target = e.target as HTMLElement
+    // Check if right-click was on a handle (React Flow handles have specific classes)
+    const isHandle = target.closest('.react-flow__handle')
+    console.log('[RightClick Debug] handleNodeContextMenu - isHandle:', isHandle)
+    if (isHandle) {
+      e.preventDefault()
+      e.stopPropagation()
+      console.log('[RightClick Debug] handleNodeContextMenu - prevented default on handle')
+    }
+  }
+
+  // Handle right-click down on handles
+  const handleNodeMouseDown = (e: React.MouseEvent) => {
+    console.log('[RightClick Debug] handleNodeMouseDown called', {
+      button: e.button,
+      nodeId: id,
+      target: e.target,
+    })
+    // Detect right-click (button === 2) on handles
+    if (e.button === 2) {
+      console.log('[RightClick Debug] Right-click detected (button === 2)')
+      const target = e.target as HTMLElement
+      const handleElement = target.closest('.react-flow__handle')
+      console.log('[RightClick Debug] handleElement found:', handleElement, {
+        handleId: handleElement?.id,
+        className: handleElement?.className,
+      })
+      if (handleElement) {
+        e.preventDefault()
+        e.stopPropagation()
+        // React Flow handles use data-handleid attribute
+        const rawHandleId = handleElement.getAttribute('data-handleid') || ''
+        if (!rawHandleId) {
+          console.log('[RightClick Debug] Missing data-handleid on handle element')
+          return
+        }
+        const handleId = rawHandleId.replace(/-(target|source)$/, '-source')
+        if (handleId !== rawHandleId) {
+          console.log('[RightClick Debug] Normalized source handle:', {
+            rawHandleId,
+            handleId,
+          })
+        }
+        console.log('[RightClick Debug] Calling onHandleRightClick with:', {
+          nodeId: id,
+          handleId,
+          clientX: e.clientX,
+          clientY: e.clientY,
+        })
+        onHandleRightClick(id, handleId, e.clientX, e.clientY)
+      } else {
+        console.log('[RightClick Debug] No handle element found, target:', target)
+      }
+    } else {
+      console.log('[RightClick Debug] Not a right-click, button:', e.button)
+    }
+  }
+
   return (
     <div
       className="world-lab-node"
@@ -501,6 +567,8 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
       }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onContextMenu={handleNodeContextMenu}
+      onMouseDown={handleNodeMouseDown}
     >
       {/* Connection handles - four handles on all sides */}
       {/* Show handles when:
@@ -895,17 +963,23 @@ function WorldLabCanvasInner({
     }))
   )
   const [edges, setEdges, onEdgesChangeInner] = useEdgesState(
-    initialEdges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      type: edge.type || 'smoothstep',
-      label: edge.label,
-      animated: edge.animated,
-      style: edge.style,
-      sourceHandle: edge.sourceHandle,
-      targetHandle: edge.targetHandle,
-    }))
+    initialEdges.map((edge) => {
+      const edgeData = (edge as any).data || {}
+      const sourceHandle = edge.sourceHandle ?? edgeData.sourceHandle
+      const targetHandle = edge.targetHandle ?? edgeData.targetHandle
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: edge.type || 'smoothstep',
+        label: edge.label,
+        animated: edge.animated,
+        style: edge.style,
+        data: edgeData,
+        sourceHandle: sourceHandle?.replace(/-target$/, '-source'),
+        targetHandle: targetHandle?.replace(/-source$/, '-target'),
+      }
+    })
   )
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -928,6 +1002,7 @@ function WorldLabCanvasInner({
   useEffect(() => {
     edgesRef.current = edges
   }, [edges])
+
   
   // Track if we've refreshed node internals after WorldLab hydrate
   const didRefreshNodeInternalsRef = useRef(false)
@@ -946,6 +1021,27 @@ function WorldLabCanvasInner({
   // Connection dragging state - track when user is dragging a connection
   const [isConnecting, setIsConnecting] = useState(false)
   const [connectingFromNodeId, setConnectingFromNodeId] = useState<string | null>(null)
+  
+  // Track if next connection should be directed (right-click drag)
+  const [isDirectingEdge, setIsDirectingEdge] = useState(false)
+  
+  // Track right-click drag state for custom directed edge creation
+  const rightClickDragStateRef = useRef<{
+    isDragging: boolean
+    sourceNodeId: string | null
+    sourceHandleId: string | null
+    startX: number
+    startY: number
+  }>({
+    isDragging: false,
+    sourceNodeId: null,
+    sourceHandleId: null,
+    startX: 0,
+    startY: 0,
+  })
+
+  // Track drag preview line position (in screen coordinates relative to canvas)
+  const [dragPreviewPosition, setDragPreviewPosition] = useState<{ x: number; y: number } | null>(null)
   
   // Helper function to clean TipTap content by removing empty text nodes
   const cleanTipTapContent = useCallback((content: any): any => {
@@ -1137,8 +1233,21 @@ function WorldLabCanvasInner({
   // Keyboard shortcuts modal state
   const [showShortcutsModal, setShowShortcutsModal] = useState(false)
 
+  // Normalize handle IDs to match expected source/target suffix
+  const normalizeHandleId = useCallback((handleId: string | null | undefined, expected: 'source' | 'target') => {
+    if (!handleId) return undefined
+    if (expected === 'source' && handleId.endsWith('-target')) {
+      return handleId.replace(/-target$/, '-source')
+    }
+    if (expected === 'target' && handleId.endsWith('-source')) {
+      return handleId.replace(/-source$/, '-target')
+    }
+    return handleId
+  }, [])
+
   // Normalize edge to match state type
   const normalizeEdge = useCallback((edge: Edge) => {
+    const edgeData = (edge as any).data
     return {
       id: edge.id,
       source: edge.source,
@@ -1147,10 +1256,19 @@ function WorldLabCanvasInner({
       label: typeof edge.label === 'string' ? edge.label : undefined,
       animated: edge.animated ?? undefined,
       style: edge.style,
-      sourceHandle: edge.sourceHandle ?? undefined,
-      targetHandle: edge.targetHandle ?? undefined,
+      data: edgeData,
+      sourceHandle: normalizeHandleId(edge.sourceHandle, 'source'),
+      targetHandle: normalizeHandleId(edge.targetHandle, 'target'),
     }
-  }, [])
+  }, [normalizeHandleId])
+
+  // Normalize existing edges once to fix any invalid handle IDs
+  const didNormalizeEdgesRef = useRef(false)
+  useEffect(() => {
+    if (didNormalizeEdgesRef.current) return
+    setEdges((eds) => eds.map((edge) => normalizeEdge(edge)))
+    didNormalizeEdgesRef.current = true
+  }, [setEdges, normalizeEdge])
 
   // Convert ReactFlow nodes back to WorldLabNode format
   const convertToWorldLabNodes = useCallback((rfNodes: Node[]): WorldLabNode[] => {
@@ -1176,6 +1294,7 @@ function WorldLabCanvasInner({
       style: edge.style,
       sourceHandle: edge.sourceHandle ?? undefined,
       targetHandle: edge.targetHandle ?? undefined,
+      data: (edge as any).data,
     }))
   }, [])
 
@@ -1407,6 +1526,7 @@ function WorldLabCanvasInner({
         label: edge.label,
         animated: edge.animated,
         style: edge.style,
+        data: (edge as any).data,
         sourceHandle: edge.sourceHandle,
         targetHandle: edge.targetHandle,
       }))
@@ -1985,6 +2105,13 @@ function WorldLabCanvasInner({
         return
       }
       
+      // Check if this should be a directed edge (right-click drag)
+      const isDirected = isDirectingEdge
+      // Reset the flag after using it
+      if (isDirectingEdge) {
+        setIsDirectingEdge(false)
+      }
+      
       const newEdge: Edge = {
         id: `edge_${params.source}_${params.target}_${Date.now()}`,
         source: params.source,
@@ -1995,6 +2122,7 @@ function WorldLabCanvasInner({
         data: {
           sourceHandle: params.sourceHandle,
           targetHandle: params.targetHandle,
+          directed: isDirected, // Mark edge as directed if created via right-click drag
         },
       }
       
@@ -2008,7 +2136,7 @@ function WorldLabCanvasInner({
         return updatedEdges
       })
     },
-    [setEdges, saveEdges, normalizeEdge, nodes, addToHistory]
+    [setEdges, saveEdges, normalizeEdge, nodes, addToHistory, isDirectingEdge]
   )
 
   // Handle node rename
@@ -2677,6 +2805,351 @@ function WorldLabCanvasInner({
     [nodes, theme]
   )
 
+  // Find nearest handle at screen coordinates using geometric hit testing
+  const findNearestHandleAtScreenCoords = useCallback((clientX: number, clientY: number): { nodeId: string; handleId: string } | null => {
+    if (!reactFlowInstance.current) {
+      console.log('[RightClick Debug] No reactFlowInstance available')
+      return null
+    }
+
+    const sourceNodeId = rightClickDragStateRef.current.sourceNodeId
+    console.log('[RightClick Debug] findNearestHandleAtScreenCoords - sourceNodeId:', sourceNodeId)
+
+    // Convert screen coordinates to flow coordinates
+    const flowPosition = reactFlowInstance.current.screenToFlowPosition({ x: clientX, y: clientY })
+    console.log('[RightClick Debug] Flow position:', flowPosition, 'from screen:', { clientX, clientY })
+
+    const currentNodes = reactFlowInstance.current.getNodes()
+    console.log('[RightClick Debug] Total nodes:', currentNodes.length, 'node IDs:', currentNodes.map(n => n.id))
+    
+    // Use same threshold as React Flow's connectionRadius (40px) for consistency
+    // Convert to flow coordinates considering zoom level
+    const viewport = reactFlowInstance.current.getViewport()
+    const zoom = viewport.zoom
+    const HANDLE_HIT_THRESHOLD = 40 / zoom // Adjust for zoom level, matching React Flow's connectionRadius
+
+    let nearestHandle: { nodeId: string; handleId: string; distance: number } | null = null
+    const allDistances: Array<{ nodeId: string; handleId: string; distance: number; isSourceNode: boolean }> = []
+
+    // Check all nodes and their handles
+    for (const node of currentNodes) {
+      const isSourceNode = node.id === sourceNodeId
+      console.log('[RightClick Debug] Checking node:', node.id, 'isSourceNode:', isSourceNode)
+      
+      // Skip source node (can't connect to itself)
+      if (isSourceNode) {
+        console.log('[RightClick Debug] Skipping source node:', node.id)
+        continue
+      }
+
+      // Get node dimensions
+      const nodeWidth = (node as any).measured?.width || (node as any).width || 200
+      const nodeHeight = (node as any).measured?.height || (node as any).height || 100
+      const nodeX = node.position.x
+      const nodeY = node.position.y
+
+      console.log('[RightClick Debug] Node dimensions:', {
+        nodeId: node.id,
+        position: { x: nodeX, y: nodeY },
+        width: nodeWidth,
+        height: nodeHeight,
+      })
+
+      // Calculate handle positions (target handles only)
+      const handleConfigs = [
+        { id: 'top-target', x: nodeX + nodeWidth / 2, y: nodeY },
+        { id: 'bottom-target', x: nodeX + nodeWidth / 2, y: nodeY + nodeHeight },
+        { id: 'left-target', x: nodeX, y: nodeY + nodeHeight / 2 },
+        { id: 'right-target', x: nodeX + nodeWidth, y: nodeY + nodeHeight / 2 },
+      ]
+
+      // Check distance to each handle
+      for (const handleConfig of handleConfigs) {
+        const dx = flowPosition.x - handleConfig.x
+        const dy = flowPosition.y - handleConfig.y
+        const distance = Math.sqrt(dx * dx + dy * dy)
+
+        allDistances.push({
+          nodeId: node.id,
+          handleId: handleConfig.id,
+          distance,
+          isSourceNode: false,
+        })
+
+        if (distance < HANDLE_HIT_THRESHOLD) {
+          console.log('[RightClick Debug] Handle within threshold:', {
+            nodeId: node.id,
+            handleId: handleConfig.id,
+            distance,
+            handlePos: { x: handleConfig.x, y: handleConfig.y },
+            flowPos: flowPosition,
+          })
+          
+          if (!nearestHandle || distance < nearestHandle.distance) {
+            nearestHandle = {
+              nodeId: node.id,
+              handleId: handleConfig.id,
+              distance,
+            }
+          }
+        }
+      }
+    }
+
+    // Log all distances sorted
+    const sortedDistances = [...allDistances].sort((a, b) => a.distance - b.distance)
+    console.log('[RightClick Debug] All handle distances (sorted, top 10):', sortedDistances.slice(0, 10))
+    console.log('[RightClick Debug] Threshold:', HANDLE_HIT_THRESHOLD)
+
+    if (nearestHandle) {
+      console.log('[RightClick Debug] Found nearest handle:', nearestHandle)
+      return {
+        nodeId: nearestHandle.nodeId,
+        handleId: nearestHandle.handleId,
+      }
+    }
+
+    console.log('[RightClick Debug] No handle found within threshold', {
+      threshold: HANDLE_HIT_THRESHOLD,
+      minDistance: sortedDistances.length > 0 ? sortedDistances[0].distance : 'N/A',
+      closestHandle: sortedDistances.length > 0 ? sortedDistances[0] : 'N/A',
+    })
+    return null
+  }, [])
+
+  // Handle right-click on handle to initiate directed edge creation
+  const handleHandleRightClick = useCallback((nodeId: string, handleId: string, clientX: number, clientY: number) => {
+    console.log('[RightClick Debug] handleHandleRightClick called', {
+      nodeId,
+      handleId,
+      clientX,
+      clientY,
+    })
+    
+    // Find source node and calculate handle position
+    const sourceNode = nodes.find((n) => n.id === nodeId)
+    if (!sourceNode || !reactFlowInstance.current || !canvasContainerRef.current) {
+      console.log('[RightClick Debug] Cannot initialize drag - missing node or refs')
+      return
+    }
+    
+    // Get container rect for coordinate conversion
+    const containerRect = canvasContainerRef.current.getBoundingClientRect()
+    
+    // Try to find the actual handle DOM element to get its exact position
+    // This ensures we use the same coordinate system as the SVG (relative to canvasContainerRef)
+    // React Flow nodes have data-id attribute, handles have data-handleid attribute
+    const nodeElement = canvasContainerRef.current.querySelector(`[data-id="${nodeId}"]`) as HTMLElement
+    const handleElement = nodeElement?.querySelector(`[data-handleid="${handleId}"], [data-handleid="${handleId}-source"], [data-handleid="${handleId}-target"]`) as HTMLElement
+    let sourceScreen: { x: number; y: number }
+    
+    if (handleElement) {
+      // Use actual DOM element position for accuracy
+      const handleRect = handleElement.getBoundingClientRect()
+      sourceScreen = {
+        x: handleRect.left + handleRect.width / 2 - containerRect.left,
+        y: handleRect.top + handleRect.height / 2 - containerRect.top,
+      }
+      console.log('[RightClick Debug] Using handle DOM element position:', sourceScreen)
+    } else {
+      // Fallback: calculate handle position using flow coordinates
+      const sourceNodeWidth = (sourceNode as any).measured?.width || (sourceNode as any).width || 200
+      const sourceNodeHeight = (sourceNode as any).measured?.height || (sourceNode as any).height || 100
+      
+      let sourceX = sourceNode.position.x + sourceNodeWidth / 2
+      let sourceY = sourceNode.position.y + sourceNodeHeight / 2
+      
+      if (handleId === 'top-source') {
+        sourceX = sourceNode.position.x + sourceNodeWidth / 2
+        sourceY = sourceNode.position.y
+      } else if (handleId === 'bottom-source') {
+        sourceX = sourceNode.position.x + sourceNodeWidth / 2
+        sourceY = sourceNode.position.y + sourceNodeHeight
+      } else if (handleId === 'left-source') {
+        sourceX = sourceNode.position.x
+        sourceY = sourceNode.position.y + sourceNodeHeight / 2
+      } else if (handleId === 'right-source') {
+        sourceX = sourceNode.position.x + sourceNodeWidth
+        sourceY = sourceNode.position.y + sourceNodeHeight / 2
+      }
+      
+      // Convert flow coordinates to screen coordinates relative to React Flow viewport
+      const flowScreen = reactFlowInstance.current.flowToScreenPosition({ x: sourceX, y: sourceY })
+      
+      // React Flow's flowToScreenPosition returns coordinates relative to its internal viewport
+      // We need to find the React Flow viewport element to get its offset relative to canvasContainerRef
+      const reactFlowViewport = canvasContainerRef.current.querySelector('.react-flow__viewport') as HTMLElement
+      if (reactFlowViewport) {
+        const viewportRect = reactFlowViewport.getBoundingClientRect()
+        sourceScreen = {
+          x: flowScreen.x + (viewportRect.left - containerRect.left),
+          y: flowScreen.y + (viewportRect.top - containerRect.top),
+        }
+      } else {
+        // Fallback: assume flowToScreenPosition is already relative to container
+        sourceScreen = flowScreen
+      }
+      console.log('[RightClick Debug] Using calculated position (fallback):', sourceScreen)
+    }
+    
+    rightClickDragStateRef.current = {
+      isDragging: true,
+      sourceNodeId: nodeId,
+      sourceHandleId: handleId,
+      startX: clientX - containerRect.left,
+      startY: clientY - containerRect.top,
+    }
+    console.log('[RightClick Debug] Set rightClickDragStateRef:', rightClickDragStateRef.current)
+    
+    // Set initial drag preview position to source handle position (relative to canvasContainerRef)
+    setDragPreviewPosition(sourceScreen)
+    setIsDirectingEdge(true)
+    setIsConnecting(true)
+    setConnectingFromNodeId(nodeId)
+    console.log('[RightClick Debug] State updated: isDirectingEdge=true, isConnecting=true, dragPreviewPosition=', sourceScreen)
+  }, [nodes])
+
+  // Handle right-click drag preview (mousemove)
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (rightClickDragStateRef.current.isDragging && canvasContainerRef.current) {
+        // Get canvas container position
+        const rect = canvasContainerRef.current.getBoundingClientRect()
+        // Store position relative to canvas container (for SVG rendering)
+        // This matches the coordinate system used in handleHandleRightClick
+        setDragPreviewPosition({
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        })
+      }
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+    }
+  }, [])
+
+  // Handle right-click drag end to create directed edge
+  useEffect(() => {
+    const handleMouseUp = (e: MouseEvent) => {
+      console.log('[RightClick Debug] handleMouseUp called', {
+        button: e.button,
+        isDragging: rightClickDragStateRef.current.isDragging,
+        state: rightClickDragStateRef.current,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        target: e.target,
+      })
+      
+      if (rightClickDragStateRef.current.isDragging && e.button === 2) {
+        console.log('[RightClick Debug] Right-click drag end detected')
+        const state = rightClickDragStateRef.current
+        
+        // Use geometric hit testing to find nearest handle at coordinates
+        const nearestHandle = findNearestHandleAtScreenCoords(e.clientX, e.clientY)
+        
+        if (nearestHandle && state.sourceNodeId && nearestHandle.nodeId !== state.sourceNodeId) {
+          console.log('[RightClick Debug] Edge creation check:', {
+            targetNodeId: nearestHandle.nodeId,
+            sourceNodeId: state.sourceNodeId,
+            targetHandleId: nearestHandle.handleId,
+            sourceHandleId: state.sourceHandleId,
+            willCreate: true,
+          })
+          
+          console.log('[RightClick Debug] Creating directed edge')
+          const sourceNode = nodes.find((n) => n.id === state.sourceNodeId)
+          const targetNode = nodes.find((n) => n.id === nearestHandle.nodeId)
+          const optimalHandles = sourceNode && targetNode
+            ? calculateOptimalHandles(sourceNode, targetNode)
+            : null
+
+          const sourceHandle = normalizeHandleId(
+            optimalHandles?.sourceHandle || state.sourceHandleId,
+            'source'
+          )
+          const targetHandle = normalizeHandleId(
+            optimalHandles?.targetHandle || nearestHandle.handleId,
+            'target'
+          )
+
+          // Create the directed edge
+          const newEdge: Edge = {
+            id: `edge_${state.sourceNodeId}_${nearestHandle.nodeId}_${Date.now()}`,
+            source: state.sourceNodeId,
+            target: nearestHandle.nodeId,
+            sourceHandle: sourceHandle || undefined,
+            targetHandle: targetHandle || undefined,
+            type: 'default',
+            data: {
+              sourceHandle: sourceHandle,
+              targetHandle: targetHandle,
+              directed: true,
+            },
+          }
+          
+          console.log('[RightClick Debug] New edge created:', newEdge)
+          
+          setEdges((eds) => {
+            const normalizedEdge = normalizeEdge(newEdge)
+            const updatedEdges = [...eds, normalizedEdge]
+            console.log('[RightClick Debug] Updated edges count:', updatedEdges.length, 'normalized edge data.directed:', (normalizedEdge as any).data?.directed)
+            addToHistory(nodes, updatedEdges)
+            saveEdges(updatedEdges)
+            return updatedEdges
+          })
+        } else {
+          console.log('[RightClick Debug] Edge creation skipped', {
+            foundHandle: !!nearestHandle,
+            hasSourceNodeId: !!state.sourceNodeId,
+            differentNodes: nearestHandle ? nearestHandle.nodeId !== state.sourceNodeId : false,
+          })
+        }
+        
+        // Reset state
+        console.log('[RightClick Debug] Resetting drag state')
+        rightClickDragStateRef.current = {
+          isDragging: false,
+          sourceNodeId: null,
+          sourceHandleId: null,
+          startX: 0,
+          startY: 0,
+        }
+        setIsDirectingEdge(false)
+        setIsConnecting(false)
+        setConnectingFromNodeId(null)
+        setDragPreviewPosition(null)
+      } else {
+        console.log('[RightClick Debug] Mouseup ignored - not dragging or wrong button', {
+          isDragging: rightClickDragStateRef.current.isDragging,
+          button: e.button,
+        })
+      }
+    }
+
+    const handleContextMenu = (e: MouseEvent) => {
+      console.log('[RightClick Debug] handleContextMenu (document) called', {
+        isDragging: rightClickDragStateRef.current.isDragging,
+        target: e.target,
+      })
+      if (rightClickDragStateRef.current.isDragging) {
+        console.log('[RightClick Debug] Preventing context menu')
+        e.preventDefault()
+      }
+    }
+
+    console.log('[RightClick Debug] Adding event listeners')
+    document.addEventListener('mouseup', handleMouseUp)
+    document.addEventListener('contextmenu', handleContextMenu)
+    
+    return () => {
+      console.log('[RightClick Debug] Removing event listeners')
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('contextmenu', handleContextMenu)
+    }
+  }, [setEdges, normalizeEdge, nodes, addToHistory, saveEdges, findNearestHandleAtScreenCoords, calculateOptimalHandles, normalizeHandleId])
+
   // Add rename props and category change handler to nodes
   const filteredNodes = React.useMemo(() => {
     return nodes.map((node) => ({
@@ -2691,9 +3164,11 @@ function WorldLabCanvasInner({
         // Pass connection state to nodes for dynamic handle visibility
         isConnecting: isConnecting,
         connectingFromNodeId: connectingFromNodeId,
+        // Pass right-click handler for directed edges
+        onHandleRightClick: handleHandleRightClick,
       },
     }))
-  }, [nodes, renamingNodeId, isConnecting, connectingFromNodeId, handleNodeRename, handleRenameCancel, handleStartRename, handleNodeCategoryChange])
+  }, [nodes, renamingNodeId, isConnecting, connectingFromNodeId, handleNodeRename, handleRenameCancel, handleStartRename, handleNodeCategoryChange, handleHandleRightClick])
 
   // Filter edges to only show connections between visible nodes
   const filteredEdges = React.useMemo(() => {
@@ -2708,11 +3183,19 @@ function WorldLabCanvasInner({
     const MIN_OFFSET_SPACING = 60 // Minimum spacing in pixels for very short edges
     const MAX_OFFSET_SPACING = 120 // Maximum spacing in pixels for very long edges
     
-    // Group edges by (source, target, sourceHandle, targetHandle)
+    // Group edges by (source, target) only
+    // This groups ALL edges between the same nodes together, regardless of:
+    // - handle positions (sourceHandle/targetHandle)
+    // - edge type (arrow/non-arrow)
+    // This ensures arrow edges and non-arrow edges maintain distance from each other
     const edgeGroups = new Map<string, Edge[]>()
     
     filteredEdges.forEach(edge => {
-      const key = `${edge.source}-${edge.target}-${edge.sourceHandle || ''}-${edge.targetHandle || ''}`
+      // Group by node pair (undirected) so A->B and B->A also get spacing
+      const pair = edge.source < edge.target
+        ? `${edge.source}-${edge.target}`
+        : `${edge.target}-${edge.source}`
+      const key = pair
       if (!edgeGroups.has(key)) {
         edgeGroups.set(key, [])
       }
@@ -2788,7 +3271,11 @@ function WorldLabCanvasInner({
       
       sortedEdges.forEach((edge, index) => {
         // Center the offsets around 0: for 1 edge -> 0, for 2 edges -> -spacing/2, spacing/2, etc.
-        const offset = (index - (sortedEdges.length - 1) / 2) * offsetSpacing
+        const baseOffset = (index - (sortedEdges.length - 1) / 2) * offsetSpacing
+        // Normalize offset direction so opposite-direction edges separate instead of overlapping.
+        // We pick a canonical direction based on sorted node ids and flip the offset for reverse edges.
+        const isReverseDirection = edge.source.localeCompare(edge.target) > 0
+        const offset = isReverseDirection ? -baseOffset : baseOffset
         offsetMap.set(edge.id, offset)
       })
     })
@@ -2852,7 +3339,7 @@ function WorldLabCanvasInner({
               cursor: default !important;
             }
             .react-flow__pane.dragging {
-              cursor: grabbing !important;
+              cursor: default !important;
             }
             .react-flow__node {
               pointer-events: all;
@@ -2870,29 +3357,66 @@ function WorldLabCanvasInner({
             nodes={filteredNodes}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
-            edges={edgesWithOffset.map((edge) => ({
-              ...edge,
-              type: 'customBezier', // Custom bezier with offset support
-              style: getEdgeStyle(edge),
-              markerEnd: undefined, // No arrow markers - just smooth lines
-              // Hide default label - we'll render custom multi-line labels using EdgeLabelRenderer
-              label: undefined,
-              labelStyle: {
-                fill: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                fontWeight: 500,
-                fontSize: '12px',
-                background: theme === 'dark' ? 'rgba(30, 30, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-                padding: '4px 8px',
-                borderRadius: '6px',
-                border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
-              },
-              labelBgStyle: {
-                fill: theme === 'dark' ? 'rgba(30, 30, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)',
-                fillOpacity: 0.9,
-              },
-              // Pass pathOptions for edge offset (to avoid overlap between multiple edges)
-              pathOptions: edge.pathOptions,
-            }))}
+            edges={(() => {
+              // Map existing edges
+              const previewEdges = edgesWithOffset.map((edge) => {
+                const edgeData = (edge as any).data
+                // Check for directed property in edge.data - ensure it's explicitly true
+                const isDirected = edgeData?.directed === true
+                const edgeStyle = getEdgeStyle(edge)
+                // Check if edge is selected (React Flow manages this)
+                const isSelected = (edge as any).selected === true
+                // Use the same color as non-directed edges (from getEdgeStyle)
+                const finalStrokeColor = edgeStyle.stroke
+                // Arrow color should be opaque (not transparent) - use solid colors
+                // Convert the edge color to an opaque version for the arrow
+                // If selected, use the selected color (which is already opaque); otherwise use opaque default
+                const arrowColor = isSelected
+                  ? finalStrokeColor  // Selected color is already opaque
+                  : (theme === 'dark' ? '#505050' : '#C0C0C0')  // Opaque colors matching light theme edge color
+                return {
+                  ...edge,
+                  type: 'customBezier', // Custom bezier with offset support
+                  style: {
+                    ...edgeStyle,
+                    // Use final stroke color (respects selection state)
+                    stroke: finalStrokeColor,
+                  },
+                  markerEnd: isDirected
+                    ? {
+                        type: MarkerType.ArrowClosed,
+                        color: arrowColor,
+                        width: 18,
+                        height: 18,
+                      }
+                    : undefined, // Arrow marker for directed edges
+                  data: {
+                    ...edgeData,
+                    directed: isDirected, // Ensure directed is passed to custom edge component
+                  },
+                  // Hide default label - we'll render custom multi-line labels using EdgeLabelRenderer
+                  label: undefined,
+                  labelStyle: {
+                    fill: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
+                    fontWeight: 500,
+                    fontSize: '12px',
+                    background: theme === 'dark' ? 'rgba(30, 30, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                    padding: '4px 8px',
+                    borderRadius: '6px',
+                    border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
+                  },
+                  labelBgStyle: {
+                    fill: theme === 'dark' ? 'rgba(30, 30, 30, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                    fillOpacity: 0.9,
+                  },
+                  // Pass pathOptions for edge offset (to avoid overlap between multiple edges)
+                  pathOptions: edge.pathOptions,
+                }
+              })
+
+
+              return previewEdges
+            })()}
             onNodesChange={onNodesChangeWithHandleAdjustment}
             onEdgesChange={onEdgesChangeInner}
             onNodeClick={handleNodeClick}
@@ -2914,6 +3438,8 @@ function WorldLabCanvasInner({
               // Clear connecting state
               setIsConnecting(false)
               setConnectingFromNodeId(null)
+              // Reset directed edge flag in case connection was cancelled
+              setIsDirectingEdge(false)
             }}
             nodesDraggable={true}
             nodesConnectable={true}
@@ -2936,6 +3462,8 @@ function WorldLabCanvasInner({
               return !!(connection.source && connection.target && connection.source !== connection.target)
             }}
             connectionRadius={40}
+            panOnDrag={false}
+            panOnScroll={true}
             style={{ background: bgColor }}
             defaultEdgeOptions={{
               animated: false,
@@ -3232,6 +3760,114 @@ function WorldLabCanvasInner({
               })()}
             </EdgeLabelRenderer>
           </ReactFlow>
+
+          {/* Right-click drag preview line */}
+          {rightClickDragStateRef.current.isDragging && dragPreviewPosition && reactFlowInstance.current && canvasContainerRef.current && (() => {
+            const state = rightClickDragStateRef.current
+            const sourceNode = nodes.find((n) => n.id === state.sourceNodeId)
+            
+            if (!sourceNode || !state.sourceNodeId) return null
+
+            const containerRect = canvasContainerRef.current.getBoundingClientRect()
+            
+            // Try to find the actual handle DOM element to get its exact position
+            // This ensures we use the same coordinate system as the SVG (relative to canvasContainerRef)
+            // React Flow nodes have data-id attribute, handles have data-handleid attribute
+            const nodeElement = canvasContainerRef.current.querySelector(`[data-id="${state.sourceNodeId}"]`) as HTMLElement
+            const handleElement = nodeElement?.querySelector(`[data-handleid="${state.sourceHandleId}"], [data-handleid="${state.sourceHandleId}-source"], [data-handleid="${state.sourceHandleId}-target"]`) as HTMLElement
+            let sourceScreen: { x: number; y: number }
+            
+            if (handleElement) {
+              // Use actual DOM element position for accuracy
+              const handleRect = handleElement.getBoundingClientRect()
+              sourceScreen = {
+                x: handleRect.left + handleRect.width / 2 - containerRect.left,
+                y: handleRect.top + handleRect.height / 2 - containerRect.top,
+              }
+            } else {
+              // Fallback: calculate handle position using flow coordinates
+              const sourceNodeWidth = (sourceNode as any).measured?.width || (sourceNode as any).width || 200
+              const sourceNodeHeight = (sourceNode as any).measured?.height || (sourceNode as any).height || 100
+              
+              let sourceX = sourceNode.position.x + sourceNodeWidth / 2
+              let sourceY = sourceNode.position.y + sourceNodeHeight / 2
+              
+              if (state.sourceHandleId === 'top-source') {
+                sourceX = sourceNode.position.x + sourceNodeWidth / 2
+                sourceY = sourceNode.position.y
+              } else if (state.sourceHandleId === 'bottom-source') {
+                sourceX = sourceNode.position.x + sourceNodeWidth / 2
+                sourceY = sourceNode.position.y + sourceNodeHeight
+              } else if (state.sourceHandleId === 'left-source') {
+                sourceX = sourceNode.position.x
+                sourceY = sourceNode.position.y + sourceNodeHeight / 2
+              } else if (state.sourceHandleId === 'right-source') {
+                sourceX = sourceNode.position.x + sourceNodeWidth
+                sourceY = sourceNode.position.y + sourceNodeHeight / 2
+              }
+              
+              // Convert flow coordinates to screen coordinates relative to React Flow viewport
+              const flowScreen = reactFlowInstance.current.flowToScreenPosition({ x: sourceX, y: sourceY })
+              
+              // React Flow's flowToScreenPosition returns coordinates relative to its internal viewport
+              // We need to find the React Flow viewport element to get its offset relative to canvasContainerRef
+              const reactFlowViewport = canvasContainerRef.current.querySelector('.react-flow__viewport') as HTMLElement
+              if (reactFlowViewport) {
+                const viewportRect = reactFlowViewport.getBoundingClientRect()
+                sourceScreen = {
+                  x: flowScreen.x + (viewportRect.left - containerRect.left),
+                  y: flowScreen.y + (viewportRect.top - containerRect.top),
+                }
+              } else {
+                // Fallback: assume flowToScreenPosition is already relative to container
+                sourceScreen = flowScreen
+              }
+            }
+            
+            // dragPreviewPosition is already in screen coordinates relative to canvasContainerRef
+            const targetScreen = dragPreviewPosition
+
+            return (
+              <svg
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  pointerEvents: 'none',
+                  zIndex: 1000,
+                }}
+              >
+                <defs>
+                  <marker
+                    id="arrowhead-preview"
+                    markerWidth="12"
+                    markerHeight="12"
+                    refX="10"
+                    refY="4"
+                    orient="auto"
+                    markerUnits="userSpaceOnUse"
+                  >
+                    <path
+                      d="M 0 0 L 0 8 L 10 4 Z"
+                      fill={theme === 'dark' ? '#505050' : '#C0C0C0'}
+                      stroke={theme === 'dark' ? '#505050' : '#C0C0C0'}
+                      strokeWidth={0.5}
+                    />
+                  </marker>
+                </defs>
+                <path
+                  d={`M ${sourceScreen.x},${sourceScreen.y} L ${targetScreen.x},${targetScreen.y}`}
+                  stroke={theme === 'dark' ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.15)'}
+                  strokeWidth={2}
+                  strokeDasharray="5,5"
+                  fill="none"
+                  markerEnd="url(#arrowhead-preview)"
+                />
+              </svg>
+            )
+          })()}
 
           {/* Inline Edge Label Input */}
           {inlineEditingEdgeId && inlineEditingPosition && (() => {

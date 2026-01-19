@@ -168,6 +168,7 @@ export interface WorldLabEdge {
   style?: Record<string, any>; // Edge style
   sourceHandle?: string; // Source handle ID (e.g., 'top-target', 'bottom-source', etc.)
   targetHandle?: string; // Target handle ID (e.g., 'top-target', 'bottom-source', etc.)
+  data?: Record<string, any>; // Optional edge data (e.g., directed)
 }
 
 export interface WorldLab {
