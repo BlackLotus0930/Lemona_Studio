@@ -46,6 +46,97 @@ interface WorldLabCanvasProps {
   onBeforeExternalChange?: () => void // Called before external changes (from Terminal) are applied
 }
 
+const TRANSIENT_NODE_DATA_KEYS = new Set([
+  'isRenaming',
+  'onRename',
+  'onRenameCancel',
+  'onStartRename',
+  'onCategoryChange',
+  'isConnecting',
+  'connectingFromNodeId',
+  'onHandleRightClick',
+])
+
+const sanitizeForCompare = (
+  value: any,
+  transientKeys: Set<string>,
+  stack: WeakSet<object> = new WeakSet(),
+  cache: WeakMap<object, any> = new WeakMap()
+): any => {
+  if (value === null || value === undefined) return value
+  if (typeof value === 'function') return undefined
+  if (typeof value !== 'object') return value
+
+  if (cache.has(value)) {
+    return cache.get(value)
+  }
+  if (stack.has(value)) {
+    return '[Circular]'
+  }
+  stack.add(value)
+
+  if (Array.isArray(value)) {
+    const result = value.map((item) => {
+      const sanitized = sanitizeForCompare(item, transientKeys, stack, cache)
+      return sanitized === undefined ? null : sanitized
+    })
+    stack.delete(value)
+    cache.set(value, result)
+    return result
+  }
+
+  const result: Record<string, any> = {}
+  const keys = Object.keys(value).sort()
+  keys.forEach((key) => {
+    if (transientKeys.has(key)) return
+    const sanitized = sanitizeForCompare(value[key], transientKeys, stack, cache)
+    if (sanitized !== undefined) {
+      result[key] = sanitized
+    }
+  })
+  stack.delete(value)
+  cache.set(value, result)
+  return result
+}
+
+const normalizeWorldLabNodesForCompare = (nodes: WorldLabNode[]) => {
+  return [...nodes]
+    .map((node) => ({
+      id: node.id,
+      label: node.label,
+      category: node.category,
+      elementName: node.elementName,
+      position: node.position,
+      data: sanitizeForCompare(node.data, TRANSIENT_NODE_DATA_KEYS),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+}
+
+const normalizeWorldLabEdgesForCompare = (edges: WorldLabEdge[]) => {
+  return [...edges]
+    .map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      type: edge.type,
+      label: edge.label,
+      animated: edge.animated,
+      style: sanitizeForCompare(edge.style, new Set()),
+      sourceHandle: edge.sourceHandle,
+      targetHandle: edge.targetHandle,
+      data: sanitizeForCompare(edge.data, new Set()),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+}
+
+const getNodesSignature = (nodes: WorldLabNode[]) => {
+  return JSON.stringify(normalizeWorldLabNodesForCompare(nodes))
+}
+
+const getEdgesSignature = (edges: WorldLabEdge[]) => {
+  return JSON.stringify(normalizeWorldLabEdgesForCompare(edges))
+}
+
 // Enhanced category color palette with gradients
 function getCategoryColor(category: string, theme: 'dark' | 'light'): {
   primary: string
@@ -977,6 +1068,10 @@ function WorldLabCanvasInner({
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null)
   const viewportSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savedViewportRef = useRef<{ x: number; y: number; zoom: number } | null>(null)
+  const prevInitialNodesSignatureRef = useRef<string>(getNodesSignature(initialNodes))
+  const prevInitialEdgesSignatureRef = useRef<string>(getEdgesSignature(initialEdges))
+  const lastInternalNodesSignatureRef = useRef<string | null>(null)
+  const lastInternalEdgesSignatureRef = useRef<string | null>(null)
   
   // Track previous node positions to detect position changes
   const prevNodePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map())
@@ -1206,6 +1301,7 @@ function WorldLabCanvasInner({
   const [historyIndex, setHistoryIndex] = useState(-1)
   const isUndoingRef = useRef(false)
   const historyInitializedRef = useRef(false)
+  const isLabSwitchingRef = useRef(false)
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -1498,8 +1594,14 @@ function WorldLabCanvasInner({
     if (labNameChanged) {
       // Lab name changed = external data source changed = WorldLab hydrate started
       prevLabNameRef.current = labName
+      isLabSwitchingRef.current = true
       // Reset refresh flag when switching projects
       didRefreshNodeInternalsRef.current = false
+      // Reset undo/redo history when switching labs
+      setHistory([])
+      setHistoryIndex(-1)
+      historyInitializedRef.current = false
+      isUndoingRef.current = false
       
       // Sync memory state with external data source (from refs, which have latest props)
       const newNodes = initialNodesRef.current.map((node) => ({
@@ -1585,6 +1687,7 @@ function WorldLabCanvasInner({
       }
       saveNodesTimeoutRef.current = setTimeout(async () => {
         const worldLabNodes = convertToWorldLabNodes(nodesToSave)
+        lastInternalNodesSignatureRef.current = getNodesSignature(worldLabNodes)
         
         // Update local state first for immediate UI feedback
         if (onNodesChange) {
@@ -1611,6 +1714,7 @@ function WorldLabCanvasInner({
       }
       saveEdgesTimeoutRef.current = setTimeout(async () => {
         const worldLabEdges = convertToWorldLabEdges(edgesToSave)
+        lastInternalEdgesSignatureRef.current = getEdgesSignature(worldLabEdges)
         
         // Use the nodes that were passed in (or current state if not provided)
         // This ensures we don't use stale closure state
@@ -2831,20 +2935,50 @@ function WorldLabCanvasInner({
   }, [nodes, edges, addToHistory]) // Initialize history when nodes are available
 
   // Sync external changes (from Terminal) to internal state and save to history
+  // IMPORTANT: This effect should ONLY run when initialNodes/initialEdges change (external changes),
+  // NOT when internal nodes/edges state changes (user moves nodes, etc.)
   const prevInitialNodesRef = useRef<WorldLabNode[]>(initialNodes)
   const prevInitialEdgesRef = useRef<WorldLabEdge[]>(initialEdges)
   
   useEffect(() => {
+    if (isLabSwitchingRef.current) {
+      isLabSwitchingRef.current = false
+      prevInitialNodesRef.current = initialNodes
+      prevInitialEdgesRef.current = initialEdges
+      prevInitialNodesSignatureRef.current = getNodesSignature(initialNodes)
+      prevInitialEdgesSignatureRef.current = getEdgesSignature(initialEdges)
+      return
+    }
     // Check if external nodes/edges changed (from Terminal operations)
-    const nodesChanged = JSON.stringify(prevInitialNodesRef.current) !== JSON.stringify(initialNodes)
-    const edgesChanged = JSON.stringify(prevInitialEdgesRef.current) !== JSON.stringify(initialEdges)
+    const currentInitialNodesSignature = getNodesSignature(initialNodes)
+    const currentInitialEdgesSignature = getEdgesSignature(initialEdges)
+    const nodesChanged = prevInitialNodesSignatureRef.current !== currentInitialNodesSignature
+    const edgesChanged = prevInitialEdgesSignatureRef.current !== currentInitialEdgesSignature
+
+    // If props reflect an internal save, skip external sync to avoid flicker
+    if (
+      (nodesChanged && lastInternalNodesSignatureRef.current === currentInitialNodesSignature) ||
+      (edgesChanged && lastInternalEdgesSignatureRef.current === currentInitialEdgesSignature)
+    ) {
+      prevInitialNodesRef.current = initialNodes
+      prevInitialEdgesRef.current = initialEdges
+      prevInitialNodesSignatureRef.current = currentInitialNodesSignature
+      prevInitialEdgesSignatureRef.current = currentInitialEdgesSignature
+      return
+    }
     
     if (nodesChanged || edgesChanged) {
-      const internalNodes = convertToWorldLabNodes(nodes)
-      const internalEdges = convertToWorldLabEdges(edges)
-      const internalMatches =
-        JSON.stringify(internalNodes) === JSON.stringify(initialNodes) &&
-        JSON.stringify(internalEdges) === JSON.stringify(initialEdges)
+      // Use refs to get current internal state without triggering re-renders
+      // This avoids the effect running on every node move
+      const currentInternalNodes = convertToWorldLabNodes(nodesRef.current)
+      const currentInternalEdges = convertToWorldLabEdges(edgesRef.current)
+      const nodesMatch =
+        !nodesChanged ||
+        getNodesSignature(currentInternalNodes) === currentInitialNodesSignature
+      const edgesMatch =
+        !edgesChanged ||
+        getEdgesSignature(currentInternalEdges) === currentInitialEdgesSignature
+      const internalMatches = nodesMatch && edgesMatch
       
       // Only apply when changes are truly external (Terminal)
       if (!internalMatches) {
@@ -2857,7 +2991,8 @@ function WorldLabCanvasInner({
         if (!historyInitializedRef.current) {
           historyInitializedRef.current = true
         }
-        addToHistory(nodes, edges, { force: true })
+        // Use refs to get current state for history
+        addToHistory(nodesRef.current, edgesRef.current, { force: true })
         
         // Convert external WorldLab nodes/edges to ReactFlow format and update internal state
         const reactFlowNodes = initialNodes.map((node) => ({
@@ -2898,7 +3033,9 @@ function WorldLabCanvasInner({
     // Update refs
     prevInitialNodesRef.current = initialNodes
     prevInitialEdgesRef.current = initialEdges
-  }, [initialNodes, initialEdges, addToHistory, onBeforeExternalChange, nodes, edges, setNodes, setEdges, convertToWorldLabNodes, convertToWorldLabEdges])
+    prevInitialNodesSignatureRef.current = currentInitialNodesSignature
+    prevInitialEdgesSignatureRef.current = currentInitialEdgesSignature
+  }, [initialNodes, initialEdges, addToHistory, onBeforeExternalChange, setNodes, setEdges, convertToWorldLabNodes, convertToWorldLabEdges])
 
   // Expose undo/redo handlers to parent component
   useEffect(() => {
