@@ -1,4 +1,4 @@
-# Lemona 🍋
+# Lemona
 
 **An Integrated Writing Environment**
 
