@@ -1022,15 +1022,40 @@ class VectorStore {
           hnswlibVersion: HNSWLIB_NODE_VERSION,
         }
         
-        // Save metadata first (atomic write)
-        await fs.writeFile(this.metadataFile, JSON.stringify(metadataData, null, 2))
-        
-        // Verify metadata file exists after write
+        // Save metadata first (atomic write using temp file + rename)
+        // This ensures the original file remains intact if the write is interrupted
+        const tempMetadataFile = this.metadataFile + '.tmp.' + Date.now()
         try {
-          await fs.stat(this.metadataFile)
-        } catch (verifyError) {
-          console.error(`[VectorStore] ✗ Metadata file verification failed:`, verifyError)
-          throw new Error(`Metadata file was not saved correctly: ${this.metadataFile}`)
+          const metadataJson = JSON.stringify(metadataData, null, 2)
+          await fs.writeFile(tempMetadataFile, metadataJson, 'utf-8')
+          
+          // Verify temp file was written correctly
+          try {
+            await fs.stat(tempMetadataFile)
+          } catch (verifyError) {
+            console.error(`[VectorStore] ✗ Temp metadata file verification failed:`, verifyError)
+            throw new Error(`Temp metadata file was not saved correctly: ${tempMetadataFile}`)
+          }
+          
+          // Atomic rename: this is the only operation that can fail and leave us in a bad state
+          // But if it fails, the original file is still intact
+          await fs.rename(tempMetadataFile, this.metadataFile)
+          
+          // Verify final metadata file exists
+          try {
+            await fs.stat(this.metadataFile)
+          } catch (verifyError) {
+            console.error(`[VectorStore] ✗ Metadata file verification failed after rename:`, verifyError)
+            throw new Error(`Metadata file was not saved correctly: ${this.metadataFile}`)
+          }
+        } catch (writeError: any) {
+          // Clean up temp file if rename failed
+          try {
+            await fs.unlink(tempMetadataFile).catch(() => {})
+          } catch {
+            // Ignore cleanup errors
+          }
+          throw writeError
         }
 
         // Save index binary using writeIndexSync() (synchronous) as per official documentation
@@ -1538,7 +1563,8 @@ class VectorStore {
   async searchUnsafe(
     queryEmbedding: number[],
     k: number = 6,
-    fileIds?: string[] // Optional: Filter results by file IDs
+    fileIds?: string[], // Optional: Filter results by file IDs
+    efSearch: number = HNSW_CONFIG.efSearch
   ): Promise<SearchResult[]> {
     // Check if index needs to be loaded first
     if (!this.isInitialized || !this.index) {
@@ -1551,8 +1577,8 @@ class VectorStore {
         )
       }
 
-      // Set efSearch parameter
-      this.index.setEf(HNSW_CONFIG.efSearch)
+      // Set efSearch parameter (higher improves recall at a small perf cost)
+      this.index.setEf(efSearch)
 
       // Search (hnswlib-node uses searchKnn)
       // hnswlib-node accepts number[] directly
@@ -1634,8 +1660,8 @@ class VectorStore {
    * Returns true if valid, false if needs rebuild
    */
   async validateIntegrity(): Promise<{ valid: boolean; indexCount: number; metadataCount: number; needsRebuild: boolean }> {
-    // Try read lock first (most common case)
-    let releaseLock = await projectLockManager.acquireReadLock(this.currentProjectId)
+    // Need write lock for potential auto-repair
+    let releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
     try {
       await this.loadIndexUnsafe()
       const indexCount = this.index ? this.index.getCurrentCount() : 0
@@ -1645,24 +1671,22 @@ class VectorStore {
 
       if (!valid) {
         console.warn(`[VectorStore] Integrity check failed for project ${this.currentProjectId || 'global'}: indexCount=${indexCount}, metadataCount=${metadataCount}`)
+
+        // If index is empty but metadata exists, keep the empty index and reindex lazily.
+        // Avoid rebuilding every startup (loadIndexUnsafe already handles corruption cases).
+        if (needsRebuild) {
+          return { valid: true, indexCount, metadataCount, needsRebuild: true }
+        }
+
+        // If index has data but metadata differs, trust the index and allow metadata to
+        // be synchronized on the next save (same as loadIndexUnsafe behavior).
+        return { valid: true, indexCount, metadataCount, needsRebuild: false }
       }
 
       return { valid, indexCount, metadataCount, needsRebuild }
     } catch (error: any) {
-      // If read lock fails (e.g., needs rebuilding), try with write lock explicitly
-      releaseLock()
-      releaseLock = await projectLockManager.acquireWriteLock(this.currentProjectId)
-      try {
-        await this.loadIndexUnsafe()
-        const indexCount = this.index ? this.index.getCurrentCount() : 0
-        const metadataCount = this.metadata.size
-        const valid = indexCount === metadataCount
-        const needsRebuild = metadataCount > 0 && indexCount === 0
-        return { valid, indexCount, metadataCount, needsRebuild }
-      } catch (writeError: any) {
-        console.error(`[VectorStore] Integrity check error for project ${this.currentProjectId || 'global'}:`, writeError)
-        return { valid: false, indexCount: 0, metadataCount: this.metadata.size, needsRebuild: true }
-      }
+      console.error(`[VectorStore] Integrity check error for project ${this.currentProjectId || 'global'}:`, error)
+      return { valid: false, indexCount: 0, metadataCount: this.metadata.size, needsRebuild: true }
     } finally {
       releaseLock()
     }

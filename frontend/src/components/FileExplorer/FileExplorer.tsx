@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import { Document } from '@shared/types'
 import { useTheme } from '../../contexts/ThemeContext'
 import { documentApi } from '../../services/api'
-import { memo } from 'react'
 // @ts-ignore
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 // @ts-ignore
@@ -1152,8 +1151,9 @@ function FileExplorer({
                 color: isFolder ? folderTextColor : undefined,
                 fontWeight: 370,
               }}
+              title={item.name} // Show full name on hover
             >
-              {item.name}
+              {item.name.length > 35 ? `${item.name.substring(0, 32)}...` : item.name}
             </span>
           )}
         </div>
@@ -1880,5 +1880,5 @@ function FileExplorer({
   )
 }
 
-export default memo(FileExplorer)
+export default FileExplorer
 

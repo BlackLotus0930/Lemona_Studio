@@ -3,9 +3,12 @@ import { PDFTextContent } from '../../../shared/types.js'
 import { estimateTokens } from './embeddingService.js'
 import crypto from 'crypto'
 
-// Default chunking parameters
-export const DEFAULT_CHUNK_SIZE = 400 // tokens per chunk
-export const DEFAULT_CHUNK_OVERLAP = 50 // tokens overlap between chunks (40-60 range, using 50 as default)
+// Chunking parameters
+// Library folder uses larger chunks, workspace/project folder uses smaller chunks for better precision
+export const DEFAULT_CHUNK_SIZE = 512 // tokens per chunk (library)
+export const DEFAULT_CHUNK_OVERLAP = 100 // tokens overlap between chunks (library, ~19.5%)
+export const WORKSPACE_CHUNK_SIZE = 384 // tokens per chunk (workspace/project)
+export const WORKSPACE_CHUNK_OVERLAP = 75 // tokens overlap between chunks (workspace/project)
 
 /**
  * Chunk metadata
@@ -333,6 +336,41 @@ export function chunkTipTapToSemanticBlocks(
   }
   let currentBlock: CurrentBlockType | null = null
   let paragraphIndex = 0
+  
+  function pushSemanticBlock(
+    blockText: string,
+    headingText: string | undefined,
+    headingLevel: number | undefined,
+    paragraphCount: number
+  ) {
+    const splitBlocks = splitTextIntoChunks(
+      blockText,
+      WORKSPACE_CHUNK_SIZE,
+      WORKSPACE_CHUNK_OVERLAP
+    )
+
+    for (const splitBlock of splitBlocks) {
+      const text = splitBlock.text
+      if (!text.trim()) {
+        continue
+      }
+
+      const hash = generateHash(text)
+      const tokenCount = estimateTokens(text)
+
+      blocks.push({
+        paragraphId: crypto.randomUUID(),
+        fileId,
+        text,
+        hash,
+        paragraphIndex: paragraphIndex++,
+        headingText,
+        headingLevel,
+        paragraphCount,
+        tokenCount,
+      })
+    }
+  }
 
   /**
    * Traverse TipTap nodes and group into semantic blocks
@@ -349,20 +387,12 @@ export function chunkTipTapToSemanticBlocks(
           ].filter(Boolean).join('\n\n')
           
           if (blockText.trim()) {
-            const hash = generateHash(blockText)
-            const tokenCount = estimateTokens(blockText)
-            
-            blocks.push({
-              paragraphId: crypto.randomUUID(),
-              fileId,
-              text: blockText,
-              hash,
-              paragraphIndex: paragraphIndex++,
-              headingText: block.headingText,
-              headingLevel: block.headingLevel,
-              paragraphCount: block.paragraphCount,
-              tokenCount,
-            })
+            pushSemanticBlock(
+              blockText,
+              block.headingText,
+              block.headingLevel,
+              block.paragraphCount
+            )
           }
         }
         
@@ -418,20 +448,12 @@ export function chunkTipTapToSemanticBlocks(
       ].filter(Boolean).join('\n\n')
       
       if (blockText.trim()) {
-        const hash = generateHash(blockText)
-        const tokenCount = estimateTokens(blockText)
-        
-        blocks.push({
-          paragraphId: crypto.randomUUID(),
-          fileId,
-          text: blockText,
-          hash,
-          paragraphIndex: paragraphIndex++,
-          headingText: block.headingText,
-          headingLevel: block.headingLevel,
-          paragraphCount: block.paragraphCount,
-          tokenCount,
-        })
+        pushSemanticBlock(
+          blockText,
+          block.headingText,
+          block.headingLevel,
+          block.paragraphCount
+        )
       }
     }
   }
@@ -448,5 +470,7 @@ export const chunkingService = {
   getChunkStats,
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,
+  WORKSPACE_CHUNK_SIZE,
+  WORKSPACE_CHUNK_OVERLAP,
 }
 

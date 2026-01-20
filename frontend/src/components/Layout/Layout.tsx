@@ -42,6 +42,8 @@ import { TextSelection } from 'prosemirror-state'
 // @ts-ignore
 import ChatIcon from '@mui/icons-material/Chat'
 // @ts-ignore
+import TerminalIcon from '@mui/icons-material/Terminal'
+// @ts-ignore
 import AddIcon from '@mui/icons-material/Add'
 // @ts-ignore
 import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder'
@@ -3479,12 +3481,13 @@ export default function Layout(): JSX.Element {
     return false
   }
 
-  // Helper function to check if title is default format (Doc X or Section X)
+  // Helper function to check if title is default format (Doc X, Section X, or Chapter X)
   const isDefaultTitle = (title: string): boolean => {
-    // Check for "Doc X" or "Section X" format (case-insensitive)
+    // Check for "Doc X", "Section X", or "Chapter X" format (case-insensitive)
     const docPattern = /^Doc \d+$/i
     const sectionPattern = /^Section \d+$/i
-    return docPattern.test(title) || sectionPattern.test(title)
+    const chapterPattern = /^Chapter \d+$/i
+    return docPattern.test(title) || sectionPattern.test(title) || chapterPattern.test(title)
   }
 
   // Handle editor content updates with debounced auto-save
@@ -3540,7 +3543,7 @@ export default function Layout(): JSX.Element {
       const currentDoc = documentsRef.current.find(doc => doc.id === docId)
       
       // Only update title if:
-      // 1. Title is default format (Doc X or Section X)
+      // 1. Title is default format (Doc X, Section X, or Chapter X)
       // 2. User has pressed Enter (has multiple paragraphs)
       // 3. First line has content
       if (currentDoc && isDefaultTitle(currentDoc.title) && hasMultipleParagraphs(content)) {
@@ -6340,9 +6343,13 @@ export default function Layout(): JSX.Element {
               e.currentTarget.style.transform = 'scale(1)'
               e.currentTarget.style.backgroundColor = theme === 'dark' ? '#252525' : '#e8e8e8'
             }}
-            title="Open AI Chat"
+            title={isWorldLabMode ? "Open Terminal" : "Open AI Chat"}
           >
-            <ChatIcon style={{ fontSize: '24px', color: theme === 'dark' ? '#ffffff' : '#5f6368' }} />
+            {isWorldLabMode ? (
+              <TerminalIcon style={{ fontSize: '24px', color: theme === 'dark' ? '#ffffff' : '#5f6368' }} />
+            ) : (
+              <ChatIcon style={{ fontSize: '24px', color: theme === 'dark' ? '#ffffff' : '#5f6368' }} />
+            )}
           </button>
         )}
       </PanelGroup>

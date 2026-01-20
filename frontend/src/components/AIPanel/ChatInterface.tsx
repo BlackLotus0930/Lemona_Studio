@@ -128,6 +128,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   // Store scroll positions per chat ID
   const scrollPositionsRef = useRef<Map<string, number>>(new Map())
   const previousChatIdRef = useRef<string | null>(null)
+  const previousDocumentIdRef = useRef<string | null>(null)
   
   // @mention autocomplete state
   const [mentionQuery, setMentionQuery] = useState('')
@@ -321,6 +322,48 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       checkLibraryIndexStatus()
     }
   }, [showMentionDropdown, projectId])
+
+  // Auto-scroll selected mention item into view when selection changes
+  useEffect(() => {
+    if (!showMentionDropdown || !mentionDropdownRef.current) return
+
+    // Use requestAnimationFrame to ensure DOM has updated
+    requestAnimationFrame(() => {
+      if (!mentionDropdownRef.current) return
+      
+      const selectedElement = mentionDropdownRef.current.querySelector(`[data-mention-index="${selectedMentionIndex}"]`) as HTMLElement
+      if (selectedElement) {
+        selectedElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      }
+    })
+  }, [selectedMentionIndex, showMentionDropdown])
+
+  // Auto-adjust textarea height when input changes (handles programmatic updates like mention insertion)
+  useEffect(() => {
+    if (!textareaRef.current) return
+
+    // Use requestAnimationFrame to ensure DOM has updated with new input value
+    requestAnimationFrame(() => {
+      if (!textareaRef.current) return
+      
+      // Sync textarea value with React state (in case they're out of sync)
+      if (textareaRef.current.value !== input) {
+        textareaRef.current.value = input
+      }
+      
+      // Auto-adjust height
+      textareaRef.current.style.height = 'auto'
+      const scrollHeight = textareaRef.current.scrollHeight
+      const newHeight = Math.min(scrollHeight, 200)
+      textareaRef.current.style.height = `${newHeight}px`
+      // Only show scrollbar when content exceeds maxHeight
+      if (scrollHeight > 200) {
+        textareaRef.current.style.overflowY = 'auto'
+      } else {
+        textareaRef.current.style.overflowY = 'hidden'
+      }
+    })
+  }, [input])
 
 
   // Save Google API key to localStorage and main process
@@ -729,6 +772,22 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       return
     }
 
+    // Capture previous values at the start to avoid race conditions with other effects
+    const prevChatId = previousChatIdRef.current
+    const prevDocumentId = previousDocumentIdRef.current
+
+    // Check if this is a new chat (chatId changed) or just document change (same chatId)
+    const isNewChat = prevChatId !== chatId
+    const isDocumentChangeOnly = !isNewChat && prevDocumentId !== documentId && prevDocumentId !== null
+    
+    // Save scroll position before switching if it's a document change only
+    let savedScrollPosition: number | null = null
+    if (isDocumentChangeOnly && scrollContainerRef.current) {
+      savedScrollPosition = scrollContainerRef.current.scrollTop
+      // Save scroll position for this chat
+      scrollPositionsRef.current.set(chatId, savedScrollPosition)
+    }
+
     const loadMessages = async () => {
       try {
         // IPC returns data directly, not wrapped in { data: ... }
@@ -741,23 +800,40 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         // Reset notification flag if chat already has messages
         hasNotifiedFirstMessage.current = messages.length > 0
         
-        // Always scroll to bottom when opening a chat
-        // Use requestAnimationFrame to ensure DOM is fully updated before scrolling
-        requestAnimationFrame(() => {
-          if (messagesEndRef.current && scrollContainerRef.current) {
-            // Use instant scroll (auto) for immediate positioning, then smooth if needed
-            messagesEndRef.current.scrollIntoView({ behavior: 'auto' })
-            // Also ensure scroll container is at bottom
-            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
-          }
-        })
-        // Double-check with another frame to ensure it sticks
-        requestAnimationFrame(() => {
-          if (messagesEndRef.current && scrollContainerRef.current) {
-            messagesEndRef.current.scrollIntoView({ behavior: 'auto' })
-            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
-          }
-        })
+        // Only scroll to bottom when opening a NEW chat (chatId changed)
+        // If only documentId changed, restore the previous scroll position
+        if (isNewChat) {
+          // Always scroll to bottom when opening a new chat
+          // Use requestAnimationFrame to ensure DOM is fully updated before scrolling
+          requestAnimationFrame(() => {
+            if (messagesEndRef.current && scrollContainerRef.current) {
+              // Use instant scroll (auto) for immediate positioning, then smooth if needed
+              messagesEndRef.current.scrollIntoView({ behavior: 'auto' })
+              // Also ensure scroll container is at bottom
+              scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
+            }
+          })
+          // Double-check with another frame to ensure it sticks
+          requestAnimationFrame(() => {
+            if (messagesEndRef.current && scrollContainerRef.current) {
+              messagesEndRef.current.scrollIntoView({ behavior: 'auto' })
+              scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
+            }
+          })
+        } else if (isDocumentChangeOnly && savedScrollPosition !== null) {
+          // Restore scroll position when only document changed (same chat)
+          requestAnimationFrame(() => {
+            if (scrollContainerRef.current) {
+              scrollContainerRef.current.scrollTop = savedScrollPosition!
+            }
+          })
+          // Double-check with another frame to ensure it sticks
+          requestAnimationFrame(() => {
+            if (scrollContainerRef.current) {
+              scrollContainerRef.current.scrollTop = savedScrollPosition!
+            }
+          })
+        }
       } catch (error) {
         console.error('Failed to load chat messages:', error)
         setMessages([])
@@ -767,6 +843,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
 
     loadMessages()
+    
+    // Update refs after determining the change type
+    previousDocumentIdRef.current = documentId
+    previousChatIdRef.current = chatId
   }, [documentId, chatId])
 
   // Add scroll detection and edge detection to show scrollbar
@@ -1445,6 +1525,19 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           // This places the cursor AFTER the space
           const newCursorPos = mentionStartPos + mentionText.length + 1
           textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+          
+          // Auto-adjust textarea height after inserting mention (especially for long filenames)
+          textareaRef.current.style.height = 'auto'
+          const scrollHeight = textareaRef.current.scrollHeight
+          const newHeight = Math.min(scrollHeight, 200)
+          textareaRef.current.style.height = `${newHeight}px`
+          // Only show scrollbar when content exceeds maxHeight
+          if (scrollHeight > 200) {
+            textareaRef.current.style.overflowY = 'auto'
+          } else {
+            textareaRef.current.style.overflowY = 'hidden'
+          }
+          
           textareaRef.current.focus()
         }
       }, 0)
@@ -1559,7 +1652,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       
       // Pass chat history (excluding the just-added user message) for conversation continuity
       const chatHistoryForAPI = messages.filter(msg => msg.id !== userMessage.id)
-      const response = await aiApi.streamChat(userMessage.content, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined, selectedStyle, projectId)
+      const response = await aiApi.streamChat(userMessage.content, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined, selectedStyle, projectId, googleApiKey, openaiApiKey)
       const reader = response.body?.getReader()
       
       // Store reader reference for cancellation
@@ -2953,6 +3046,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   return (
                     <div
                       key={mention.id || mention.name}
+                      data-mention-index={index}
                       onClick={() => {
                         insertMention(mention)
                       }}

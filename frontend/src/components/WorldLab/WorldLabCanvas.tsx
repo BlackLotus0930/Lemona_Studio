@@ -3247,7 +3247,8 @@ function WorldLabCanvasInner({
             }}
             connectionRadius={40}
             panOnDrag={true}
-            panOnScroll={true}
+            panOnScroll={false}
+            zoomOnScroll={true}
             style={{ background: bgColor }}
             defaultEdgeOptions={{
               animated: false,
@@ -3518,13 +3519,17 @@ function WorldLabCanvasInner({
                         border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.15)'}`,
                         whiteSpace: 'pre-wrap',
                         wordBreak: 'break-word',
-                        maxWidth: '140px',
+                        display: 'inline-block',
+                        width: 'max-content',
+                        maxWidth: '200px',
                         textAlign: 'center',
                         pointerEvents: 'all',
                         lineHeight: '1.4',
                         zIndex: 1000,
                         cursor: 'text',
                         transition: 'color 0.2s ease',
+                        writingMode: 'horizontal-tb',
+                        textOrientation: 'mixed',
                       }}
                       onMouseEnter={() => setHoveredEdgeLabelId(edge.id)}
                       onMouseLeave={() => setHoveredEdgeLabelId(null)}

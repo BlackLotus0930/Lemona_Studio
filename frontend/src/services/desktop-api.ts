@@ -80,13 +80,14 @@ export const aiApi = {
   },
   getStatus: () =>
     invokeOrFetch('ai:getStatus'),
-  streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string, attachments?: any[], style?: string, projectId?: string): Promise<Response> => {
+  streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string, attachments?: any[], style?: string, projectId?: string, googleApiKeyOverride?: string, openaiApiKeyOverride?: string): Promise<Response> => {
     if (!isElectron) {
       throw new Error('Streaming not available in web mode')
     }
 
-    const googleApiKey = getApiKey()
-    const openaiApiKey = getOpenaiApiKey()
+    // Use provided API keys if available, otherwise fall back to localStorage
+    const googleApiKey = googleApiKeyOverride !== undefined ? googleApiKeyOverride : getApiKey()
+    const openaiApiKey = openaiApiKeyOverride !== undefined ? openaiApiKeyOverride : getOpenaiApiKey()
 
     // Create a ReadableStream that reads from IPC events
     const stream = new ReadableStream({

@@ -3,7 +3,7 @@ import { Document } from '../../../shared/types.js'
 import { documentService } from './documentService.js'
 import { extractPDFText } from './pdfTextExtractor.js'
 import { parseDocx } from './docxParser.js'
-import { chunkPDF, chunkDocx, chunkTipTap, chunkTipTapToSemanticBlocks, Chunk, SemanticBlock, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP } from './chunkingService.js'
+import { chunkPDF, chunkDocx, chunkTipTap, chunkTipTapToSemanticBlocks, Chunk, SemanticBlock, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, WORKSPACE_CHUNK_SIZE, WORKSPACE_CHUNK_OVERLAP } from './chunkingService.js'
 import { generateEmbeddingsBatch, EMBEDDING_DIMENSION, isQuotaError } from './embeddingService.js'
 import { getVectorStore, ChunkMetadata, getProjectIndexDirectory, getProjectLockManager, IndexManifest } from './vectorStore.js'
 import { app } from 'electron'
@@ -499,11 +499,13 @@ export async function isIndexValid(projectId: string, folder: 'library' | 'proje
     }
     
     // Check critical configuration fields
+    // Use different chunk sizes for library vs workspace/project folders
+    const isWorkspace = folder === 'project'
     const expectedConfig = {
       embeddingModel: 'gemini-embedding-001', // Default, will be checked against actual
       embeddingDimension: EMBEDDING_DIMENSION,
-      chunkSize: DEFAULT_CHUNK_SIZE,
-      chunkOverlap: DEFAULT_CHUNK_OVERLAP,
+      chunkSize: isWorkspace ? WORKSPACE_CHUNK_SIZE : DEFAULT_CHUNK_SIZE,
+      chunkOverlap: isWorkspace ? WORKSPACE_CHUNK_OVERLAP : DEFAULT_CHUNK_OVERLAP,
       indexVersion: '1.0.0', // Current index version
     }
     
@@ -514,12 +516,12 @@ export async function isIndexValid(projectId: string, folder: 'library' | 'proje
     }
     
     if (manifest.chunkSize !== expectedConfig.chunkSize) {
-      console.warn(`[Indexing] Index invalid: chunkSize mismatch (${manifest.chunkSize} vs ${expectedConfig.chunkSize})`)
+      console.warn(`[Indexing] Index invalid: chunkSize mismatch (${manifest.chunkSize} vs ${expectedConfig.chunkSize}). Please reindex files to use the new chunk size.`)
       return false
     }
     
     if (manifest.chunkOverlap !== expectedConfig.chunkOverlap) {
-      console.warn(`[Indexing] Index invalid: chunkOverlap mismatch (${manifest.chunkOverlap} vs ${expectedConfig.chunkOverlap})`)
+      console.warn(`[Indexing] Index invalid: chunkOverlap mismatch (${manifest.chunkOverlap} vs ${expectedConfig.chunkOverlap}). Please reindex files to use the new chunk overlap.`)
       return false
     }
     
@@ -1288,8 +1290,8 @@ export async function incrementalIndexProjectFile(
         folder: 'project',
         embeddingModel: geminiApiKey ? 'gemini-embedding-001' : (openaiApiKey ? 'text-embedding-3-small' : 'unknown'),
         embeddingDimension: EMBEDDING_DIMENSION,
-        chunkSize: DEFAULT_CHUNK_SIZE,
-        chunkOverlap: DEFAULT_CHUNK_OVERLAP,
+        chunkSize: WORKSPACE_CHUNK_SIZE,
+        chunkOverlap: WORKSPACE_CHUNK_OVERLAP,
         indexVersion: '1.0.0',
         appVersion: app.getVersion(),
         createdAt: new Date().toISOString(),

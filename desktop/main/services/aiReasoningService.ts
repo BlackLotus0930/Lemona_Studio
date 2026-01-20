@@ -84,14 +84,31 @@ async function assessRelevance(
 /**
  * Format search results for context
  */
-function formatSearchResults(results: SearchResult[]): string {
+async function formatSearchResults(results: SearchResult[]): Promise<string> {
   if (results.length === 0) {
     return ''
   }
 
+  // Resolve all file IDs to document titles
+  const fileIdToTitle = new Map<string, string>()
+  const uniqueFileIds = [...new Set(results.map(r => r.chunk.fileId))]
+  
+  for (const fileId of uniqueFileIds) {
+    try {
+      const document = await documentService.getById(fileId)
+      if (document) {
+        fileIdToTitle.set(fileId, document.title)
+      } else {
+        fileIdToTitle.set(fileId, fileId) // Fallback to fileId if document not found
+      }
+    } catch (error) {
+      fileIdToTitle.set(fileId, fileId) // Fallback to fileId on error
+    }
+  }
+
   return results.map((result, index) => {
     const chunk = result.chunk
-    const fileName = chunk.fileId // Will be resolved to actual filename if needed
+    const fileName = fileIdToTitle.get(chunk.fileId) || chunk.fileId
     return `[${index + 1}] ${fileName} (score: ${result.score.toFixed(3)})
 ${chunk.text}
 
@@ -243,7 +260,7 @@ export async function reason(
   return {
     steps,
     finalResults,
-    formattedResults: formatSearchResults(finalResults),
+    formattedResults: await formatSearchResults(finalResults),
     totalStepsUsed: maxSteps - budgetRemaining,
     stoppedReason,
   }

@@ -2,6 +2,16 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import { WorldLab, WorldLabNode, WorldLabEdge } from '@shared/types'
 import { aiApi } from '../../services/api'
+// @ts-ignore
+import AddIcon from '@mui/icons-material/Add'
+// @ts-ignore
+import HistoryIcon from '@mui/icons-material/History'
+// @ts-ignore
+import CloseIcon from '@mui/icons-material/Close'
+// @ts-ignore
+import EditIcon from '@mui/icons-material/Edit'
+// @ts-ignore
+import DeleteIcon from '@mui/icons-material/Delete'
 
 interface WorldLabTerminalProps {
   labName: string
@@ -30,6 +40,102 @@ interface CommandResult {
   error?: string
 }
 
+interface TerminalSession {
+  id: string
+  name: string
+  lines: TerminalLine[]
+  commandHistory: string[]
+}
+
+// Helper functions to persist active terminal session ID per lab
+function getActiveTerminalIdKey(labName: string): string {
+  return `activeTerminalId_${labName}`
+}
+
+function loadActiveTerminalId(labName: string): string | null {
+  try {
+    return localStorage.getItem(getActiveTerminalIdKey(labName))
+  } catch (error) {
+    console.error('Failed to load active terminal ID:', error)
+    return null
+  }
+}
+
+function saveActiveTerminalId(labName: string, terminalId: string): void {
+  try {
+    localStorage.setItem(getActiveTerminalIdKey(labName), terminalId)
+  } catch (error) {
+    console.error('Failed to save active terminal ID:', error)
+  }
+}
+
+// Helper functions to persist open terminal tabs per lab
+function getOpenTerminalTabsKey(labName: string): string {
+  return `openTerminalTabs_${labName}`
+}
+
+function loadOpenTerminalTabs(labName: string): string[] {
+  try {
+    const saved = localStorage.getItem(getOpenTerminalTabsKey(labName))
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      return Array.isArray(parsed) ? parsed : []
+    }
+  } catch (error) {
+    console.error('Failed to load open terminal tabs:', error)
+  }
+  return []
+}
+
+function saveOpenTerminalTabs(labName: string, terminalIds: string[]): void {
+  try {
+    localStorage.setItem(getOpenTerminalTabsKey(labName), JSON.stringify(terminalIds))
+  } catch (error) {
+    console.error('Failed to save open terminal tabs:', error)
+  }
+}
+
+// Helper function to load terminal session from localStorage
+function loadTerminalSession(labName: string, terminalId: string): TerminalSession | null {
+  try {
+    const storageKey = `worldlab_terminal_${labName}_${terminalId}`
+    const saved = localStorage.getItem(storageKey)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      return {
+        id: terminalId,
+        name: parsed.name || `Terminal ${terminalId.split('_').pop()?.slice(0, 6) || '1'}`,
+        lines: Array.isArray(parsed.lines) ? parsed.lines : [],
+        commandHistory: Array.isArray(parsed.commandHistory) ? parsed.commandHistory : [],
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load terminal session:', error)
+  }
+  return null
+}
+
+// Helper function to save terminal session to localStorage
+function saveTerminalSession(labName: string, session: TerminalSession): void {
+  try {
+    const storageKey = `worldlab_terminal_${labName}_${session.id}`
+    localStorage.setItem(storageKey, JSON.stringify({
+      name: session.name,
+      lines: session.lines,
+      commandHistory: session.commandHistory,
+    }))
+  } catch (error) {
+    console.error('Failed to save terminal session:', error)
+  }
+}
+
+// Helper function to generate terminal name from first command
+function generateTerminalName(firstCommand: string): string {
+  if (!firstCommand || !firstCommand.trim()) return 'New Terminal'
+  const cleaned = firstCommand.trim().replace(/\n/g, ' ').substring(0, 30)
+  return cleaned.length < firstCommand.trim().length ? `${cleaned}...` : cleaned
+}
+
 export default function WorldLabTerminal({
   labName,
   worldLabData,
@@ -38,38 +144,383 @@ export default function WorldLabTerminal({
   onNodesChange,
   onEdgesChange,
   projectId,
-  onClose: _onClose, // Available for future use (e.g., close button)
+  onClose,
 }: WorldLabTerminalProps) {
   const { theme } = useTheme()
   
-  // 状态管理
+  // Terminal session management
+  const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>([])
+  const [activeTerminalId, setActiveTerminalId] = useState<string>(() => {
+    const saved = loadActiveTerminalId(labName)
+    return saved || 'terminal_default'
+  })
+  const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
+  const [hoveredTerminalId, setHoveredTerminalId] = useState<string | null>(null)
+  const [draggedTerminalId, setDraggedTerminalId] = useState<string | null>(null)
+  const [dropTargetTerminalId, setDropTargetTerminalId] = useState<string | null>(null)
+  const [dropPosition, setDropPosition] = useState<'left' | 'right' | null>(null)
+  const headerScrollRef = useRef<HTMLDivElement>(null)
+  const terminalTabsScrollRef = useRef<HTMLDivElement>(null)
+  const historyButtonRef = useRef<HTMLButtonElement>(null)
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  
+  // Get current active session
+  const activeSession = terminalSessions.find(s => s.id === activeTerminalId)
+  
+  // 状态管理 - use active session data
   const [commandHistory, setCommandHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState<number>(-1)
   const [currentInput, setCurrentInput] = useState<string>('')
   const [outputLines, setOutputLines] = useState<TerminalLine[]>([])
   const [isProcessing, setIsProcessing] = useState<boolean>(false)
-  const [autocompleteSuggestions, setAutocompleteSuggestions] = useState<string[]>([])
-  const [autocompleteIndex, setAutocompleteIndex] = useState<number>(-1)
-  const [showAutocomplete, setShowAutocomplete] = useState<boolean>(false)
+  const [googleApiKey, setGoogleApiKey] = useState<string>('')
+  const [openaiApiKey, setOpenaiApiKey] = useState<string>('')
+  // Initialize selectedModel based on available API keys from localStorage
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    try {
+      const googleKey = localStorage.getItem('googleApiKey') || ''
+      const openaiKey = localStorage.getItem('openaiApiKey') || ''
+      const hasGoogleKey = !!googleKey && googleKey.trim().length > 0
+      const hasOpenaiKey = !!openaiKey && openaiKey.trim().length > 0
+      
+      console.log('[WorldLabTerminal] Initial model selection:', {
+        hasGoogleKey,
+        hasOpenaiKey,
+        googleKeyLength: googleKey.length,
+        openaiKeyLength: openaiKey.length,
+      })
+      
+      // Select model based on available keys
+      let selectedModel: string
+      if (hasOpenaiKey && !hasGoogleKey) {
+        // Only OpenAI key available - use GPT
+        selectedModel = 'gpt-4.1-nano'
+      } else if (hasGoogleKey && !hasOpenaiKey) {
+        // Only Google key available - use Gemini
+        selectedModel = 'gemini-3-flash-preview'
+      } else if (hasGoogleKey && hasOpenaiKey) {
+        // Both keys available - prefer Gemini
+        selectedModel = 'gemini-3-flash-preview'
+      } else {
+        // No keys available - default to GPT (will show clearer error message)
+        selectedModel = 'gpt-4.1-nano'
+      }
+      
+      console.log('[WorldLabTerminal] Initial selected model:', selectedModel)
+      return selectedModel
+    } catch (error) {
+      console.error('[WorldLabTerminal] Failed to initialize model from localStorage:', error)
+      // Default to GPT if there's an error reading localStorage
+      return 'gpt-4.1-nano'
+    }
+  })
   
   // Refs
   const terminalRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLDivElement>(null)
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const streamReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
   const currentAIOutputRef = useRef<string>('')
   const currentAILineIdRef = useRef<string | null>(null)
+  const isLoadingSessionRef = useRef<boolean>(false)
+  const terminalSessionsRef = useRef<TerminalSession[]>([])
 
-  // 初始化欢迎消息
+  // Load API keys from localStorage
   useEffect(() => {
-    const welcomeLine: TerminalLine = {
-      id: `line_${Date.now()}`,
-      type: 'info',
-      content: `Welcome to WorldLab Terminal. Type 'help' for available commands.`,
-      timestamp: new Date().toISOString(),
+    const loadApiKeys = () => {
+      try {
+        const googleKey = localStorage.getItem('googleApiKey') || ''
+        const openaiKey = localStorage.getItem('openaiApiKey') || ''
+        const hasGoogleKey = !!googleKey && googleKey.trim().length > 0
+        const hasOpenaiKey = !!openaiKey && openaiKey.trim().length > 0
+        
+        console.log('[WorldLabTerminal] Loading API keys:', {
+          hasGoogleKey,
+          hasOpenaiKey,
+          googleKeyLength: googleKey.length,
+          openaiKeyLength: openaiKey.length,
+        })
+        
+        setGoogleApiKey(googleKey)
+        setOpenaiApiKey(openaiKey)
+      } catch (error) {
+        console.error('[WorldLabTerminal] Failed to load API keys:', error)
+      }
     }
-    setOutputLines([welcomeLine])
+    
+    loadApiKeys()
+    
+    // Listen for storage changes (when user updates API keys in settings)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'googleApiKey' || e.key === 'openaiApiKey') {
+        console.log('[WorldLabTerminal] Storage changed:', e.key)
+        loadApiKeys()
+      }
+    }
+    
+    window.addEventListener('storage', handleStorageChange)
+    return () => window.removeEventListener('storage', handleStorageChange)
   }, [])
+
+  // Select appropriate model based on available API keys
+  useEffect(() => {
+    const hasGoogleKey = !!googleApiKey && googleApiKey.trim().length > 0
+    const hasOpenaiKey = !!openaiApiKey && openaiApiKey.trim().length > 0
+    const isGeminiModel = selectedModel && (selectedModel.startsWith('gemini-') || selectedModel.includes('gemini'))
+    const isGptModel = selectedModel && selectedModel.startsWith('gpt-')
+    
+    console.log('[WorldLabTerminal] Model selection effect triggered:', {
+      currentModel: selectedModel,
+      hasGoogleKey,
+      hasOpenaiKey,
+      isGeminiModel,
+      isGptModel,
+    })
+    
+    // If current model is incompatible with available keys, switch to a compatible one
+    if (isGptModel && !hasOpenaiKey) {
+      // GPT model selected but no OpenAI key - switch to Gemini if available
+      if (hasGoogleKey) {
+        console.log('[WorldLabTerminal] Switching from GPT to Gemini (no OpenAI key, has Google key)')
+        setSelectedModel('gemini-3-flash-preview')
+      }
+      // If no keys at all, keep GPT (will show error when used, but at least won't try Gemini)
+    } else if (isGeminiModel && !hasGoogleKey) {
+      // Gemini model selected but no Google key - switch to GPT if available
+      if (hasOpenaiKey) {
+        console.log('[WorldLabTerminal] Switching from Gemini to GPT (no Google key, has OpenAI key)')
+        setSelectedModel('gpt-4.1-nano')
+      }
+      // If no keys at all, switch to GPT (will show clearer error message)
+      else if (!hasOpenaiKey && !hasGoogleKey) {
+        console.log('[WorldLabTerminal] Switching from Gemini to GPT (no keys available)')
+        setSelectedModel('gpt-4.1-nano')
+      }
+    } else if (!hasGoogleKey && !hasOpenaiKey) {
+      // No keys available - prefer GPT model (will show clearer error message)
+      if (!isGptModel && !isGeminiModel) {
+        console.log('[WorldLabTerminal] Setting model to GPT (no keys, invalid model)')
+        setSelectedModel('gpt-4.1-nano')
+      } else if (isGeminiModel) {
+        // Switch from Gemini to GPT if no keys available
+        console.log('[WorldLabTerminal] Switching from Gemini to GPT (no keys available)')
+        setSelectedModel('gpt-4.1-nano')
+      }
+    } else if (hasGoogleKey && hasOpenaiKey) {
+      // Both keys available - prefer Gemini if current model is invalid
+      if (!isGeminiModel && !isGptModel) {
+        console.log('[WorldLabTerminal] Setting model to Gemini (both keys available, invalid model)')
+        setSelectedModel('gemini-3-flash-preview')
+      }
+    } else if (hasGoogleKey && !hasOpenaiKey) {
+      // Only Google key - ensure we're using a Gemini model
+      if (!isGeminiModel) {
+        console.log('[WorldLabTerminal] Switching to Gemini (only Google key available)')
+        setSelectedModel('gemini-3-flash-preview')
+      }
+    } else if (hasOpenaiKey && !hasGoogleKey) {
+      // Only OpenAI key - ensure we're using a GPT model
+      if (!isGptModel) {
+        console.log('[WorldLabTerminal] Switching to GPT (only OpenAI key available)')
+        setSelectedModel('gpt-4.1-nano')
+      }
+    }
+  }, [googleApiKey, openaiApiKey, selectedModel])
+
+  // Initialize terminal sessions on mount
+  useEffect(() => {
+    const savedActiveId = loadActiveTerminalId(labName)
+    const savedOpenTabs = loadOpenTerminalTabs(labName)
+    
+    if (savedOpenTabs.length > 0) {
+      // Load saved sessions
+      const loadedSessions: TerminalSession[] = []
+      for (const terminalId of savedOpenTabs) {
+        const session = loadTerminalSession(labName, terminalId)
+        if (session) {
+          loadedSessions.push(session)
+        } else {
+          // Create new session if not found
+          const newSession: TerminalSession = {
+            id: terminalId,
+            name: `Terminal ${terminalId.split('_').pop()?.slice(0, 6) || '1'}`,
+            lines: [],
+            commandHistory: [],
+          }
+          loadedSessions.push(newSession)
+          saveTerminalSession(labName, newSession)
+        }
+      }
+      setTerminalSessions(loadedSessions)
+      
+      // Set active terminal
+      const activeId = savedActiveId && loadedSessions.some(s => s.id === savedActiveId)
+        ? savedActiveId
+        : loadedSessions[0]?.id || 'terminal_default'
+      setActiveTerminalId(activeId)
+      
+      // Load the active session's data immediately to avoid race conditions
+      const activeSession = loadedSessions.find(s => s.id === activeId)
+      if (activeSession) {
+        isLoadingSessionRef.current = true
+        setOutputLines(activeSession.lines)
+        setCommandHistory(activeSession.commandHistory)
+        setHistoryIndex(-1)
+        setCurrentInput('')
+        if (inputRef.current) {
+          inputRef.current.textContent = ''
+        }
+        saveActiveTerminalId(labName, activeId)
+        // Reset flag after state updates complete
+        setTimeout(() => {
+          isLoadingSessionRef.current = false
+        }, 0)
+      }
+    } else {
+      // First time - create default session
+      const defaultId = 'terminal_default'
+      const defaultSession: TerminalSession = {
+        id: defaultId,
+        name: 'Terminal 1',
+        lines: [],
+        commandHistory: [],
+      }
+      setTerminalSessions([defaultSession])
+      setActiveTerminalId(defaultId)
+      saveTerminalSession(labName, defaultSession)
+      saveOpenTerminalTabs(labName, [defaultId])
+      saveActiveTerminalId(labName, defaultId)
+      
+      // Initialize empty lines and history for new session
+      isLoadingSessionRef.current = true
+      setOutputLines([])
+      setCommandHistory([])
+      setHistoryIndex(-1)
+      setCurrentInput('')
+      if (inputRef.current) {
+        inputRef.current.textContent = ''
+      }
+      setTimeout(() => {
+        isLoadingSessionRef.current = false
+      }, 0)
+    }
+  }, [labName])
+
+  // Load active session data when activeTerminalId changes
+  useEffect(() => {
+    const session = terminalSessions.find(s => s.id === activeTerminalId)
+    if (session) {
+      // Set flag to prevent save effect from running during load
+      isLoadingSessionRef.current = true
+      setOutputLines(session.lines)
+      setCommandHistory(session.commandHistory)
+      setHistoryIndex(-1)
+      setCurrentInput('')
+      if (inputRef.current) {
+        inputRef.current.textContent = ''
+      }
+      saveActiveTerminalId(labName, activeTerminalId)
+      // Reset flag after state updates complete
+      setTimeout(() => {
+        isLoadingSessionRef.current = false
+      }, 0)
+      
+      // Auto-focus the input field when switching terminals (separate timeout for DOM update)
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus()
+          // Move cursor to end
+          const range = document.createRange()
+          const selection = window.getSelection()
+          range.selectNodeContents(inputRef.current)
+          range.collapse(false) // Collapse to end
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+        }
+      }, 100)
+    }
+  }, [activeTerminalId, terminalSessions, labName])
+
+  // Save active session when outputLines or commandHistory changes
+  useEffect(() => {
+    // Skip saving if we're currently loading a session to prevent infinite loops
+    if (isLoadingSessionRef.current) {
+      return
+    }
+    
+    // Use functional update to get current terminalSessions without including it in dependencies
+    setTerminalSessions(prev => {
+      const currentSession = prev.find(s => s.id === activeTerminalId)
+      if (!currentSession) {
+        return prev
+      }
+      
+      // Update terminal name if this is the first command and name is still default
+      let updatedName = currentSession.name
+      if (currentSession.name.startsWith('Terminal ') && commandHistory.length === 1 && currentSession.commandHistory.length === 0) {
+        const firstCommand = commandHistory[0]
+        if (firstCommand) {
+          updatedName = generateTerminalName(firstCommand)
+        }
+      }
+      
+      // Create updated session with current data
+      const updatedSession: TerminalSession = {
+        ...currentSession,
+        name: updatedName,
+        lines: [...outputLines], // Create new array to ensure reference change
+        commandHistory: [...commandHistory], // Create new array to ensure reference change
+      }
+      
+      // Always save to localStorage immediately to ensure persistence
+      saveTerminalSession(labName, updatedSession)
+      
+      // Update state - always update to ensure state stays in sync
+      return prev.map(s => s.id === activeTerminalId ? updatedSession : s)
+    })
+  }, [outputLines, commandHistory, activeTerminalId, labName])
+
+  // Keep refs in sync with current state
+  useEffect(() => {
+    terminalSessionsRef.current = terminalSessions
+  }, [terminalSessions])
+  
+  const outputLinesRef = useRef<TerminalLine[]>([])
+  const commandHistoryRef = useRef<string[]>([])
+  const activeTerminalIdRef = useRef<string>('')
+  
+  useEffect(() => {
+    outputLinesRef.current = outputLines
+  }, [outputLines])
+  
+  useEffect(() => {
+    commandHistoryRef.current = commandHistory
+  }, [commandHistory])
+  
+  useEffect(() => {
+    activeTerminalIdRef.current = activeTerminalId
+  }, [activeTerminalId])
+
+  // Save all sessions on unmount to ensure nothing is lost
+  useEffect(() => {
+    return () => {
+      // Save all terminal sessions before unmounting, ensuring active session has latest data
+      const sessionsToSave = terminalSessionsRef.current.map(session => {
+        if (session.id === activeTerminalIdRef.current) {
+          // Update active session with current outputLines and commandHistory from refs
+          return {
+            ...session,
+            lines: outputLinesRef.current,
+            commandHistory: commandHistoryRef.current,
+          }
+        }
+        return session
+      })
+      
+      sessionsToSave.forEach(session => {
+        saveTerminalSession(labName, session)
+      })
+    }
+  }, [labName]) // Only depend on labName to avoid re-running unnecessarily
 
   // 自动滚动到底部
   const scrollToBottom = useCallback(() => {
@@ -82,6 +533,85 @@ export default function WorldLabTerminal({
       }
     }, 10)
   }, [])
+
+  // Add scroll detection and edge detection to show scrollbar
+  useEffect(() => {
+    const container = terminalRef.current
+    if (!container) return
+
+    const EDGE_DISTANCE = 20 // pixels from edge to show scrollbar
+
+    const handleScroll = () => {
+      if (container) {
+        container.classList.add('scrolling')
+        if (scrollTimeoutRef.current) {
+          clearTimeout(scrollTimeoutRef.current)
+        }
+        scrollTimeoutRef.current = setTimeout(() => {
+          if (container) {
+            container.classList.remove('scrolling')
+          }
+        }, 600) // Hide scrollbar after 600ms of no scrolling
+      }
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const mouseX = e.clientX - rect.left
+      const mouseY = e.clientY - rect.top
+      const width = rect.width
+      const height = rect.height
+      
+      // Check if mouse is near right edge (for vertical scrollbar) or bottom edge (for horizontal scrollbar)
+      const nearRightEdge = mouseX > width - EDGE_DISTANCE
+      const nearBottomEdge = mouseY > height - EDGE_DISTANCE
+      
+      if (nearRightEdge || nearBottomEdge) {
+        container.classList.add('show-scrollbar')
+      } else {
+        container.classList.remove('show-scrollbar')
+      }
+    }
+
+    const handleMouseLeave = () => {
+      if (container) {
+        container.classList.remove('show-scrollbar')
+      }
+    }
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    container.addEventListener('mousemove', handleMouseMove, { passive: true })
+    container.addEventListener('mouseleave', handleMouseLeave)
+    
+    return () => {
+      container.removeEventListener('scroll', handleScroll)
+      container.removeEventListener('mousemove', handleMouseMove)
+      container.removeEventListener('mouseleave', handleMouseLeave)
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Auto-focus input when processing finishes
+  useEffect(() => {
+    if (!isProcessing && inputRef.current) {
+      // Use setTimeout to ensure the input field is visible and rendered
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus()
+          // Move cursor to end of content if there's any text
+          const range = document.createRange()
+          const selection = window.getSelection()
+          range.selectNodeContents(inputRef.current)
+          range.collapse(false) // Collapse to end
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+        }
+      }, 100)
+    }
+  }, [isProcessing])
 
   // 添加输出行
   const addOutputLine = useCallback((line: TerminalLine) => {
@@ -375,6 +905,7 @@ export default function WorldLabTerminal({
 
       case 'clear': {
         setOutputLines([])
+        // Clear is handled by the session save effect
         break
       }
 
@@ -746,6 +1277,43 @@ ${node.data?.description ? `Description: ${node.data.description}` : ''}`
     }
   }, [worldLabData, commandHistory, addOutputLine, onNodeSelect, onNodesChange, onEdgesChange])
 
+  // 清理 markdown 格式，转换为 terminal 友好的纯文本
+  const cleanMarkdownForTerminal = useCallback((text: string): string => {
+    if (!text) return text
+    
+    let cleaned = text
+    
+    // 移除代码块标记，但保留内容
+    cleaned = cleaned.replace(/```[\w]*\n?/g, '')
+    cleaned = cleaned.replace(/```/g, '')
+    
+    // 将标题转换为大写文本
+    cleaned = cleaned.replace(/^#{1,6}\s+(.+)$/gm, (_match, title) => {
+      return `\n${title.toUpperCase()}\n${'='.repeat(title.length)}\n`
+    })
+    
+    // 移除粗体和斜体标记，保留文本
+    cleaned = cleaned.replace(/\*\*\*(.+?)\*\*\*/g, '$1')
+    cleaned = cleaned.replace(/\*\*(.+?)\*\*/g, '$1')
+    cleaned = cleaned.replace(/\*(.+?)\*/g, '$1')
+    cleaned = cleaned.replace(/_(.+?)_/g, '$1')
+    
+    // 移除链接标记，保留文本
+    cleaned = cleaned.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+    
+    // 移除行内代码标记
+    cleaned = cleaned.replace(/`([^`]+)`/g, '$1')
+    
+    // 清理多余的空行（保留最多两个连续空行）
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n')
+    
+    // 移除列表标记，转换为简单的缩进
+    cleaned = cleaned.replace(/^[\s]*[-*+]\s+(.+)$/gm, '  • $1')
+    cleaned = cleaned.replace(/^[\s]*\d+\.\s+(.+)$/gm, '  $1')
+    
+    return cleaned.trim()
+  }, [])
+
   // 构建 WorldLab 上下文内容
   const buildWorldLabContext = useCallback((): string => {
     if (!worldLabData) return ''
@@ -809,7 +1377,7 @@ Please analyze what would happen in this scenario. Consider:
 - Are there any inconsistencies or conflicts?
 - What are the implications?
 
-Provide a clear, structured analysis.`
+IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.`
         break
       }
 
@@ -828,7 +1396,7 @@ Please check for:
 - Inconsistent properties or relationships
 - Logical errors or gaps
 
-Provide a detailed consistency analysis.`
+IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.`
         break
       }
 
@@ -846,7 +1414,9 @@ Please suggest:
 - Relationships that could be added
 - Edges that would improve the world structure
 
-Provide specific suggestions with source and target node IDs.`
+Provide specific suggestions with source and target node IDs.
+
+IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.`
         break
       }
 
@@ -863,7 +1433,7 @@ Please help the user understand or interact with this WorldLab. You can:
 - Help explore the world structure
 - Provide insights about the world state
 
-Respond in a helpful, clear manner.`
+IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.`
         break
       }
 
@@ -890,17 +1460,33 @@ Respond in a helpful, clear manner.`
     addOutputLine(aiLine)
 
     try {
-      // 调用 AI API
+      // Log before calling AI API
+      const hasGoogleKey = !!googleApiKey && googleApiKey.trim().length > 0
+      const hasOpenaiKey = !!openaiApiKey && openaiApiKey.trim().length > 0
+      console.log('[WorldLabTerminal] Executing AI command:', {
+        command,
+        selectedModel,
+        hasGoogleKey,
+        hasOpenaiKey,
+        googleKeyLength: googleApiKey.length,
+        openaiKeyLength: openaiApiKey.length,
+        isGeminiModel: selectedModel?.startsWith('gemini-') || selectedModel?.includes('gemini'),
+        isGptModel: selectedModel?.startsWith('gpt-'),
+      })
+      
+      // 调用 AI API - pass API keys from state to ensure they're used
       const response = await aiApi.streamChat(
         aiPrompt,
         worldLabContext, // documentContent
         undefined, // documentId
         [], // chatHistory
         false, // useWebSearch
-        'gemini-3-flash-preview', // modelName
+        selectedModel, // modelName - uses model selected based on available API keys
         undefined, // attachments
         'Normal', // style
-        projectId // projectId
+        projectId, // projectId
+        googleApiKey, // googleApiKeyOverride - use state value
+        openaiApiKey // openaiApiKeyOverride - use state value
       )
 
       const reader = response.body?.getReader()
@@ -929,14 +1515,15 @@ Respond in a helpful, clear manner.`
                 // Skip metadata chunks
                 if (!data.chunk.includes('__METADATA__')) {
                   currentAIOutputRef.current += data.chunk
-                  // Update the output line
+                  // Clean markdown and update the output line
+                  const cleanedContent = cleanMarkdownForTerminal(currentAIOutputRef.current)
                   setOutputLines(prev => {
                     const updated = [...prev]
                     const lineIndex = updated.findIndex(l => l.id === currentAILineIdRef.current)
                     if (lineIndex !== -1) {
                       updated[lineIndex] = {
                         ...updated[lineIndex],
-                        content: currentAIOutputRef.current,
+                        content: cleanedContent,
                       }
                     }
                     return updated
@@ -968,156 +1555,28 @@ Respond in a helpful, clear manner.`
       currentAILineIdRef.current = null
       currentAIOutputRef.current = ''
     }
-  }, [worldLabData, buildWorldLabContext, addOutputLine, scrollToBottom, projectId, labName])
-
-  // 获取自动补全建议
-  const getAutocompleteSuggestions = useCallback((input: string): string[] => {
-    if (!input.trim()) return []
-
-    const trimmed = input.trim().toLowerCase()
-    const parts = trimmed.split(/\s+/)
-    const lastPart = parts[parts.length - 1] || ''
-
-    // 命令补全
-    const commands = [
-      'query', 'create', 'update', 'delete', 'focus',
-      'simulate', 'analyze', 'suggest', 'help', 'clear', 'history'
-    ]
-    if (parts.length === 1) {
-      return commands.filter(cmd => cmd.startsWith(trimmed))
-    }
-
-    // 节点 ID 补全
-    if (worldLabData) {
-      const nodes = worldLabData.nodes
-      const nodeIds = nodes.map(n => n.id).filter(id => id.toLowerCase().includes(lastPart))
-      const nodeLabels = nodes
-        .filter(n => n.label.toLowerCase().includes(lastPart))
-        .map(n => n.id)
-      
-      if (nodeIds.length > 0 || nodeLabels.length > 0) {
-        return [...new Set([...nodeIds, ...nodeLabels])].slice(0, 10)
-      }
-    }
-
-    // 子命令补全
-    if (parts[0] === 'query' && parts.length === 2) {
-      const subCommands = ['nodes', 'edges', 'node']
-      return subCommands.filter(cmd => cmd.startsWith(parts[1] || ''))
-    }
-
-    if (parts[0] === 'create' && parts.length === 2) {
-      const subCommands = ['node', 'edge']
-      return subCommands.filter(cmd => cmd.startsWith(parts[1] || ''))
-    }
-
-    if (parts[0] === 'delete' && parts.length === 2) {
-      const subCommands = ['node', 'edge']
-      return subCommands.filter(cmd => cmd.startsWith(parts[1] || ''))
-    }
-
-    if (parts[0] === 'analyze' && parts.length === 2) {
-      const subCommands = ['consistency']
-      return subCommands.filter(cmd => cmd.startsWith(parts[1] || ''))
-    }
-
-    if (parts[0] === 'suggest' && parts.length === 2) {
-      const subCommands = ['connections']
-      return subCommands.filter(cmd => cmd.startsWith(parts[1] || ''))
-    }
-
-    return []
-  }, [worldLabData])
-
-  // 处理输入变化，更新自动补全
-  useEffect(() => {
-    if (currentInput.trim()) {
-      const suggestions = getAutocompleteSuggestions(currentInput)
-      setAutocompleteSuggestions(suggestions)
-      setShowAutocomplete(suggestions.length > 0)
-      setAutocompleteIndex(-1)
-    } else {
-      setShowAutocomplete(false)
-      setAutocompleteSuggestions([])
-    }
-  }, [currentInput, getAutocompleteSuggestions])
+  }, [worldLabData, buildWorldLabContext, addOutputLine, scrollToBottom, projectId, labName, selectedModel, cleanMarkdownForTerminal])
 
   // 处理输入提交
   const handleSubmit = useCallback(async (e: React.KeyboardEvent<HTMLDivElement>) => {
-    // Tab 键：应用自动补全
-    if (e.key === 'Tab' && showAutocomplete && autocompleteSuggestions.length > 0) {
-      e.preventDefault()
-      const selectedIndex = autocompleteIndex === -1 ? 0 : autocompleteIndex
-      const suggestion = autocompleteSuggestions[selectedIndex]
-      
-      if (suggestion) {
-        const parts = currentInput.trim().split(/\s+/)
-        const lastPart = parts[parts.length - 1] || ''
-        const newInput = currentInput.slice(0, currentInput.length - lastPart.length) + suggestion
-        setCurrentInput(newInput)
-        setShowAutocomplete(false)
-        
-        // 更新 contentEditable
-        if (inputRef.current) {
-          inputRef.current.textContent = newInput
-          // 移动光标到末尾
-          const range = document.createRange()
-          const sel = window.getSelection()
-          range.selectNodeContents(inputRef.current)
-          range.collapse(false)
-          sel?.removeAllRanges()
-          sel?.addRange(range)
-        }
-      }
-      return
-    }
-
-    // 上下箭头：导航自动补全
-    if (e.key === 'ArrowUp' && showAutocomplete) {
-      e.preventDefault()
-      if (autocompleteSuggestions.length > 0) {
-        const newIndex = autocompleteIndex === -1 
-          ? autocompleteSuggestions.length - 1 
-          : Math.max(0, autocompleteIndex - 1)
-        setAutocompleteIndex(newIndex)
-      }
-      return
-    }
-
-    if (e.key === 'ArrowDown' && showAutocomplete) {
-      e.preventDefault()
-      if (autocompleteSuggestions.length > 0) {
-        const newIndex = autocompleteIndex === -1 
-          ? 0 
-          : Math.min(autocompleteSuggestions.length - 1, autocompleteIndex + 1)
-        setAutocompleteIndex(newIndex)
-      }
-      return
-    }
-
-    // Esc: 关闭自动补全
-    if (e.key === 'Escape' && showAutocomplete) {
-      e.preventDefault()
-      setShowAutocomplete(false)
-      return
-    }
-
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       const input = currentInput.trim()
       if (!input || isProcessing) return
 
-      // 关闭自动补全
-      setShowAutocomplete(false)
-
       // 添加到命令历史
       setCommandHistory(prev => [...prev, input])
       setHistoryIndex(-1)
       setCurrentInput('')
+      
+      // 清空输入框内容
+      if (inputRef.current) {
+        inputRef.current.textContent = ''
+      }
 
       // 执行命令
       await executeCommand(input)
-    } else if (e.key === 'ArrowUp' && !showAutocomplete) {
+    } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       if (commandHistory.length > 0) {
         const newIndex = historyIndex === -1 
@@ -1129,7 +1588,7 @@ Respond in a helpful, clear manner.`
           inputRef.current.textContent = commandHistory[newIndex]
         }
       }
-    } else if (e.key === 'ArrowDown' && !showAutocomplete) {
+    } else if (e.key === 'ArrowDown') {
       e.preventDefault()
       if (historyIndex !== -1) {
         const newIndex = historyIndex + 1
@@ -1148,15 +1607,268 @@ Respond in a helpful, clear manner.`
         }
       }
     }
-  }, [currentInput, isProcessing, commandHistory, historyIndex, executeCommand, showAutocomplete, autocompleteSuggestions, autocompleteIndex])
+  }, [currentInput, isProcessing, commandHistory, historyIndex, executeCommand])
 
-  // 样式
-  const bgColor = theme === 'dark' ? '#0D0D0D' : '#FAFAFA'
+  // Terminal management handlers
+  const handleNewTerminal = () => {
+    const newTerminalId = `terminal_${Date.now()}`
+    const newSession: TerminalSession = {
+      id: newTerminalId,
+      name: `Terminal ${terminalSessions.length + 1}`,
+      lines: [],
+      commandHistory: [],
+    }
+    const newSessions = [...terminalSessions, newSession]
+    setTerminalSessions(newSessions)
+    setActiveTerminalId(newTerminalId)
+    saveTerminalSession(labName, newSession)
+    saveOpenTerminalTabs(labName, newSessions.map(s => s.id))
+    saveActiveTerminalId(labName, newTerminalId)
+    
+    // Auto-focus the input field after creating new terminal
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus()
+        // Move cursor to end
+        const range = document.createRange()
+        const selection = window.getSelection()
+        range.selectNodeContents(inputRef.current)
+        range.collapse(false) // Collapse to end
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+      }
+    }, 100)
+  }
+
+  const handleCloseTerminal = (terminalId: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation()
+    }
+    
+    if (terminalSessions.length === 1) {
+      // If it's the last terminal, create a new one and replace the old one
+      const newTerminalId = `terminal_${Date.now()}`
+      const newSession: TerminalSession = {
+        id: newTerminalId,
+        name: 'Terminal 1',
+        lines: [],
+        commandHistory: [],
+      }
+      setTerminalSessions([newSession])
+      setActiveTerminalId(newTerminalId)
+      saveTerminalSession(labName, newSession)
+      saveOpenTerminalTabs(labName, [newTerminalId])
+      saveActiveTerminalId(labName, newTerminalId)
+    } else {
+      // Remove the terminal from tabs
+      const newSessions = terminalSessions.filter(s => s.id !== terminalId)
+      setTerminalSessions(newSessions)
+      
+      // Update persisted open tabs list
+      saveOpenTerminalTabs(labName, newSessions.map(s => s.id))
+      
+      // If the closed terminal was active, switch to another one
+      if (activeTerminalId === terminalId) {
+        const closedIndex = terminalSessions.findIndex(s => s.id === terminalId)
+        const newActiveIndex = closedIndex > 0 ? closedIndex - 1 : 0
+        const newActiveId = newSessions[newActiveIndex]?.id || newSessions[0]?.id
+        setActiveTerminalId(newActiveId)
+        saveActiveTerminalId(labName, newActiveId)
+      }
+    }
+  }
+
+  const handleRenameTerminal = (terminalId: string, newName: string) => {
+    setTerminalSessions(prev => {
+      const updated = prev.map(s => s.id === terminalId ? { ...s, name: newName } : s)
+      // Update saved session with the updated session data
+      const updatedSession = updated.find(s => s.id === terminalId)
+      if (updatedSession) {
+        saveTerminalSession(labName, updatedSession)
+      }
+      return updated
+    })
+  }
+
+  // Drag and drop handlers for terminal tabs
+  const handleTerminalDragStart = (e: React.DragEvent, terminalId: string) => {
+    setDraggedTerminalId(terminalId)
+    setDropTargetTerminalId(null)
+    setDropPosition(null)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', terminalId)
+  }
+
+  const handleTerminalDragOver = (e: React.DragEvent, targetTerminalId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    
+    if (draggedTerminalId && draggedTerminalId !== targetTerminalId) {
+      const rect = e.currentTarget.getBoundingClientRect()
+      const mouseX = e.clientX - rect.left
+      const tabWidth = rect.width
+      const dropSide = mouseX < tabWidth / 2 ? 'left' : 'right'
+      
+      setDropTargetTerminalId(targetTerminalId)
+      setDropPosition(dropSide)
+    }
+  }
+
+  const handleTerminalDragLeave = () => {
+    setDropTargetTerminalId(null)
+    setDropPosition(null)
+  }
+
+  const handleTerminalDrop = (e: React.DragEvent, targetTerminalId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    if (draggedTerminalId && draggedTerminalId !== targetTerminalId && dropPosition) {
+      const draggedIndex = terminalSessions.findIndex(s => s.id === draggedTerminalId)
+      const targetIndex = terminalSessions.findIndex(s => s.id === targetTerminalId)
+      
+      if (draggedIndex !== -1 && targetIndex !== -1) {
+        const newSessions = [...terminalSessions]
+        const [draggedSession] = newSessions.splice(draggedIndex, 1)
+        
+        const insertIndex = dropPosition === 'left' ? targetIndex : targetIndex + 1
+        newSessions.splice(insertIndex, 0, draggedSession)
+        
+        setTerminalSessions(newSessions)
+        saveOpenTerminalTabs(labName, newSessions.map(s => s.id))
+      }
+    }
+    
+    setDraggedTerminalId(null)
+    setDropTargetTerminalId(null)
+    setDropPosition(null)
+  }
+
+  const handleTerminalDragEnd = () => {
+    setDraggedTerminalId(null)
+    setDropTargetTerminalId(null)
+    setDropPosition(null)
+  }
+
+  // Get all terminal sessions for history (including closed ones)
+  const getAllTerminalSessions = (): TerminalSession[] => {
+    // Load all saved sessions from localStorage
+    const allSessions: TerminalSession[] = []
+    try {
+      // Get all keys that match the pattern
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && key.startsWith(`worldlab_terminal_${labName}_`)) {
+          const terminalId = key.replace(`worldlab_terminal_${labName}_`, '')
+          const session = loadTerminalSession(labName, terminalId)
+          if (session) {
+            allSessions.push(session)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load all terminal sessions:', error)
+    }
+    
+    // Merge with currently open sessions (to get latest data)
+    const sessionMap = new Map(allSessions.map(s => [s.id, s]))
+    terminalSessions.forEach(session => {
+      sessionMap.set(session.id, session)
+    })
+    
+    return Array.from(sessionMap.values())
+      .filter(s => s.lines.length > 0) // Only show terminals with content
+      .sort((a, b) => {
+        // Sort by last activity (last line timestamp)
+        const aLastTime = a.lines.length > 0 
+          ? new Date(a.lines[a.lines.length - 1].timestamp).getTime()
+          : 0
+        const bLastTime = b.lines.length > 0
+          ? new Date(b.lines[b.lines.length - 1].timestamp).getTime()
+          : 0
+        return bLastTime - aLastTime
+      })
+      .slice(0, 20) // Keep the 20 most recent
+  }
+
+  // Update terminal name when first command is executed
+  useEffect(() => {
+    // Use the activeSession's commandHistory instead of the shared state
+    // to avoid stale data when switching tabs
+    if (activeSession && activeSession.name.startsWith('Terminal ') && activeSession.commandHistory.length === 1) {
+      const firstCommand = activeSession.commandHistory[0]
+      if (firstCommand) {
+        const newName = generateTerminalName(firstCommand)
+        // Only update if the name hasn't been set yet (still default name)
+        if (activeSession.name.startsWith('Terminal ')) {
+          handleRenameTerminal(activeTerminalId, newName)
+        }
+      }
+    }
+  }, [activeSession?.commandHistory.length, activeSession?.name, activeTerminalId])
+
+  // Add scroll detection for header
+  useEffect(() => {
+    const container = headerScrollRef.current
+    if (!container) return
+
+    const handleScroll = () => {
+      if (container) {
+        container.classList.add('scrolling')
+        if (scrollTimeoutRef.current) {
+          clearTimeout(scrollTimeoutRef.current)
+        }
+        scrollTimeoutRef.current = setTimeout(() => {
+          if (container) {
+            container.classList.remove('scrolling')
+          }
+        }, 600)
+      }
+    }
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    
+    return () => {
+      container.removeEventListener('scroll', handleScroll)
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Close history dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (historyButtonRef.current && !historyButtonRef.current.contains(target)) {
+        // Check if clicking on history dropdown (it will be rendered separately)
+        const historyDropdown = document.querySelector('[data-terminal-history-dropdown]')
+        if (!historyDropdown || !historyDropdown.contains(target)) {
+          setShowHistoryDropdown(false)
+        }
+      }
+    }
+
+    if (showHistoryDropdown) {
+      document.addEventListener('mousedown', handleClickOutside, true)
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside, true)
+      }
+    }
+  }, [showHistoryDropdown])
+
+  // 样式 - 使用与 FileExplorer 相同的背景颜色
+  const bgColor = theme === 'dark' ? '#141414' : '#FAFAFA'
+  const brighterBg = theme === 'dark' ? '#141414' : '#FAFAFA'
   const textColor = theme === 'dark' ? '#E8E8E8' : '#1A1A1A'
-  const borderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.1)'
   const promptColor = theme === 'dark' ? '#5BA3FF' : '#1976D2'
   const errorColor = theme === 'dark' ? '#FF6B9D' : '#D32F2F'
   const infoColor = theme === 'dark' ? '#51CF66' : '#388E3C'
+  const activeTerminalBg = theme === 'dark' ? '#212121' : '#f0f0f0'
+  const hoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'
+  const buttonHoverBg = theme === 'dark' ? '#252525' : '#f8f8f8'
+  const iconColor = theme === 'dark' ? '#858585' : '#5f6368'
 
   return (
     <div
@@ -1166,29 +1878,337 @@ Respond in a helpful, clear manner.`
         display: 'flex',
         flexDirection: 'column',
         background: bgColor,
-        fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace",
-        fontSize: '13px',
+        fontFamily: "'JetBrains Mono', 'DejaVu Sans Mono', 'Consolas', 'Monaco', 'Courier New', monospace",
+        fontSize: '14px',
         lineHeight: '1.5',
         color: textColor,
       }}
     >
+      {/* Header - Terminal Tabs */}
+      <div 
+        ref={headerScrollRef}
+        style={{
+          paddingTop: '6px',
+          paddingBottom: '6px',
+          paddingLeft: '12px',
+          paddingRight: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          backgroundColor: brighterBg,
+          overflow: 'hidden'
+        }}>
+        {/* Terminal Tabs - Scrollable area */}
+        <div 
+          ref={terminalTabsScrollRef}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            flex: '1',
+            minWidth: 0,
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            scrollbarWidth: 'thin',
+            msOverflowStyle: 'auto',
+          } as React.CSSProperties}
+          className="terminal-tabs-scrollable scrollable-container"
+        >
+          {terminalSessions.map((session) => {
+            const isDragging = draggedTerminalId === session.id
+            const isDropTarget = dropTargetTerminalId === session.id
+            const showDropIndicator = isDropTarget && dropPosition
+            
+            return (
+              <div
+                key={session.id}
+                data-terminal-id={session.id}
+                draggable
+                onDragStart={(e) => handleTerminalDragStart(e, session.id)}
+                onDragOver={(e) => handleTerminalDragOver(e, session.id)}
+                onDragLeave={handleTerminalDragLeave}
+                onDrop={(e) => handleTerminalDrop(e, session.id)}
+                onDragEnd={handleTerminalDragEnd}
+                onClick={() => {
+                  if (!isDragging) {
+                    setActiveTerminalId(session.id)
+                    saveActiveTerminalId(labName, session.id)
+                  }
+                }}
+                onMouseEnter={() => {
+                  if (!isDragging) {
+                    setHoveredTerminalId(session.id)
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (!isDragging) {
+                    setHoveredTerminalId(null)
+                  }
+                }}
+                style={{
+                  paddingTop: '4px',
+                  paddingBottom: '6px',
+                  paddingLeft: '8px',
+                  paddingRight: '8px',
+                  borderRadius: '6px',
+                  backgroundColor: activeTerminalId === session.id 
+                    ? activeTerminalBg 
+                    : (hoveredTerminalId === session.id ? hoverBg : 'transparent'),
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: isDragging ? 'grabbing' : 'pointer',
+                  transition: isDragging ? 'none' : 'all 0.2s ease',
+                  minWidth: '60px',
+                  maxWidth: '120px',
+                  flexShrink: 0,
+                  flexGrow: 0,
+                  position: 'relative',
+                  opacity: isDragging ? 0.5 : 1,
+                  userSelect: 'none'
+                }}
+              >
+                {/* Drop indicator line */}
+                {showDropIndicator && dropPosition === 'left' && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: '2px',
+                      backgroundColor: theme === 'dark' ? '#999999' : '#c0c0c0',
+                      zIndex: 1000,
+                      pointerEvents: 'none'
+                    }}
+                  />
+                )}
+                {showDropIndicator && dropPosition === 'right' && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      right: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: '2px',
+                      backgroundColor: theme === 'dark' ? '#999999' : '#c0c0c0',
+                      zIndex: 1000,
+                      pointerEvents: 'none'
+                    }}
+                  />
+                )}
+                <span style={{
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  color: activeTerminalId === session.id ? textColor : '#6b6b6b',
+                  opacity: activeTerminalId === session.id ? 0.9 : 0.7,
+                  overflow: 'hidden',
+                  textOverflow: 'clip',
+                  whiteSpace: 'nowrap',
+                  width: hoveredTerminalId === session.id ? 'calc(100% - 24px)' : '100%',
+                  display: 'block',
+                  paddingRight: hoveredTerminalId === session.id ? '4px' : '0'
+                }}>
+                  {session.name}
+                </span>
+                {hoveredTerminalId === session.id && !isDragging && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleCloseTerminal(session.id, e)
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    style={{
+                      position: 'absolute',
+                      right: '6px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      padding: '2px',
+                      border: 'none',
+                      borderRadius: '6px',
+                      backgroundColor: theme === 'dark' ? 'rgba(33, 33, 33, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                      color: iconColor,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '18px',
+                      height: '18px',
+                      transition: 'background-color 0.15s',
+                      backdropFilter: 'blur(4px)',
+                      zIndex: 5
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = theme === 'dark' ? '#232323' : '#e8eaed'
+                      e.currentTarget.style.color = theme === 'dark' ? '#D6D6DD' : '#202124'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(33, 33, 33, 0.95)' : 'rgba(255, 255, 255, 0.95)'
+                      e.currentTarget.style.color = iconColor
+                    }}
+                    title="Close terminal"
+                  >
+                    <CloseIcon style={{ fontSize: '14px' }} />
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        
+        {/* Action Buttons - Always visible on the right */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1px', flexShrink: 0, marginRight: '0px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1px' }}>
+            <button
+              onClick={handleNewTerminal}
+              style={{
+                padding: '4px 6px',
+                border: 'none',
+                borderRadius: '6px',
+                backgroundColor: 'transparent',
+                color: iconColor,
+                cursor: 'pointer',
+                fontSize: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'background-color 0.15s',
+                minWidth: '28px',
+                minHeight: '28px'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = buttonHoverBg}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+              title="New terminal"
+            >
+              <AddIcon style={{ fontSize: '19px' }} />
+            </button>
+            
+            <button
+              ref={historyButtonRef}
+              onClick={() => {
+                setShowHistoryDropdown(!showHistoryDropdown)
+              }}
+              style={{
+                padding: '4px 8px 4px 6px',
+                border: 'none',
+                borderRadius: '6px',
+                backgroundColor: showHistoryDropdown ? buttonHoverBg : 'transparent',
+                color: iconColor,
+                cursor: 'pointer',
+                fontSize: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'background-color 0.15s',
+                minWidth: '28px',
+                minHeight: '28px'
+              }}
+              onMouseEnter={(e) => !showHistoryDropdown && (e.currentTarget.style.backgroundColor = buttonHoverBg)}
+              onMouseLeave={(e) => !showHistoryDropdown && (e.currentTarget.style.backgroundColor = 'transparent')}
+              title="History"
+            >
+              <HistoryIcon style={{ fontSize: '16px' }} />
+            </button>
+          </div>
+          
+          <button
+            onClick={onClose}
+            style={{
+              padding: '4px 6px',
+              border: 'none',
+              borderRadius: '6px',
+              backgroundColor: 'transparent',
+              color: iconColor,
+              cursor: 'pointer',
+              fontSize: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'background-color 0.15s',
+              transform: 'translateY(0.5px)',
+              marginLeft: '0px',
+              minWidth: '28px',
+              minHeight: '28px'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = buttonHoverBg}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            title="Close Terminal"
+          >
+            <CloseIcon style={{ fontSize: '18px', fontWeight: 200 }} />
+          </button>
+        </div>
+      </div>
+
+      {/* Terminal History Dropdown */}
+      {showHistoryDropdown && (
+        <TerminalHistoryDropdown
+          labName={labName}
+          sessions={terminalSessions}
+          allSessions={getAllTerminalSessions()}
+          isOpen={showHistoryDropdown}
+          onClose={() => setShowHistoryDropdown(false)}
+          onSelectTerminal={(terminalId) => {
+            // Check if terminal is already in tabs
+            const terminalExists = terminalSessions.some(s => s.id === terminalId)
+            
+            if (!terminalExists) {
+              // Load the terminal from localStorage and add it to tabs
+              const session = loadTerminalSession(labName, terminalId)
+              if (session) {
+                const newSessions = [...terminalSessions, session]
+                setTerminalSessions(newSessions)
+                saveOpenTerminalTabs(labName, newSessions.map(s => s.id))
+              }
+            }
+            
+            setActiveTerminalId(terminalId)
+            saveActiveTerminalId(labName, terminalId)
+          }}
+          onDeleteTerminal={(terminalId) => {
+            // Remove from tabs if it's open
+            const terminalExists = terminalSessions.some(s => s.id === terminalId)
+            if (terminalExists) {
+              handleCloseTerminal(terminalId)
+            }
+            
+            // Delete from localStorage
+            try {
+              const storageKey = `worldlab_terminal_${labName}_${terminalId}`
+              localStorage.removeItem(storageKey)
+            } catch (error) {
+              console.error('Failed to delete terminal session:', error)
+            }
+          }}
+          onRenameTerminal={handleRenameTerminal}
+          activeTerminalId={activeTerminalId}
+          anchorElement={historyButtonRef.current}
+        />
+      )}
+
       {/* Terminal Output Area */}
       <div
         ref={terminalRef}
+        className={`scrollable-container ${theme === 'dark' ? 'dark-theme' : ''}`}
         style={{
           flex: 1,
           overflowY: 'auto',
           overflowX: 'hidden',
           padding: '16px',
-          paddingBottom: '8px',
+          paddingTop: '8px',
+          paddingBottom: '60px',
           position: 'relative',
         }}
       >
-        {outputLines.map(line => {
+        {outputLines.map((line, index) => {
           let lineColor = textColor
           if (line.type === 'error') lineColor = errorColor
           else if (line.type === 'info') lineColor = infoColor
           else if (line.type === 'command') lineColor = promptColor
+
+          // 检查是否是新一轮对话的开始（命令行，且前一行不是命令）
+          const isNewConversationRound = line.type === 'command' && 
+            index > 0 && 
+            outputLines[index - 1].type !== 'command'
 
           // 语法高亮：节点 ID（绿色）、命令（蓝色）
           const highlightContent = (content: string): React.ReactNode => {
@@ -1240,6 +2260,7 @@ Respond in a helpful, clear manner.`
               style={{
                 color: lineColor,
                 marginBottom: '4px',
+                marginTop: isNewConversationRound ? '16px' : '0',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
               }}
@@ -1253,112 +2274,560 @@ Respond in a helpful, clear manner.`
         <div
           style={{
             display: 'flex',
-            alignItems: 'flex-start',
-            marginTop: '8px',
+            flexDirection: 'column',
+            marginTop: isProcessing ? '0' : (outputLines.length === 0 ? '0' : '16px'),
           }}
         >
-          <span style={{ color: promptColor, marginRight: '8px' }}>worldlab &gt;</span>
-          <div
-            ref={inputRef}
-            contentEditable
-            suppressContentEditableWarning
-            onKeyDown={handleSubmit}
-            onInput={(e) => {
-              const text = e.currentTarget.textContent || ''
-              setCurrentInput(text)
-            }}
-            style={{
-              flex: 1,
-              outline: 'none',
-              color: textColor,
-              minHeight: '20px',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}
-            data-placeholder={isProcessing ? 'Processing...' : 'Type a command...'}
-          />
-        </div>
-
-        {/* Autocomplete Dropdown */}
-        {showAutocomplete && autocompleteSuggestions.length > 0 && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '40px',
-              left: '16px',
-              right: '16px',
-              background: theme === 'dark' ? 'rgba(28, 28, 28, 0.98)' : 'rgba(255, 255, 255, 0.98)',
-              border: `1px solid ${borderColor}`,
-              borderRadius: '6px',
-              boxShadow: theme === 'dark'
-                ? '0 4px 12px rgba(0, 0, 0, 0.4)'
-                : '0 4px 12px rgba(0, 0, 0, 0.1)',
-              maxHeight: '200px',
-              overflowY: 'auto',
-              zIndex: 1000,
-              padding: '4px 0',
-            }}
-          >
-            {autocompleteSuggestions.map((suggestion, idx) => (
+          {!isProcessing && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+              }}
+            >
+              <span style={{ color: promptColor, marginRight: '8px' }}>worldlab &gt;</span>
               <div
-                key={idx}
-                onClick={() => {
-                  const parts = currentInput.trim().split(/\s+/)
-                  const lastPart = parts[parts.length - 1] || ''
-                  const newInput = currentInput.slice(0, currentInput.length - lastPart.length) + suggestion
-                  setCurrentInput(newInput)
-                  setShowAutocomplete(false)
-                  if (inputRef.current) {
-                    inputRef.current.textContent = newInput
-                    const range = document.createRange()
-                    const sel = window.getSelection()
-                    range.selectNodeContents(inputRef.current)
-                    range.collapse(false)
-                    sel?.removeAllRanges()
-                    sel?.addRange(range)
-                  }
+                ref={inputRef}
+                contentEditable
+                suppressContentEditableWarning
+                onKeyDown={handleSubmit}
+                onInput={(e) => {
+                  const text = e.currentTarget.textContent || ''
+                  setCurrentInput(text)
+                  // Auto-scroll to keep input visible when typing long text
+                  setTimeout(() => {
+                    if (terminalRef.current) {
+                      terminalRef.current.scrollTop = terminalRef.current.scrollHeight
+                    }
+                  }, 0)
                 }}
                 style={{
-                  padding: '6px 12px',
-                  cursor: 'pointer',
-                  background: idx === autocompleteIndex 
-                    ? (theme === 'dark' ? 'rgba(91, 163, 255, 0.2)' : 'rgba(25, 118, 210, 0.1)')
-                    : 'transparent',
+                  flex: 1,
+                  outline: 'none',
                   color: textColor,
-                  fontSize: '13px',
-                  fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace",
+                  minHeight: '20px',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
                 }}
-                onMouseEnter={() => setAutocompleteIndex(idx)}
-              >
-                {suggestion}
-              </div>
-            ))}
+              />
+            </div>
+          )}
+          {isProcessing && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                marginTop: '0',
+                marginLeft: 0,
+                color: theme === 'dark' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)',
+                fontSize: '14px',
+                fontStyle: 'italic',
+              }}
+            >
+              <span>Processing…</span>
+            </div>
+          )}
+        </div>
+
+      </div>
+
+      {/* Styles */}
+      <style>{`
+        .loading-dots {
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+        }
+        .loading-dots span {
+          display: inline-block;
+          animation: dot-pulse 1.4s ease-in-out infinite;
+          opacity: 0.3;
+        }
+        .loading-dots span:nth-child(1) {
+          animation-delay: 0s;
+        }
+        .loading-dots span:nth-child(2) {
+          animation-delay: 0.2s;
+        }
+        .loading-dots span:nth-child(3) {
+          animation-delay: 0.4s;
+        }
+        @keyframes dot-pulse {
+          0%, 100% {
+            opacity: 0.3;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 1;
+            transform: scale(1.2);
+          }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+// Terminal History Dropdown Component
+interface TerminalHistoryDropdownProps {
+  labName: string
+  sessions: TerminalSession[]
+  allSessions: TerminalSession[]
+  isOpen: boolean
+  onClose: () => void
+  onSelectTerminal: (terminalId: string) => void
+  onDeleteTerminal: (terminalId: string) => void
+  onRenameTerminal: (terminalId: string, newName: string) => void
+  activeTerminalId: string
+  anchorElement?: HTMLElement | null
+}
+
+function TerminalHistoryDropdown({
+  labName: _labName,
+  sessions: _sessions,
+  allSessions,
+  isOpen,
+  onClose,
+  onSelectTerminal,
+  onDeleteTerminal,
+  onRenameTerminal,
+  activeTerminalId,
+  anchorElement
+}: TerminalHistoryDropdownProps) {
+  const { theme } = useTheme()
+  const [editingTerminalId, setEditingTerminalId] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState('')
+  const [hoveredTerminalId, setHoveredTerminalId] = useState<string | null>(null)
+  const [position, setPosition] = useState({ top: 0, left: 0 })
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const editInputRef = useRef<HTMLInputElement>(null)
+
+  // Calculate position based on anchor element
+  useEffect(() => {
+    if (isOpen && anchorElement) {
+      const rect = anchorElement.getBoundingClientRect()
+      setPosition({
+        top: rect.bottom + 4,
+        left: rect.left - 150 + rect.width / 2
+      })
+    }
+  }, [isOpen, anchorElement])
+
+  // Focus edit input when editing starts
+  useEffect(() => {
+    if (editingTerminalId && editInputRef.current) {
+      editInputRef.current.focus()
+      editInputRef.current.select()
+    }
+  }, [editingTerminalId])
+
+  const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
+  const borderColor = theme === 'dark' ? '#232323' : '#dadce0'
+  const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
+  const secondaryTextColor = theme === 'dark' ? '#858585' : '#9aa0a6'
+  const hoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'
+  const selectedBg = theme === 'dark' ? '#252525' : '#e8eaed'
+  const iconColor = theme === 'dark' ? '#858585' : '#5f6368'
+
+  // Format time ago
+  const formatTimeAgo = (date: Date): string => {
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+    const diffDays = Math.floor(diffMs / 86400000)
+
+    if (diffMins < 1) return 'now'
+    if (diffMins < 60) return `${diffMins}m`
+    if (diffHours < 24) return `${diffHours}h`
+    if (diffDays === 1) return 'Yesterday'
+    if (diffDays < 7) return `${diffDays}d`
+    return date.toLocaleDateString()
+  }
+
+  // Group terminals by date
+  const groupTerminalsByDate = () => {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+
+    const todayItems: TerminalSession[] = []
+    const yesterdayItems: TerminalSession[] = []
+    const olderItems: TerminalSession[] = []
+
+    allSessions.forEach(session => {
+      let lastActivityTime = new Date(0)
+      if (session.lines.length > 0) {
+        const timestamps = session.lines
+          .map(line => new Date(line.timestamp))
+          .filter(ts => !isNaN(ts.getTime()))
+        
+        if (timestamps.length > 0) {
+          lastActivityTime = new Date(Math.max(...timestamps.map(ts => ts.getTime())))
+        }
+      }
+
+      if (lastActivityTime.getTime() === 0) {
+        // Fallback to session ID timestamp
+        const timestampMatch = session.id.match(/\d+/)
+        if (timestampMatch) {
+          lastActivityTime = new Date(parseInt(timestampMatch[0]))
+        } else {
+          lastActivityTime = new Date()
+        }
+      }
+
+      const itemDate = new Date(lastActivityTime.getFullYear(), lastActivityTime.getMonth(), lastActivityTime.getDate())
+      
+      if (itemDate.getTime() === today.getTime()) {
+        todayItems.push(session)
+      } else if (itemDate.getTime() === yesterday.getTime()) {
+        yesterdayItems.push(session)
+      } else {
+        olderItems.push(session)
+      }
+    })
+
+    return { todayItems, yesterdayItems, olderItems }
+  }
+
+  const { todayItems, yesterdayItems, olderItems } = groupTerminalsByDate()
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node
+      
+      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
+        if (anchorElement && !anchorElement.contains(target)) {
+          onClose()
+        }
+      }
+    }
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside, true)
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside, true)
+      }
+    }
+  }, [isOpen, onClose, anchorElement])
+
+  const handleEdit = (terminalId: string, currentName: string) => {
+    setEditingTerminalId(terminalId)
+    setEditingName(currentName)
+  }
+
+  const handleSaveEdit = () => {
+    if (editingTerminalId && editingName.trim()) {
+      onRenameTerminal(editingTerminalId, editingName.trim())
+    }
+    setEditingTerminalId(null)
+    setEditingName('')
+  }
+
+  const handleCancelEdit = () => {
+    setEditingTerminalId(null)
+    setEditingName('')
+  }
+
+  const handleDelete = async (terminalId: string) => {
+    await onDeleteTerminal(terminalId)
+    if (editingTerminalId === terminalId) {
+      setEditingTerminalId(null)
+    }
+  }
+
+  const handleEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSaveEdit()
+    } else if (e.key === 'Escape') {
+      handleCancelEdit()
+    }
+  }
+
+  if (!isOpen) return null
+
+  const renderTerminalItem = (session: TerminalSession) => {
+    const isActive = session.id === activeTerminalId
+    const isHovered = hoveredTerminalId === session.id
+    const isEditing = editingTerminalId === session.id
+    
+    // Get last activity time
+    let lastActivityTime = new Date(0)
+    if (session.lines.length > 0) {
+      const timestamps = session.lines
+        .map(line => new Date(line.timestamp))
+        .filter(ts => !isNaN(ts.getTime()))
+      
+      if (timestamps.length > 0) {
+        lastActivityTime = new Date(Math.max(...timestamps.map(ts => ts.getTime())))
+      }
+    }
+
+    if (lastActivityTime.getTime() === 0) {
+      const timestampMatch = session.id.match(/\d+/)
+      if (timestampMatch) {
+        lastActivityTime = new Date(parseInt(timestampMatch[0]))
+      } else {
+        lastActivityTime = new Date()
+      }
+    }
+
+    return (
+      <div
+        key={session.id}
+        onMouseEnter={() => setHoveredTerminalId(session.id)}
+        onMouseLeave={() => setHoveredTerminalId(null)}
+        onClick={() => {
+          if (editingTerminalId !== session.id) {
+            onSelectTerminal(session.id)
+            onClose()
+          }
+        }}
+        style={{
+          padding: '8px 12px',
+          backgroundColor: isActive ? selectedBg : (isHovered ? hoverBg : 'transparent'),
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          position: 'relative',
+          transition: 'background-color 0.15s'
+        }}
+      >
+        {/* Icon */}
+        <div style={{
+          width: '16px',
+          height: '16px',
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <div style={{
+            width: '12px',
+            height: '12px',
+            border: `1.5px solid ${isActive ? textColor : iconColor}`,
+            borderRadius: '6px',
+            backgroundColor: isActive ? textColor : 'transparent'
+          }} />
+        </div>
+
+        {/* Terminal Name */}
+        {isEditing ? (
+          <input
+            ref={editInputRef}
+            type="text"
+            value={editingName}
+            onChange={(e) => setEditingName(e.target.value)}
+            onBlur={handleSaveEdit}
+            onKeyDown={handleEditKeyDown}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              flex: 1,
+              padding: '2px 4px',
+              backgroundColor: theme === 'dark' ? '#1d1d1d' : '#ffffff',
+              border: `1px solid ${theme === 'dark' ? '#3e3e42' : '#bdc1c6'}`,
+              borderRadius: '6px',
+              color: textColor,
+              fontSize: '13px',
+              outline: 'none',
+              fontFamily: 'inherit'
+            }}
+          />
+        ) : (
+          <span style={{
+            flex: 1,
+            fontSize: '13px',
+            color: textColor,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}>
+            {session.name}
+          </span>
+        )}
+
+        {/* Time Ago */}
+        {!isEditing && (
+          <span style={{
+            fontSize: '12px',
+            color: secondaryTextColor,
+            marginRight: isHovered ? '40px' : '0',
+            transition: 'margin-right 0.15s',
+            flexShrink: 0
+          }}>
+            {formatTimeAgo(lastActivityTime)}
+          </span>
+        )}
+
+        {/* Edit and Delete Buttons */}
+        {isHovered && !isEditing && (
+          <div style={{
+            position: 'absolute',
+            right: '8px',
+            display: 'flex',
+            gap: '4px',
+            alignItems: 'center'
+          }}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleEdit(session.id, session.name)
+              }}
+              style={{
+                padding: '4px',
+                border: 'none',
+                borderRadius: '6px',
+                backgroundColor: 'transparent',
+                color: iconColor,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '20px',
+                height: '20px',
+                transition: 'background-color 0.15s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#e8eaed'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }}
+              title="Edit terminal name"
+            >
+              {/* @ts-ignore */}
+              <EditIcon style={{ fontSize: '14px' }} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                handleDelete(session.id)
+              }}
+              style={{
+                padding: '4px',
+                border: 'none',
+                borderRadius: '6px',
+                backgroundColor: 'transparent',
+                color: iconColor,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '20px',
+                height: '20px',
+                transition: 'background-color 0.15s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#e8eaed'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }}
+              title="Delete terminal"
+            >
+              {/* @ts-ignore */}
+              <DeleteIcon style={{ fontSize: '14px' }} />
+            </button>
           </div>
         )}
       </div>
+    )
+  }
 
-      {/* Custom Scrollbar Styles */}
-      <style>{`
-        div::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
-        }
-        div::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        div::-webkit-scrollbar-thumb {
-          background: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)'};
-          border-radius: 4px;
-        }
-        div::-webkit-scrollbar-thumb:hover {
-          background: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)'};
-        }
-        [contenteditable][data-placeholder]:empty:before {
-          content: attr(data-placeholder);
-          color: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)'};
-          pointer-events: none;
-        }
-      `}</style>
+  return (
+    <div
+      ref={dropdownRef}
+      data-terminal-history-dropdown
+      style={{
+        position: 'fixed',
+        top: `${position.top}px`,
+        left: `${position.left}px`,
+        transform: 'translateX(-50%)',
+        width: '400px',
+        maxHeight: '60vh',
+        backgroundColor: bgColor,
+        border: `1px solid ${borderColor}`,
+        borderRadius: '6px',
+        boxShadow: theme === 'dark' 
+          ? '0 4px 16px rgba(0,0,0,0.5)' 
+          : '0 4px 16px rgba(0,0,0,0.15)',
+        zIndex: 10000,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      }}
+    >
+      {/* Terminal List */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '4px 0'
+      }}>
+        {/* Today Section */}
+        {todayItems.length > 0 && (
+          <div>
+            <div style={{
+              padding: '8px 12px 4px 12px',
+              fontSize: '11px',
+              fontWeight: 600,
+              color: secondaryTextColor,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}>
+              Today
+            </div>
+            {todayItems.map(session => renderTerminalItem(session))}
+          </div>
+        )}
+
+        {/* Yesterday Section */}
+        {yesterdayItems.length > 0 && (
+          <div>
+            <div style={{
+              padding: '12px 12px 4px 12px',
+              fontSize: '11px',
+              fontWeight: 600,
+              color: secondaryTextColor,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}>
+              Yesterday
+            </div>
+            {yesterdayItems.map(session => renderTerminalItem(session))}
+          </div>
+        )}
+
+        {/* Older Items */}
+        {olderItems.length > 0 && (
+          <div>
+            <div style={{
+              padding: '12px 12px 4px 12px',
+              fontSize: '11px',
+              fontWeight: 600,
+              color: secondaryTextColor,
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}>
+              Past Terminals
+            </div>
+            {olderItems.map(session => renderTerminalItem(session))}
+          </div>
+        )}
+
+        {allSessions.length === 0 && (
+          <div style={{
+            padding: '24px',
+            textAlign: 'center',
+            color: secondaryTextColor,
+            fontSize: '13px'
+          }}>
+            No terminal history
+          </div>
+        )}
+      </div>
     </div>
   )
 }

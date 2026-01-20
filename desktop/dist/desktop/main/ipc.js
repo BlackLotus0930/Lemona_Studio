@@ -178,14 +178,76 @@ export function setupIPC() {
                 const document = await documentService.getById(documentId);
                 finalProjectId = document?.projectId;
             }
-            // Determine which service to use based on model name
+            // Determine which service to use based on model name and available API keys
             const isOpenaiModel = modelName && modelName.startsWith('gpt-');
-            const useOpenai = isOpenaiModel && openaiApiKey;
-            if (useOpenai && !openaiApiKey) {
-                throw new Error('OpenAI API key is required for GPT models. Please set it in Settings > API Keys.');
+            const isGeminiModel = modelName && (modelName.startsWith('gemini-') || modelName.includes('gemini'));
+            const hasOpenaiKey = openaiApiKey && openaiApiKey.trim().length > 0;
+            const hasGoogleKey = googleApiKey && googleApiKey.trim().length > 0;
+            console.log('[IPC ai:streamChat] Received request:', {
+                modelName,
+                isOpenaiModel,
+                isGeminiModel,
+                hasOpenaiKey,
+                hasGoogleKey,
+                openaiKeyLength: openaiApiKey?.length || 0,
+                googleKeyLength: googleApiKey?.length || 0,
+                messagePreview: message?.substring(0, 50),
+            });
+            let useOpenai = false;
+            let finalModelName = modelName;
+            if (isOpenaiModel) {
+                // Explicit GPT model requested
+                if (!hasOpenaiKey) {
+                    // Try to fall back to Gemini if available
+                    if (hasGoogleKey) {
+                        useOpenai = false;
+                        finalModelName = 'gemini-3-flash-preview';
+                    }
+                    else {
+                        throw new Error('OpenAI API key is required for GPT models. Please set it in Settings > API Keys.');
+                    }
+                }
+                else {
+                    useOpenai = true;
+                }
             }
-            if (!useOpenai && !googleApiKey) {
-                throw new Error('Google API key is required for Gemini models. Please set it in Settings > API Keys.');
+            else if (isGeminiModel) {
+                // Explicit Gemini model requested
+                if (!hasGoogleKey) {
+                    // Try to fall back to GPT if available
+                    if (hasOpenaiKey) {
+                        useOpenai = true;
+                        finalModelName = 'gpt-4.1-nano';
+                    }
+                    else {
+                        throw new Error('Google API key is required for Gemini models. Please set it in Settings > API Keys.');
+                    }
+                }
+                else {
+                    useOpenai = false;
+                }
+            }
+            else {
+                // No explicit model or unrecognized model name - auto-select based on available keys
+                if (hasOpenaiKey && !hasGoogleKey) {
+                    // Only OpenAI key available - use GPT
+                    useOpenai = true;
+                    finalModelName = modelName || 'gpt-4.1-nano';
+                }
+                else if (hasGoogleKey && !hasOpenaiKey) {
+                    // Only Google key available - use Gemini
+                    useOpenai = false;
+                    finalModelName = modelName || 'gemini-3-flash-preview';
+                }
+                else if (hasOpenaiKey && hasGoogleKey) {
+                    // Both keys available - prefer Gemini (matches frontend default)
+                    useOpenai = false;
+                    finalModelName = modelName || 'gemini-3-flash-preview';
+                }
+                else {
+                    // No keys available
+                    throw new Error('No API key configured. Please set either Google API key or OpenAI API key in Settings > API Keys.');
+                }
             }
             // Start streaming in background
             ;
@@ -193,8 +255,8 @@ export function setupIPC() {
                 try {
                     let chunkCount = 0;
                     const stream = useOpenai
-                        ? openaiService.streamChat(openaiApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, modelName, attachments, style, googleApiKey)
-                        : geminiService.streamChat(googleApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, modelName, attachments, openaiApiKey);
+                        ? openaiService.streamChat(openaiApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, finalModelName, attachments, style, googleApiKey)
+                        : geminiService.streamChat(googleApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, finalModelName, attachments, openaiApiKey);
                     for await (const chunk of stream) {
                         chunkCount++;
                         webContents.send('ai:streamChunk', streamId, chunk);

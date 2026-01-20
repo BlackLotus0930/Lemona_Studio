@@ -32,8 +32,9 @@ export function parseMentions(message: string): ParsedMentions {
   }
 
   // Pattern to match @mentions
-  // Matches: @Library, @filename, @file-id, etc.
-  const mentionPattern = /@(\w+)/g
+  // Matches: @Library, @filename, @file-id, @"File Name.md", @'File Name.md'
+  // Keep a leading whitespace group so we can preserve it in replacements.
+  const mentionPattern = /(^|\s)@("([^"]+)"|'([^']+)'|([^\s@]+))/g
   const matches = Array.from(message.matchAll(mentionPattern))
 
   if (matches.length === 0) {
@@ -42,7 +43,18 @@ export function parseMentions(message: string): ParsedMentions {
 
   // Process each mention
   for (const match of matches) {
-    const mention = match[1].toLowerCase()
+    const rawMention = (match[3] || match[4] || match[5] || '').trim()
+    if (!rawMention) {
+      continue
+    }
+    
+    // Trim trailing punctuation that often follows mentions in prose
+    const cleanedMention = rawMention.replace(/[.,:;!?]+$/, '')
+    if (!cleanedMention) {
+      continue
+    }
+    
+    const mention = cleanedMention.toLowerCase()
 
     // Check for @Library mention
     if (mention === 'library') {
@@ -50,13 +62,13 @@ export function parseMentions(message: string): ParsedMentions {
     } else {
       // Assume it's a file mention (could be filename or ID)
       // We'll resolve it later when searching
-      result.fileMentions.push(match[1]) // Keep original case for matching
+      result.fileMentions.push(cleanedMention) // Keep original case for matching
     }
   }
 
   // Remove @mentions from message for embedding generation
   // Keep the text content but remove the @mention syntax
-  result.cleanedMessage = message.replace(mentionPattern, '').trim()
+  result.cleanedMessage = message.replace(mentionPattern, (_full, prefix) => prefix || '').trim()
 
   return result
 }
@@ -221,8 +233,24 @@ export async function searchLibrary(
 
       // Search - we hold read lock
       // Index is already scoped by projectId and folder, no need for additional filtering
-      const results = await vectorStore.searchUnsafe(embedding, k, fileIds)
-      return results
+      const effectiveK = getAdaptiveK(query, k, folder)
+      const efSearch = getAdaptiveEfSearch(query)
+      
+      // Use rerank if enabled (both library and workspace)
+      let results: SearchResult[]
+      if (RERANK_ENABLED) {
+        // Get more results for reranking based on folder type
+        const rerankInitialK = folder === 'project' ? WORKSPACE_RERANK_INITIAL_K : LIBRARY_RERANK_INITIAL_K
+        const rerankFinalK = folder === 'project' ? WORKSPACE_RERANK_FINAL_K : LIBRARY_RERANK_FINAL_K
+        const rerankK = Math.max(effectiveK, rerankInitialK)
+        const rerankResults = await vectorStore.searchUnsafe(embedding, rerankK, fileIds, efSearch)
+        results = rerankSearchResults(rerankResults, query, rerankFinalK, RRF_K)
+      } else {
+        results = await vectorStore.searchUnsafe(embedding, effectiveK, fileIds, efSearch)
+      }
+      
+      // Apply folder-specific filtering
+      return filterByRelevance(results, folder)
     } finally {
       releaseLock()
     }
@@ -340,7 +368,7 @@ export async function searchProjectFiles(
   geminiApiKey?: string,
   openaiApiKey?: string,
   fileIds?: string[],
-  k: number = 6
+  k: number = WORKSPACE_SEARCH_K
 ): Promise<SearchResult[]> {
   return searchLibrary(query, projectId, 'project', geminiApiKey, openaiApiKey, fileIds, k)
 }
@@ -400,25 +428,181 @@ export async function resolveFileMentionsAll(
 }
 
 /**
- * Search workspace and library folders together
- * System-controlled search strategy:
- * - No @mentions: Search all documents (workspace + library), sorted by relevance
- * - With @mentions: Prioritize @mentioned documents, but also search others
+ * Search workspace and library folders together with normalized distances and RRF rerank
+ * 
+ * This function implements a fair comparison system:
+ * 1. Normalizes distances using folder-specific thresholds (workspace: 0.35, library: 0.40)
+ * 2. Applies RRF (Reciprocal Rank Fusion) for reranking
+ * 3. Applies source weights (workspace: 1.1x boost, library: 1.0x baseline)
+ * 4. Prioritizes @mentioned files with boost factor
  * 
  * @param query - Search query
  * @param projectId - Project ID
  * @param geminiApiKey - Optional Gemini API key
  * @param openaiApiKey - Optional OpenAI API key
  * @param fileIds - Optional: @mentioned file IDs (will be prioritized)
- * @param k - Number of results per folder (default: 6)
+ * @param k - Number of final results to return (default: 10)
  */
+// Mixed search configuration (for workspace + library combined search)
+// Must be defined before functions that use it
+const MIXED_SEARCH_CONFIG = {
+  retrieval: {
+    initialMultiplier: 1.5,      // Multiplier for initial retrieval (for rerank)
+    defaultTotalK: 10,           // Final number of results to return
+  },
+  normalization: {
+    workspaceThreshold: 0.35,    // Workspace distance threshold for normalization
+    libraryThreshold: 0.40,     // Library distance threshold for normalization
+  },
+  sourceWeights: {
+    workspaceBoost: 1.1,         // Workspace boost factor
+    libraryBoost: 1.0,           // Library baseline weight
+  },
+  rrf: {
+    k: 60,                       // RRF constant
+  },
+}
+
+/**
+ * Normalize distance based on folder-specific threshold
+ * 
+ * Purpose: Allows fair comparison between workspace and library results
+ *          by scaling distances to a common [0, 1] range
+ * 
+ * Formula: normalizedDistance = min(distance / threshold, 1.0)
+ * 
+ * @param distance - Original L2 distance from vector search
+ * @param folder - Source folder type ('library' or 'project')
+ * @returns Normalized distance in [0, 1] range
+ *          - 0 = perfect match (distance = 0)
+ *          - 1 = at or beyond threshold (distance >= threshold)
+ *          - Lower normalized distance = better match
+ * 
+ * Example:
+ *   - Workspace: distance 0.28 → normalized = 0.28 / 0.35 = 0.8
+ *   - Library: distance 0.32 → normalized = 0.32 / 0.40 = 0.8
+ *   Both have same normalized distance, allowing fair comparison
+ */
+function normalizeDistance(
+  distance: number,
+  folder: 'library' | 'project'
+): number {
+  const threshold = folder === 'project' 
+    ? MIXED_SEARCH_CONFIG.normalization.workspaceThreshold
+    : MIXED_SEARCH_CONFIG.normalization.libraryThreshold
+  
+  // Normalize: distance / threshold, clamped to [0, 1]
+  // Lower normalized distance = better match
+  return Math.min(distance / threshold, 1.0)
+}
+
+/**
+ * Rerank mixed search results using RRF with normalized distances and source weights
+ * 
+ * Algorithm:
+ * 1. Normalize distances separately for each source (workspace/library)
+ * 2. Calculate RRF scores based on rank within each source list
+ * 3. Combine RRF scores from both sources
+ * 4. Calculate normalized distance scores (1 - normalizedDistance)
+ * 5. Combine RRF and distance scores
+ * 6. Apply source weights and mention boost
+ */
+function rerankMixedResults(
+  workspaceResults: SearchResult[],
+  libraryResults: SearchResult[],
+  query: string,
+  finalK: number,
+  mentionedFileIds?: Set<string>
+): SearchResult[] {
+  // Tag results with source, normalized distance, and RRF scores
+  interface TaggedResult extends SearchResult {
+    source: 'workspace' | 'library'
+    normalizedDistance: number
+    originalDistance: number
+    rrfScore: number // RRF score from its source list
+  }
+
+  const taggedResults: TaggedResult[] = []
+  const rrfK = MIXED_SEARCH_CONFIG.rrf.k
+
+  // Process workspace results: calculate RRF based on rank within workspace list
+  for (let i = 0; i < workspaceResults.length; i++) {
+    const result = workspaceResults[i]
+    const normalizedDist = normalizeDistance(result.distance, 'project')
+    const rank = i + 1 // Rank within workspace list (1-indexed)
+    const rrfScore = 1 / (rrfK + rank) // RRF formula: 1 / (k + rank)
+    
+    taggedResults.push({
+      ...result,
+      source: 'workspace',
+      normalizedDistance: normalizedDist,
+      originalDistance: result.distance,
+      rrfScore,
+    })
+  }
+
+  // Process library results: calculate RRF based on rank within library list
+  for (let i = 0; i < libraryResults.length; i++) {
+    const result = libraryResults[i]
+    const normalizedDist = normalizeDistance(result.distance, 'library')
+    const rank = i + 1 // Rank within library list (1-indexed)
+    const rrfScore = 1 / (rrfK + rank) // RRF formula: 1 / (k + rank)
+    
+    taggedResults.push({
+      ...result,
+      source: 'library',
+      normalizedDistance: normalizedDist,
+      originalDistance: result.distance,
+      rrfScore,
+    })
+  }
+
+  // Calculate final scores for each result
+  const scoredResults = taggedResults.map((result) => {
+    // 1. Normalized distance score: convert distance to similarity score
+    //    Lower normalized distance = better match = higher score
+    //    Formula: score = 1 - normalizedDistance (range: [0, 1])
+    const normalizedDistanceScore = 1 - result.normalizedDistance
+    
+    // 2. Combine RRF and distance scores
+    //    RRF provides rank-based signal, distance provides similarity signal
+    //    Weight: RRF 40% + Distance 60% (distance is more important for semantic similarity)
+    const baseScore = result.rrfScore * 0.4 + normalizedDistanceScore * 0.6
+    
+    // 3. Apply source weight (before mention boost)
+    //    Workspace gets 1.1x boost, library stays at 1.0x
+    const sourceWeight = result.source === 'workspace'
+      ? MIXED_SEARCH_CONFIG.sourceWeights.workspaceBoost
+      : MIXED_SEARCH_CONFIG.sourceWeights.libraryBoost
+    const weightedScore = baseScore * sourceWeight
+    
+    // 4. Apply mention boost (if file is @mentioned)
+    //    Mentioned files get distance reduced by 50% (effectively 2x boost)
+    //    This is applied as a multiplier to the final score
+    const isMentioned = mentionedFileIds?.has(result.chunk.fileId) ?? false
+    const mentionBoost = isMentioned ? 1.5 : 1.0 // 1.5x boost for mentioned files
+    const finalScore = weightedScore * mentionBoost
+    
+    return {
+      result,
+      score: finalScore,
+    }
+  })
+
+  // Sort by final score (higher is better)
+  scoredResults.sort((a, b) => b.score - a.score)
+
+  // Return top k results
+  return scoredResults.slice(0, finalK).map(item => item.result)
+}
+
 export async function searchWorkspaceAndLibrary(
   query: string,
   projectId: string,
   geminiApiKey?: string,
   openaiApiKey?: string,
   fileIds?: string[],
-  k: number = 6
+  k: number = MIXED_SEARCH_CONFIG.retrieval.defaultTotalK
 ): Promise<SearchResult[]> {
   if (!query || query.trim().length === 0) {
     return []
@@ -432,47 +616,188 @@ export async function searchWorkspaceAndLibrary(
     return []
   }
 
-  // Search both folders
+  // Calculate initial retrieval k (multiply for rerank)
+  const initialK = Math.ceil(k * MIXED_SEARCH_CONFIG.retrieval.initialMultiplier)
+  const workspaceK = getAdaptiveK(query, initialK, 'project')
+  const libraryK = getAdaptiveK(query, initialK, 'library')
+
+  // Search both folders (get more results for rerank)
   const [workspaceResults, libraryResults] = await Promise.all([
-    searchProjectFiles(query, projectId, geminiApiKey, openaiApiKey, fileIds, k).catch(() => [] as SearchResult[]),
-    searchLibrary(query, projectId, 'library', geminiApiKey, openaiApiKey, fileIds, k).catch(() => [] as SearchResult[]),
+    searchProjectFiles(query, projectId, geminiApiKey, openaiApiKey, fileIds, workspaceK).catch(() => [] as SearchResult[]),
+    searchLibrary(query, projectId, 'library', geminiApiKey, openaiApiKey, fileIds, libraryK).catch(() => [] as SearchResult[]),
   ])
 
-  // Merge results and prioritize @mentioned files
-  const allResults: SearchResult[] = []
+  // Apply folder-specific filtering before rerank
+  const filteredWorkspace = filterByRelevance(workspaceResults, 'project')
+  const filteredLibrary = filterByRelevance(libraryResults, 'library')
+
+  // Rerank mixed results using normalized distances and RRF
   const mentionedFileIds = new Set(fileIds || [])
+  const rerankedResults = rerankMixedResults(
+    filteredWorkspace.length > 0 ? filteredWorkspace : workspaceResults,
+    filteredLibrary.length > 0 ? filteredLibrary : libraryResults,
+    query,
+    k,
+    mentionedFileIds
+  )
 
-  // Separate results into mentioned and non-mentioned
-  const mentionedResults: SearchResult[] = []
-  const otherResults: SearchResult[] = []
+  // Diversify by file to avoid over-representing one document
+  const diversified = diversifyByFile(rerankedResults, 2)
 
-  for (const result of [...workspaceResults, ...libraryResults]) {
-    if (mentionedFileIds.has(result.chunk.fileId)) {
-      mentionedResults.push(result)
-    } else {
-      otherResults.push(result)
-    }
+  return diversified.slice(0, k)
+}
+
+// Search configuration for library folder
+const DEFAULT_SEARCH_K = 8
+const MAX_SEARCH_K = 16
+const DEFAULT_EF_SEARCH = 50
+const HIGH_RECALL_EF = 80
+const MAX_DISTANCE_THRESHOLD = 0.40
+const MAX_DISTANCE_FROM_BEST = 0.15
+const MIN_RESULTS_AFTER_FILTER = 4
+
+// Search configuration for workspace/project folder (optimized for precision)
+const WORKSPACE_SEARCH_K = 10
+const WORKSPACE_MAX_SEARCH_K = 20
+const WORKSPACE_MAX_DISTANCE_THRESHOLD = 0.35
+const WORKSPACE_MIN_RESULTS_AFTER_FILTER = 5
+
+// Rerank configuration
+const RERANK_ENABLED = true
+const LIBRARY_RERANK_INITIAL_K = 16
+const LIBRARY_RERANK_FINAL_K = 8
+const WORKSPACE_RERANK_INITIAL_K = 20
+const WORKSPACE_RERANK_FINAL_K = 10
+const RRF_K = 60 // Reciprocal Rank Fusion constant
+
+function getAdaptiveK(query: string, requestedK: number, folder: 'library' | 'project' = 'library'): number {
+  if (!query) {
+    return requestedK
   }
 
-  // Sort each group by score (lower distance = better)
-  mentionedResults.sort((a, b) => a.distance - b.distance)
-  otherResults.sort((a, b) => a.distance - b.distance)
+  const isWorkspace = folder === 'project'
+  const defaultK = isWorkspace ? WORKSPACE_SEARCH_K : DEFAULT_SEARCH_K
+  const maxK = isWorkspace ? WORKSPACE_MAX_SEARCH_K : MAX_SEARCH_K
 
-  // Combine: mentioned files first, then others
-  // Boost mentioned results by reducing their effective distance
-  const mentionedBoosted = mentionedResults.map(result => ({
-    ...result,
-    distance: result.distance * 0.5, // Boost by halving distance
-    score: result.score * 0.5, // Lower score is better
-  }))
+  // Respect custom k values from callers
+  if (requestedK !== defaultK) {
+    return requestedK
+  }
 
-  allResults.push(...mentionedBoosted, ...otherResults)
+  const wordCount = query.trim().split(/\s+/).filter(Boolean).length
+  let multiplier = 1
+  if (wordCount >= 20) {
+    multiplier = 1.8
+  } else if (wordCount >= 12) {
+    multiplier = 1.5
+  } else if (wordCount >= 7) {
+    multiplier = 1.2
+  }
 
-  // Re-sort all results by boosted score
-  allResults.sort((a, b) => a.distance - b.distance)
+  const adapted = Math.round(defaultK * multiplier)
+  return Math.min(maxK, Math.max(defaultK, adapted))
+}
+
+function getAdaptiveEfSearch(query: string): number {
+  if (!query) {
+    return DEFAULT_EF_SEARCH
+  }
+
+  const wordCount = query.trim().split(/\s+/).filter(Boolean).length
+  if (wordCount >= 10 || query.length >= 80) {
+    return HIGH_RECALL_EF
+  }
+
+  return DEFAULT_EF_SEARCH
+}
+
+function diversifyByFile(results: SearchResult[], maxPerFile: number): SearchResult[] {
+  if (maxPerFile <= 0) {
+    return results
+  }
+
+  const counts = new Map<string, number>()
+  const diversified: SearchResult[] = []
+
+  for (const result of results) {
+    const fileId = result.chunk.fileId
+    const count = counts.get(fileId) || 0
+    if (count >= maxPerFile) {
+      continue
+    }
+    counts.set(fileId, count + 1)
+    diversified.push(result)
+  }
+
+  return diversified
+}
+
+function filterByRelevance(results: SearchResult[], folder: 'library' | 'project' = 'library'): SearchResult[] {
+  if (results.length === 0) {
+    return results
+  }
+
+  const isWorkspace = folder === 'project'
+  const maxDistanceThreshold = isWorkspace ? WORKSPACE_MAX_DISTANCE_THRESHOLD : MAX_DISTANCE_THRESHOLD
+  const minResultsAfterFilter = isWorkspace ? WORKSPACE_MIN_RESULTS_AFTER_FILTER : MIN_RESULTS_AFTER_FILTER
+
+  // Results are already sorted by (effective) distance; use actual distances for thresholds
+  const bestDistance = results[0]?.distance ?? 0
+  const maxAllowedDistance = Math.min(
+    maxDistanceThreshold,
+    bestDistance + MAX_DISTANCE_FROM_BEST
+  )
+
+  const filtered = results.filter(result => result.distance <= maxAllowedDistance)
+
+  if (filtered.length < minResultsAfterFilter) {
+    return results.slice(0, Math.min(results.length, minResultsAfterFilter))
+  }
+
+  return filtered
+}
+
+/**
+ * Rerank search results using reciprocal rank fusion (RRF)
+ * RRF formula: score = 1 / (k + rank), where k is a constant and rank is the position (1-indexed)
+ * This method combines rank-based scoring with distance-based scoring for better results
+ */
+function rerankSearchResults(
+  results: SearchResult[],
+  query: string,
+  finalK: number,
+  rrfK: number = RRF_K
+): SearchResult[] {
+  if (results.length === 0) {
+    return results
+  }
+
+  // Calculate RRF scores for each result
+  const reranked = results.map((result, index) => {
+    // RRF score: 1 / (k + rank), where rank is 1-indexed
+    const rank = index + 1
+    const rrfScore = 1 / (rrfK + rank)
+    
+    // Normalize distance to 0-1 range (assuming max distance ~1.0 for L2 distance)
+    // Lower distance = higher similarity score
+    const normalizedDistance = Math.min(result.distance / 1.0, 1.0)
+    const distanceScore = 1 - normalizedDistance
+    
+    // Combine RRF and distance scores
+    // Weight: RRF 40%, Distance 60% (distance is more important for semantic similarity)
+    const combinedScore = rrfScore * 0.4 + distanceScore * 0.6
+    
+    return {
+      result,
+      score: combinedScore,
+    }
+  })
+
+  // Sort by combined score (higher is better)
+  reranked.sort((a, b) => b.score - a.score)
 
   // Return top k results
-  return allResults.slice(0, k)
+  return reranked.slice(0, finalK).map(item => item.result)
 }
 
 export const semanticSearchService = {
