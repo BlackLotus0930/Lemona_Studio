@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
-import { WorldLab, WorldLabNode, WorldLabEdge } from '@shared/types'
+import { WorldLab, WorldLabNode, WorldLabEdge, AIChatMessage } from '@shared/types'
 import { aiApi } from '../../services/api'
+import { worldLabApi } from '../../services/desktop-api'
 // @ts-ignore
 import AddIcon from '@mui/icons-material/Add'
 // @ts-ignore
@@ -22,6 +23,13 @@ interface WorldLabTerminalProps {
   onEdgesChange?: (edges: WorldLabEdge[]) => void
   projectId?: string
   onClose?: () => void // Available for future use (e.g., close button)
+  onBeforeOperation?: () => void // Called before any operation that modifies nodes/edges
+  undoRedoHandlers?: {
+    undo: () => void
+    redo: () => void
+    canUndo: () => boolean
+    canRedo: () => boolean
+  } | null
 }
 
 interface TerminalLine {
@@ -129,11 +137,71 @@ function saveTerminalSession(labName: string, session: TerminalSession): void {
   }
 }
 
+// Helper function to clear all terminal sessions for a lab
+function clearTerminalSessions(labName: string): void {
+  try {
+    // Clear active terminal ID
+    localStorage.removeItem(getActiveTerminalIdKey(labName))
+    
+    // Clear open terminal tabs
+    localStorage.removeItem(getOpenTerminalTabsKey(labName))
+    
+    // Clear all terminal sessions
+    const savedOpenTabs = loadOpenTerminalTabs(labName)
+    for (const terminalId of savedOpenTabs) {
+      const storageKey = `worldlab_terminal_${labName}_${terminalId}`
+      localStorage.removeItem(storageKey)
+    }
+    
+    // Also clear conversation history for all terminals
+    for (const terminalId of savedOpenTabs) {
+      const storageKey = `worldlab_conversation_${labName}_${terminalId}`
+      localStorage.removeItem(storageKey)
+    }
+    
+    console.log(`[WorldLabTerminal] Cleared all terminal sessions for lab: ${labName}`)
+  } catch (error) {
+    console.error('Failed to clear terminal sessions:', error)
+  }
+}
+
 // Helper function to generate terminal name from first command
 function generateTerminalName(firstCommand: string): string {
   if (!firstCommand || !firstCommand.trim()) return 'New Terminal'
   const cleaned = firstCommand.trim().replace(/\n/g, ' ').substring(0, 30)
   return cleaned.length < firstCommand.trim().length ? `${cleaned}...` : cleaned
+}
+
+const MAX_CONVERSATION_MESSAGES = 20 // Keep only recent 20 messages (frontend), backend will handle summarization
+
+// Helper function to load conversation history from localStorage
+function loadConversationHistory(labName: string, terminalId: string): AIChatMessage[] {
+  try {
+    const storageKey = `worldlab_conversation_${labName}_${terminalId}`
+    const saved = localStorage.getItem(storageKey)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      return Array.isArray(parsed) ? parsed : []
+    }
+  } catch (error) {
+    console.error('Failed to load conversation history:', error)
+  }
+  return []
+}
+
+// Helper function to save conversation history to localStorage
+function saveConversationHistory(labName: string, terminalId: string, history: AIChatMessage[]): void {
+  try {
+    const storageKey = `worldlab_conversation_${labName}_${terminalId}`
+    localStorage.setItem(storageKey, JSON.stringify(history))
+  } catch (error) {
+    console.error('Failed to save conversation history:', error)
+  }
+}
+
+function trimConversationHistory(history: AIChatMessage[]): AIChatMessage[] {
+  if (history.length <= MAX_CONVERSATION_MESSAGES) return history
+  return history.slice(history.length - MAX_CONVERSATION_MESSAGES)
 }
 
 export default function WorldLabTerminal({
@@ -145,6 +213,8 @@ export default function WorldLabTerminal({
   onEdgesChange,
   projectId,
   onClose,
+  onBeforeOperation,
+  undoRedoHandlers,
 }: WorldLabTerminalProps) {
   const { theme } = useTheme()
   
@@ -173,8 +243,14 @@ export default function WorldLabTerminal({
   const [currentInput, setCurrentInput] = useState<string>('')
   const [outputLines, setOutputLines] = useState<TerminalLine[]>([])
   const [isProcessing, setIsProcessing] = useState<boolean>(false)
+  const [hasStartedStreaming, setHasStartedStreaming] = useState<boolean>(false)
   const [googleApiKey, setGoogleApiKey] = useState<string>('')
   const [openaiApiKey, setOpenaiApiKey] = useState<string>('')
+  // Conversation history for AI memory (persisted per labName + terminal)
+  const [conversationHistory, setConversationHistory] = useState<AIChatMessage[]>(() => {
+    const initialTerminalId = loadActiveTerminalId(labName) || 'terminal_default'
+    return loadConversationHistory(labName, initialTerminalId)
+  })
   // Initialize selectedModel based on available API keys from localStorage
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
@@ -182,13 +258,6 @@ export default function WorldLabTerminal({
       const openaiKey = localStorage.getItem('openaiApiKey') || ''
       const hasGoogleKey = !!googleKey && googleKey.trim().length > 0
       const hasOpenaiKey = !!openaiKey && openaiKey.trim().length > 0
-      
-      console.log('[WorldLabTerminal] Initial model selection:', {
-        hasGoogleKey,
-        hasOpenaiKey,
-        googleKeyLength: googleKey.length,
-        openaiKeyLength: openaiKey.length,
-      })
       
       // Select model based on available keys
       let selectedModel: string
@@ -206,7 +275,6 @@ export default function WorldLabTerminal({
         selectedModel = 'gpt-4.1-nano'
       }
       
-      console.log('[WorldLabTerminal] Initial selected model:', selectedModel)
       return selectedModel
     } catch (error) {
       console.error('[WorldLabTerminal] Failed to initialize model from localStorage:', error)
@@ -230,16 +298,6 @@ export default function WorldLabTerminal({
       try {
         const googleKey = localStorage.getItem('googleApiKey') || ''
         const openaiKey = localStorage.getItem('openaiApiKey') || ''
-        const hasGoogleKey = !!googleKey && googleKey.trim().length > 0
-        const hasOpenaiKey = !!openaiKey && openaiKey.trim().length > 0
-        
-        console.log('[WorldLabTerminal] Loading API keys:', {
-          hasGoogleKey,
-          hasOpenaiKey,
-          googleKeyLength: googleKey.length,
-          openaiKeyLength: openaiKey.length,
-        })
-        
         setGoogleApiKey(googleKey)
         setOpenaiApiKey(openaiKey)
       } catch (error) {
@@ -252,7 +310,6 @@ export default function WorldLabTerminal({
     // Listen for storage changes (when user updates API keys in settings)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'googleApiKey' || e.key === 'openaiApiKey') {
-        console.log('[WorldLabTerminal] Storage changed:', e.key)
         loadApiKeys()
       }
     }
@@ -268,59 +325,43 @@ export default function WorldLabTerminal({
     const isGeminiModel = selectedModel && (selectedModel.startsWith('gemini-') || selectedModel.includes('gemini'))
     const isGptModel = selectedModel && selectedModel.startsWith('gpt-')
     
-    console.log('[WorldLabTerminal] Model selection effect triggered:', {
-      currentModel: selectedModel,
-      hasGoogleKey,
-      hasOpenaiKey,
-      isGeminiModel,
-      isGptModel,
-    })
-    
     // If current model is incompatible with available keys, switch to a compatible one
     if (isGptModel && !hasOpenaiKey) {
       // GPT model selected but no OpenAI key - switch to Gemini if available
       if (hasGoogleKey) {
-        console.log('[WorldLabTerminal] Switching from GPT to Gemini (no OpenAI key, has Google key)')
         setSelectedModel('gemini-3-flash-preview')
       }
       // If no keys at all, keep GPT (will show error when used, but at least won't try Gemini)
     } else if (isGeminiModel && !hasGoogleKey) {
       // Gemini model selected but no Google key - switch to GPT if available
       if (hasOpenaiKey) {
-        console.log('[WorldLabTerminal] Switching from Gemini to GPT (no Google key, has OpenAI key)')
         setSelectedModel('gpt-4.1-nano')
       }
       // If no keys at all, switch to GPT (will show clearer error message)
       else if (!hasOpenaiKey && !hasGoogleKey) {
-        console.log('[WorldLabTerminal] Switching from Gemini to GPT (no keys available)')
         setSelectedModel('gpt-4.1-nano')
       }
     } else if (!hasGoogleKey && !hasOpenaiKey) {
       // No keys available - prefer GPT model (will show clearer error message)
       if (!isGptModel && !isGeminiModel) {
-        console.log('[WorldLabTerminal] Setting model to GPT (no keys, invalid model)')
         setSelectedModel('gpt-4.1-nano')
       } else if (isGeminiModel) {
         // Switch from Gemini to GPT if no keys available
-        console.log('[WorldLabTerminal] Switching from Gemini to GPT (no keys available)')
         setSelectedModel('gpt-4.1-nano')
       }
     } else if (hasGoogleKey && hasOpenaiKey) {
       // Both keys available - prefer Gemini if current model is invalid
       if (!isGeminiModel && !isGptModel) {
-        console.log('[WorldLabTerminal] Setting model to Gemini (both keys available, invalid model)')
         setSelectedModel('gemini-3-flash-preview')
       }
     } else if (hasGoogleKey && !hasOpenaiKey) {
       // Only Google key - ensure we're using a Gemini model
       if (!isGeminiModel) {
-        console.log('[WorldLabTerminal] Switching to Gemini (only Google key available)')
         setSelectedModel('gemini-3-flash-preview')
       }
     } else if (hasOpenaiKey && !hasGoogleKey) {
       // Only OpenAI key - ensure we're using a GPT model
       if (!isGptModel) {
-        console.log('[WorldLabTerminal] Switching to GPT (only OpenAI key available)')
         setSelectedModel('gpt-4.1-nano')
       }
     }
@@ -328,6 +369,20 @@ export default function WorldLabTerminal({
 
   // Initialize terminal sessions on mount
   useEffect(() => {
+    // Check if this is a newly created WorldLab (created within last 2 minutes)
+    // If so, clear old terminal sessions to start fresh
+    if (worldLabData?.metadata?.createdAt) {
+      const createdAt = new Date(worldLabData.metadata.createdAt)
+      const now = new Date()
+      const ageInMinutes = (now.getTime() - createdAt.getTime()) / (1000 * 60)
+      
+      // If WorldLab was created within last 2 minutes, clear old terminal sessions
+      if (ageInMinutes < 2) {
+        console.log(`[WorldLabTerminal] Detected newly created WorldLab (${ageInMinutes.toFixed(2)} minutes old), clearing old terminal sessions`)
+        clearTerminalSessions(labName)
+      }
+    }
+    
     const savedActiveId = loadActiveTerminalId(labName)
     const savedOpenTabs = loadOpenTerminalTabs(labName)
     
@@ -403,7 +458,13 @@ export default function WorldLabTerminal({
         isLoadingSessionRef.current = false
       }, 0)
     }
-  }, [labName])
+  }, [labName, worldLabData?.metadata?.createdAt])
+
+  // Load conversation history when labName or active terminal changes
+  useEffect(() => {
+    const history = loadConversationHistory(labName, activeTerminalId)
+    setConversationHistory(history)
+  }, [labName, activeTerminalId])
 
   // Load active session data when activeTerminalId changes
   useEffect(() => {
@@ -638,168 +699,61 @@ export default function WorldLabTerminal({
       }
     }
 
-    // clear 命令
-    if (command === 'clear') {
+    // create [描述] - 创建节点（使用 AI）
+    if (command === 'create') {
+      const description = parts.slice(1).join(' ')
+      if (description.trim()) {
+        return {
+          type: 'ai',
+          command: 'create-node-ai',
+          args: { description },
+        }
+      } else {
+        return { type: 'error', error: 'Please provide a description for the node to create' }
+      }
+    }
+
+    // edit [node1,node2,...] [变更] - 编辑节点（支持多个节点，用逗号分隔）
+    if (command === 'edit') {
+      if (parts.length < 3) {
+        return { type: 'error', error: 'Usage: edit <nodeLabel1,nodeLabel2,...> <change description>' }
+      }
+      const nodeIdentifiers = parts[1].split(',').map(id => id.trim()).filter(id => id.length > 0)
+      if (nodeIdentifiers.length === 0) {
+        return { type: 'error', error: 'Please provide at least one node to edit' }
+      }
+      const changeDescription = parts.slice(2).join(' ')
       return {
-        type: 'command',
-        command: 'clear',
+        type: 'ai',
+        command: 'edit-node-ai',
+        args: { nodeIds: nodeIdentifiers, changeDescription },
+      }
+    }
+
+    // derive - 根据 nodes 和 edges 生成故事
+    if (command === 'derive') {
+      return {
+        type: 'ai',
+        command: 'derive-story',
         args: {},
       }
     }
 
-    // history 命令
-    if (command === 'history') {
+    // undo - 撤销上一个操作
+    if (command === 'undo') {
       return {
         type: 'command',
-        command: 'history',
+        command: 'undo',
         args: {},
       }
     }
 
-    // query nodes [category]
-    if (command === 'query' && parts[1] === 'nodes') {
-      const category = parts[2] || null
+    // redo - 重做上一个操作
+    if (command === 'redo') {
       return {
         type: 'command',
-        command: 'query-nodes',
-        args: { category },
-      }
-    }
-
-    // query edges [nodeId]
-    if (command === 'query' && parts[1] === 'edges') {
-      const nodeId = parts[2] || null
-      return {
-        type: 'command',
-        command: 'query-edges',
-        args: { nodeId },
-      }
-    }
-
-    // query node <nodeId>
-    if (command === 'query' && parts[1] === 'node' && parts[2]) {
-      return {
-        type: 'command',
-        command: 'query-node',
-        args: { nodeId: parts[2] },
-      }
-    }
-
-    // create node category:<category> name:<name>
-    if (command === 'create' && parts[1] === 'node') {
-      const args: Record<string, string> = {}
-      for (let i = 2; i < parts.length; i++) {
-        const part = parts[i]
-        if (part.includes(':')) {
-          const [key, ...valueParts] = part.split(':')
-          args[key] = valueParts.join(':')
-        }
-      }
-      return {
-        type: 'command',
-        command: 'create-node',
-        args,
-      }
-    }
-
-    // create edge <sourceId> -> <targetId> [label:<label>]
-    if (command === 'create' && parts[1] === 'edge') {
-      const arrowIndex = parts.findIndex(p => p === '->')
-      if (arrowIndex === -1 || arrowIndex < 2 || arrowIndex >= parts.length - 1) {
-        return { type: 'error', error: 'Invalid edge syntax. Use: create edge <sourceId> -> <targetId> [label:<label>]' }
-      }
-      const sourceId = parts[2]
-      const targetId = parts[arrowIndex + 1]
-      const args: Record<string, string> = { sourceId, targetId }
-      
-      // 解析 label
-      for (let i = arrowIndex + 2; i < parts.length; i++) {
-        const part = parts[i]
-        if (part.startsWith('label:')) {
-          args.label = part.slice(6)
-        }
-      }
-      
-      return {
-        type: 'command',
-        command: 'create-edge',
-        args,
-      }
-    }
-
-    // update node <nodeId> property:<key> value:<value>
-    if (command === 'update' && parts[1] === 'node' && parts[2]) {
-      const nodeId = parts[2]
-      const args: Record<string, string> = { nodeId }
-      
-      for (let i = 3; i < parts.length; i++) {
-        const part = parts[i]
-        if (part.startsWith('property:')) {
-          args.property = part.slice(9)
-        } else if (part.startsWith('value:')) {
-          args.value = part.slice(6)
-        }
-      }
-      
-      return {
-        type: 'command',
-        command: 'update-node',
-        args,
-      }
-    }
-
-    // delete node <nodeId>
-    if (command === 'delete' && parts[1] === 'node' && parts[2]) {
-      return {
-        type: 'command',
-        command: 'delete-node',
-        args: { nodeId: parts[2] },
-      }
-    }
-
-    // delete edge <edgeId>
-    if (command === 'delete' && parts[1] === 'edge' && parts[2]) {
-      return {
-        type: 'command',
-        command: 'delete-edge',
-        args: { edgeId: parts[2] },
-      }
-    }
-
-    // focus node <nodeId>
-    if (command === 'focus' && parts[1] === 'node' && parts[2]) {
-      return {
-        type: 'command',
-        command: 'focus-node',
-        args: { nodeId: parts[2] },
-      }
-    }
-
-    // simulate <query>
-    if (command === 'simulate') {
-      const query = parts.slice(1).join(' ')
-      return {
-        type: 'ai',
-        command: 'simulate',
-        args: { query },
-      }
-    }
-
-    // analyze consistency [nodeId]
-    if (command === 'analyze' && parts[1] === 'consistency') {
-      return {
-        type: 'ai',
-        command: 'analyze-consistency',
-        args: { nodeId: parts[2] || null },
-      }
-    }
-
-    // suggest connections [nodeId]
-    if (command === 'suggest' && parts[1] === 'connections') {
-      return {
-        type: 'ai',
-        command: 'suggest-connections',
-        args: { nodeId: parts[2] || null },
+        command: 'redo',
+        args: {},
       }
     }
 
@@ -846,7 +800,7 @@ export default function WorldLabTerminal({
       if (result.type === 'command') {
         await executeLocalCommand(result.command!, result.args || {})
       } else if (result.type === 'ai') {
-        await executeAICommand(result.command!, result.args || {})
+        await executeAICommand(result.command!, result.args || {}, input)
       }
     } catch (error: any) {
       const errorLine: TerminalLine = {
@@ -858,11 +812,12 @@ export default function WorldLabTerminal({
       addOutputLine(errorLine)
     } finally {
       setIsProcessing(false)
+      setHasStartedStreaming(false) // Reset streaming state
     }
   }, [isProcessing, parseCommand, addOutputLine])
 
   // 执行本地命令
-  const executeLocalCommand = useCallback(async (command: string, args: Record<string, any>) => {
+  const executeLocalCommand = useCallback(async (command: string, _args: Record<string, any>) => {
     if (!worldLabData) {
       addOutputLine({
         id: `err_${Date.now()}`,
@@ -873,27 +828,22 @@ export default function WorldLabTerminal({
       return
     }
 
-    const nodes = worldLabData.nodes
-    const edges = worldLabData.edges
-
     switch (command) {
       case 'help': {
-        const helpText = `Available commands:
-  query nodes [category]     - Query nodes (optionally filter by category)
-  query edges [nodeId]        - Query edges (optionally filter by node)
-  query node <nodeId>        - Query specific node details
-  create node category:<cat> name:<name>  - Create a new node
-  create edge <src> -> <dst> [label:<label>]  - Create an edge
-  update node <nodeId> property:<key> value:<value>  - Update node property
-  delete node <nodeId>       - Delete a node
-  delete edge <edgeId>       - Delete an edge
-  focus node <nodeId>        - Focus on a node in canvas
-  simulate <query>           - AI simulate a scenario
-  analyze consistency [nodeId]  - Analyze consistency
-  suggest connections [nodeId]  - Suggest connections
-  help                       - Show this help
-  clear                      - Clear terminal
-  history                    - Show command history`
+        const helpText = `CORE COMMANDS
+  create [description]
+  edit [node1] [node2] [description]
+  derive [description]
+  undo
+  redo
+  help
+
+CAPABILITIES
+  • Capture and build ideas
+  • Natural conversation
+  • Select nodes to focus AI operations  
+  • All changes are reversible (Ctrl+Z)`
+  
         addOutputLine({
           id: `out_${Date.now()}`,
           type: 'output',
@@ -903,365 +853,67 @@ export default function WorldLabTerminal({
         break
       }
 
-      case 'clear': {
-        setOutputLines([])
-        // Clear is handled by the session save effect
-        break
-      }
+      case 'undo': {
+        if (!undoRedoHandlers) {
+          addOutputLine({
+            id: `err_${Date.now()}`,
+            type: 'error',
+            content: 'Error: Undo/redo handlers not available',
+            timestamp: new Date().toISOString(),
+          })
+          return
+        }
 
-      case 'history': {
-        if (commandHistory.length === 0) {
+        if (!undoRedoHandlers.canUndo()) {
           addOutputLine({
             id: `out_${Date.now()}`,
             type: 'output',
-            content: 'No command history.',
+            content: 'Nothing to undo',
             timestamp: new Date().toISOString(),
           })
-        } else {
-          const historyText = commandHistory.map((cmd, idx) => `${idx + 1}. ${cmd}`).join('\n')
+          return
+        }
+
+        // Call undo handler directly
+        undoRedoHandlers.undo()
+        
+        addOutputLine({
+          id: `out_${Date.now()}`,
+          type: 'info',
+          content: 'Undone previous operation',
+          timestamp: new Date().toISOString(),
+        })
+        break
+      }
+
+      case 'redo': {
+        if (!undoRedoHandlers) {
+          addOutputLine({
+            id: `err_${Date.now()}`,
+            type: 'error',
+            content: 'Error: Undo/redo handlers not available',
+            timestamp: new Date().toISOString(),
+          })
+          return
+        }
+
+        if (!undoRedoHandlers.canRedo()) {
           addOutputLine({
             id: `out_${Date.now()}`,
             type: 'output',
-            content: historyText,
+            content: 'Nothing to redo',
             timestamp: new Date().toISOString(),
           })
-        }
-        break
-      }
-
-      case 'query-nodes': {
-        let filteredNodes = nodes
-        if (args.category) {
-          filteredNodes = nodes.filter(n => 
-            (n.category || '').toLowerCase() === args.category.toLowerCase()
-          )
-        }
-        const count = filteredNodes.length
-        const nodeList = filteredNodes.map(n => `  - ${n.label} (${n.id}) [${n.category || 'Uncategorized'}]`).join('\n')
-        addOutputLine({
-          id: `out_${Date.now()}`,
-          type: 'output',
-          content: `Found ${count} node(s):\n${nodeList || '  (none)'}`,
-          timestamp: new Date().toISOString(),
-          nodeRefs: filteredNodes.map(n => n.id),
-        })
-        break
-      }
-
-      case 'query-edges': {
-        let filteredEdges = edges
-        if (args.nodeId) {
-          filteredEdges = edges.filter(e => 
-            e.source === args.nodeId || e.target === args.nodeId
-          )
-        }
-        const count = filteredEdges.length
-        const edgeList = filteredEdges.map(e => 
-          `  - ${e.source} -> ${e.target}${e.label ? ` [${e.label}]` : ''} (${e.id})`
-        ).join('\n')
-        addOutputLine({
-          id: `out_${Date.now()}`,
-          type: 'output',
-          content: `Found ${count} edge(s):\n${edgeList || '  (none)'}`,
-          timestamp: new Date().toISOString(),
-        })
-        break
-      }
-
-      case 'query-node': {
-        const node = nodes.find(n => n.id === args.nodeId)
-        if (!node) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: `Node "${args.nodeId}" not found.`,
-            timestamp: new Date().toISOString(),
-          })
-        } else {
-          const info = `Node: ${node.label} (${node.id})
-Category: ${node.category || 'Uncategorized'}
-Position: (${node.position.x}, ${node.position.y})
-${node.data?.description ? `Description: ${node.data.description}` : ''}`
-          addOutputLine({
-            id: `out_${Date.now()}`,
-            type: 'output',
-            content: info,
-            timestamp: new Date().toISOString(),
-            nodeRefs: [node.id],
-          })
-        }
-        break
-      }
-
-      case 'focus-node': {
-        const node = nodes.find(n => n.id === args.nodeId)
-        if (!node) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: `Node "${args.nodeId}" not found.`,
-            timestamp: new Date().toISOString(),
-          })
-        } else {
-          if (onNodeSelect) {
-            onNodeSelect(args.nodeId)
-          }
-          addOutputLine({
-            id: `out_${Date.now()}`,
-            type: 'info',
-            content: `Focused on node: ${node.label} (${args.nodeId})`,
-            timestamp: new Date().toISOString(),
-            nodeRefs: [args.nodeId],
-          })
-        }
-        break
-      }
-
-      case 'create-node': {
-        if (!args.category || !args.name) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: 'Error: Missing required parameters. Use: create node category:<category> name:<name>',
-            timestamp: new Date().toISOString(),
-          })
-          break
+          return
         }
 
-        if (!onNodesChange) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: 'Error: onNodesChange callback not available',
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        // Generate node ID
-        const nodeId = `node_${Date.now()}`
-        const newNode: WorldLabNode = {
-          id: nodeId,
-          label: args.name,
-          category: args.category,
-          position: { x: Math.random() * 400 + 100, y: Math.random() * 400 + 100 },
-          data: {},
-        }
-
-        const updatedNodes = [...nodes, newNode]
-        onNodesChange(updatedNodes)
-
+        // Call redo handler directly
+        undoRedoHandlers.redo()
+        
         addOutputLine({
           id: `out_${Date.now()}`,
           type: 'info',
-          content: `Created node: ${args.name} (${nodeId})`,
-          timestamp: new Date().toISOString(),
-          nodeRefs: [nodeId],
-        })
-        break
-      }
-
-      case 'create-edge': {
-        if (!args.sourceId || !args.targetId) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: 'Error: Missing source or target node ID',
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        // Check if nodes exist
-        const sourceNode = nodes.find(n => n.id === args.sourceId)
-        const targetNode = nodes.find(n => n.id === args.targetId)
-
-        if (!sourceNode || !targetNode) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: `Error: Node not found. Source: ${sourceNode ? 'found' : 'not found'}, Target: ${targetNode ? 'found' : 'not found'}`,
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        if (!onEdgesChange) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: 'Error: onEdgesChange callback not available',
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        // Check if edge already exists
-        const edgeExists = edges.some(e => 
-          e.source === args.sourceId && e.target === args.targetId
-        )
-
-        if (edgeExists) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: `Error: Edge already exists between ${args.sourceId} and ${args.targetId}`,
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        // Generate edge ID
-        const edgeId = `edge_${Date.now()}`
-        const newEdge: WorldLabEdge = {
-          id: edgeId,
-          source: args.sourceId,
-          target: args.targetId,
-          label: args.label || undefined,
-          type: 'default',
-        }
-
-        const updatedEdges = [...edges, newEdge]
-        onEdgesChange(updatedEdges)
-
-        addOutputLine({
-          id: `out_${Date.now()}`,
-          type: 'info',
-          content: `Created edge: ${args.sourceId} -> ${args.targetId}${args.label ? ` [${args.label}]` : ''}`,
-          timestamp: new Date().toISOString(),
-        })
-        break
-      }
-
-      case 'update-node': {
-        if (!args.nodeId || !args.property || args.value === undefined) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: 'Error: Missing required parameters. Use: update node <nodeId> property:<key> value:<value>',
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        const nodeIndex = nodes.findIndex(n => n.id === args.nodeId)
-        if (nodeIndex === -1) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: `Error: Node "${args.nodeId}" not found`,
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        if (!onNodesChange) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: 'Error: onNodesChange callback not available',
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        const updatedNodes = [...nodes]
-        const node = { ...updatedNodes[nodeIndex] }
-
-        // Update property
-        if (args.property === 'label') {
-          node.label = args.value
-        } else if (args.property === 'category') {
-          node.category = args.value
-        } else {
-          // Update data property
-          if (!node.data) node.data = {}
-          node.data[args.property] = args.value
-        }
-
-        updatedNodes[nodeIndex] = node
-        onNodesChange(updatedNodes)
-
-        addOutputLine({
-          id: `out_${Date.now()}`,
-          type: 'info',
-          content: `Updated node ${args.nodeId}: ${args.property} = ${args.value}`,
-          timestamp: new Date().toISOString(),
-          nodeRefs: [args.nodeId],
-        })
-        break
-      }
-
-      case 'delete-node': {
-        const nodeIndex = nodes.findIndex(n => n.id === args.nodeId)
-        if (nodeIndex === -1) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: `Error: Node "${args.nodeId}" not found`,
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        if (!onNodesChange || !onEdgesChange) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: 'Error: Callbacks not available',
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        // Delete node
-        const updatedNodes = nodes.filter(n => n.id !== args.nodeId)
-        onNodesChange(updatedNodes)
-
-        // Delete related edges
-        const updatedEdges = edges.filter(e => 
-          e.source !== args.nodeId && e.target !== args.nodeId
-        )
-        onEdgesChange(updatedEdges)
-
-        addOutputLine({
-          id: `out_${Date.now()}`,
-          type: 'info',
-          content: `Deleted node: ${args.nodeId} (and related edges)`,
-          timestamp: new Date().toISOString(),
-        })
-        break
-      }
-
-      case 'delete-edge': {
-        const edgeIndex = edges.findIndex(e => e.id === args.edgeId)
-        if (edgeIndex === -1) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: `Error: Edge "${args.edgeId}" not found`,
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        if (!onEdgesChange) {
-          addOutputLine({
-            id: `err_${Date.now()}`,
-            type: 'error',
-            content: 'Error: onEdgesChange callback not available',
-            timestamp: new Date().toISOString(),
-          })
-          break
-        }
-
-        const updatedEdges = edges.filter(e => e.id !== args.edgeId)
-        onEdgesChange(updatedEdges)
-
-        addOutputLine({
-          id: `out_${Date.now()}`,
-          type: 'info',
-          content: `Deleted edge: ${args.edgeId}`,
+          content: 'Redone previous operation',
           timestamp: new Date().toISOString(),
         })
         break
@@ -1275,7 +927,59 @@ ${node.data?.description ? `Description: ${node.data.description}` : ''}`
           timestamp: new Date().toISOString(),
         })
     }
-  }, [worldLabData, commandHistory, addOutputLine, onNodeSelect, onNodesChange, onEdgesChange])
+  }, [worldLabData, commandHistory, addOutputLine, onNodeSelect, onNodesChange, onEdgesChange, onBeforeOperation, undoRedoHandlers])
+
+  // 计算节点初始位置 - 在创建节点时调用
+  const calculateInitialPosition = useCallback((
+    _nodeId: string,
+    nodeLabel: string,
+    allEdges: Array<{from: string, to: string}>,
+    existingNodes: WorldLabNode[],
+    labelToIdMap: Map<string, string>,
+    newNodeIds: Set<string>,
+    viewportCenter: { x: number; y: number } = { x: 400, y: 300 }
+  ): { x: number; y: number } => {
+    // Find edges involving this node (by label) that connect to EXISTING nodes only
+    const edgesToExisting = allEdges.filter(e => {
+      const involvesThisNode = e.from === nodeLabel || e.to === nodeLabel
+      if (!involvesThisNode) return false
+      
+      // Check if the other end is an existing node
+      const otherLabel = e.from === nodeLabel ? e.to : e.from
+      const otherId = labelToIdMap.get(otherLabel)
+      return otherId && !newNodeIds.has(otherId) // Other node exists and is not new
+    })
+    
+    if (edgesToExisting.length > 0) {
+      // Get connected EXISTING node IDs
+      const connectedExistingNodeIds = new Set<string>()
+      edgesToExisting.forEach(edge => {
+        const otherLabel = edge.from === nodeLabel ? edge.to : edge.from
+        const otherId = labelToIdMap.get(otherLabel)
+        if (otherId && !newNodeIds.has(otherId)) {
+          connectedExistingNodeIds.add(otherId)
+        }
+      })
+      
+      // Calculate center of connected existing nodes
+      const connectedNodes = existingNodes.filter(n => 
+        connectedExistingNodeIds.has(n.id)
+      )
+      
+      if (connectedNodes.length > 0) {
+        const centerX = connectedNodes.reduce((sum, n) => sum + n.position.x, 0) / connectedNodes.length
+        const centerY = connectedNodes.reduce((sum, n) => sum + n.position.y, 0) / connectedNodes.length
+        // Place nearby (offset by some distance)
+        return {
+          x: centerX + (Math.random() - 0.5) * 200,
+          y: centerY + (Math.random() - 0.5) * 200
+        }
+      }
+    }
+    
+    // Isolated node or only connected to new nodes - use viewport center
+    return viewportCenter
+  }, [])
 
   // 清理 markdown 格式，转换为 terminal 友好的纯文本
   const cleanMarkdownForTerminal = useCallback((text: string): string => {
@@ -1314,41 +1018,115 @@ ${node.data?.description ? `Description: ${node.data.description}` : ''}`
     return cleaned.trim()
   }, [])
 
-  // 构建 WorldLab 上下文内容
+  // 获取用于 derive 的 nodes 和 edges（如果 selectedNodeId 存在，只使用该节点和相关的边）
+  const getDeriveNodesAndEdges = useCallback((): { nodes: WorldLabNode[], edges: WorldLabEdge[] } => {
+    if (!worldLabData) {
+      return { nodes: [], edges: [] }
+    }
+    
+    // 如果没有选中节点，使用所有节点和边
+    if (!selectedNodeId) {
+      return {
+        nodes: worldLabData.nodes,
+        edges: worldLabData.edges,
+      }
+    }
+    
+    // 如果选中了节点，只使用该节点和连接到它的边
+    const selectedNode = worldLabData.nodes.find(n => n.id === selectedNodeId)
+    if (!selectedNode) {
+      return {
+        nodes: worldLabData.nodes,
+        edges: worldLabData.edges,
+      }
+    }
+    
+    // 找到所有连接到选中节点的边
+    const relatedEdges = worldLabData.edges.filter(edge => 
+      edge.source === selectedNodeId || edge.target === selectedNodeId
+    )
+    
+    // 找到所有相关的节点（选中节点 + 通过边连接的节点）
+    const relatedNodeIds = new Set<string>([selectedNodeId])
+    relatedEdges.forEach(edge => {
+      relatedNodeIds.add(edge.source)
+      relatedNodeIds.add(edge.target)
+    })
+    
+    const relatedNodes = worldLabData.nodes.filter(node => relatedNodeIds.has(node.id))
+    
+    return {
+      nodes: relatedNodes,
+      edges: relatedEdges,
+    }
+  }, [worldLabData, selectedNodeId])
+
+  // 构建 WorldLab 上下文内容 - 使用 label-based JSON 格式
   const buildWorldLabContext = useCallback((): string => {
     if (!worldLabData) return ''
     
     const nodes = worldLabData.nodes
     const edges = worldLabData.edges
     
-    let context = `WorldLab: ${labName}\n\n`
-    context += `Nodes (${nodes.length}):\n`
+    // Build label-to-ID map for reference
+    const labelToIdMap = new Map<string, string>()
     nodes.forEach(node => {
-      context += `  - ${node.label} (ID: ${node.id})`
-      if (node.category) context += ` [Category: ${node.category}]`
-      if (node.data?.description) context += ` - ${node.data.description}`
-      context += '\n'
+      labelToIdMap.set(node.label, node.id)
     })
     
-    context += `\nEdges (${edges.length}):\n`
-    edges.forEach(edge => {
-      context += `  - ${edge.source} -> ${edge.target}`
-      if (edge.label) context += ` [${edge.label}]`
-      context += '\n'
+    // Build nodes JSON with labels
+    const nodesJson = nodes.map(node => ({
+      label: node.label,
+      category: node.category || 'Uncategorized',
+      type: node.data?.type || 'node',
+      ...(node.data?.description && { description: node.data.description })
+    }))
+    
+    // Build edges JSON with labels (convert IDs to labels)
+    const edgesJson = edges.map(edge => {
+      const sourceNode = nodes.find(n => n.id === edge.source)
+      const targetNode = nodes.find(n => n.id === edge.target)
+      const edgeObj: {
+        from: string
+        to: string
+        label?: string
+        directional?: boolean
+      } = {
+        from: sourceNode?.label || edge.source,
+        to: targetNode?.label || edge.target,
+      }
+      if (edge.label) {
+        edgeObj.label = edge.label
+      }
+      // Determine if edge is directional (default edges are bidirectional, others are directional)
+      edgeObj.directional = edge.type !== 'default' && edge.type !== undefined
+      return edgeObj
     })
+    
+    // Build context as JSON
+    const contextObj: {
+      worldLab: string
+      nodes: typeof nodesJson
+      edges: typeof edgesJson
+      selectedNode?: string
+    } = {
+      worldLab: labName,
+      nodes: nodesJson,
+      edges: edgesJson,
+    }
     
     if (selectedNodeId) {
       const selectedNode = nodes.find(n => n.id === selectedNodeId)
       if (selectedNode) {
-        context += `\nCurrently selected node: ${selectedNode.label} (${selectedNodeId})\n`
+        contextObj.selectedNode = selectedNode.label
       }
     }
     
-    return context
+    return JSON.stringify(contextObj, null, 2)
   }, [worldLabData, labName, selectedNodeId])
 
   // 执行 AI 命令
-  const executeAICommand = useCallback(async (command: string, args: Record<string, any>) => {
+  const executeAICommand = useCallback(async (command: string, args: Record<string, any>, rawInput?: string) => {
     if (!worldLabData) {
       addOutputLine({
         id: `err_${Date.now()}`,
@@ -1364,62 +1142,6 @@ ${node.data?.description ? `Description: ${node.data.description}` : ''}`
     let aiPrompt = ''
 
     switch (command) {
-      case 'simulate': {
-        aiPrompt = `You are analyzing a WorldLab (world-building system). Here is the current state:
-
-${worldLabContext}
-
-User wants to simulate: "${args.query}"
-
-Please analyze what would happen in this scenario. Consider:
-- How would the nodes interact?
-- What new connections or events might occur?
-- Are there any inconsistencies or conflicts?
-- What are the implications?
-
-IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.`
-        break
-      }
-
-      case 'analyze-consistency': {
-        const nodeContext = args.nodeId 
-          ? `Focusing on node: ${args.nodeId}\n`
-          : 'Analyzing the entire WorldLab for consistency.\n'
-        aiPrompt = `You are analyzing a WorldLab for consistency. Here is the current state:
-
-${worldLabContext}
-${nodeContext}
-
-Please check for:
-- Contradictions between nodes
-- Missing connections that should exist
-- Inconsistent properties or relationships
-- Logical errors or gaps
-
-IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.`
-        break
-      }
-
-      case 'suggest-connections': {
-        const nodeContext = args.nodeId
-          ? `Focusing on node: ${args.nodeId}\n`
-          : 'Suggesting connections for the entire WorldLab.\n'
-        aiPrompt = `You are analyzing a WorldLab to suggest connections. Here is the current state:
-
-${worldLabContext}
-${nodeContext}
-
-Please suggest:
-- Missing connections between nodes that make sense
-- Relationships that could be added
-- Edges that would improve the world structure
-
-Provide specific suggestions with source and target node IDs.
-
-IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.`
-        break
-      }
-
       case 'natural-language': {
         aiPrompt = `You are an AI assistant helping with a WorldLab (world-building system). Here is the current state:
 
@@ -1434,6 +1156,237 @@ Please help the user understand or interact with this WorldLab. You can:
 - Provide insights about the world state
 
 IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.`
+        break
+      }
+
+      case 'create-node-ai': {
+        const description = args.description || 'a new node'
+        
+        aiPrompt = `You are helping create a new node in a WorldLab (world-building system). Here is the current state:
+
+${worldLabContext}
+
+User wants to create: ${description}
+
+Please generate:
+1. label: Short name (1-6 words, e.g., "Alice", "Magic Sword")
+2. category: Character, Concept, Event, Place, Time.
+3. content: Detailed description (multiple sentences of background/characteristics)
+4. edges: Connections to existing or new nodes
+
+IMPORTANT:
+- Do NOT include position coordinates - system will calculate automatically
+- Ensure all node labels are unique (if you need multiple similar nodes, use distinct labels)
+- Edges should reference existing nodes by label, or new nodes you're creating
+- Respond ONLY with valid JSON, no other text before or after
+
+Respond in JSON format:
+{
+  "nodes": [
+    {
+      "label": "Alice",
+      "category": "Character",
+      "content": "A brave warrior named Alice who grew up in a small village. She is known for her exceptional sword skills and kind heart. Alice has been traveling the world for the past five years, seeking adventure and helping those in need."
+    }
+  ],
+  "edges": [
+    {"from": "label1", "to": "label2", "label": "...", "directional": true}
+  ]
+}`
+        break
+      }
+
+      case 'edit-node-ai': {
+        // Support both single node (backward compatibility) and multiple nodes
+        const nodeIdentifiers = args.nodeIds || (args.nodeId ? [args.nodeId] : [])
+        const changeDescription = args.changeDescription
+        
+        if (nodeIdentifiers.length === 0) {
+          addOutputLine({
+            id: `err_${Date.now()}`,
+            type: 'error',
+            content: 'Error: No nodes specified to edit',
+            timestamp: new Date().toISOString(),
+          })
+          return
+        }
+        
+        // Find all nodes to edit - first by label, then by ID
+        const nodesToEdit: WorldLabNode[] = []
+        const notFoundIdentifiers: string[] = []
+        
+        for (const identifier of nodeIdentifiers) {
+          let nodeToEdit = worldLabData.nodes.find(n => n.label === identifier)
+          if (!nodeToEdit) {
+            // If not found by label, try by ID (backward compatibility)
+            nodeToEdit = worldLabData.nodes.find(n => n.id === identifier)
+          }
+          
+          if (nodeToEdit) {
+            nodesToEdit.push(nodeToEdit)
+          } else {
+            notFoundIdentifiers.push(identifier)
+          }
+        }
+        
+        if (notFoundIdentifiers.length > 0) {
+          addOutputLine({
+            id: `err_${Date.now()}`,
+            type: 'error',
+            content: `Error: Node(s) not found: ${notFoundIdentifiers.join(', ')}`,
+            timestamp: new Date().toISOString(),
+          })
+          return
+        }
+        
+        // Update args.nodeIds to actual IDs for later use
+        args.nodeIds = nodesToEdit.map(n => n.id)
+        
+        // Build nodes info for prompt
+        const nodesInfo = nodesToEdit.map(node => {
+          return `- Label: ${node.label}
+- Category: ${node.category || 'Uncategorized'}
+- Content: ${node.data?.content || '(no content)'}`
+        }).join('\n\n')
+        
+        const nodesLabel = nodesToEdit.length === 1 ? 'node' : 'nodes'
+        
+        aiPrompt = `You are helping edit ${nodesToEdit.length} ${nodesLabel} in a WorldLab (world-building system). Here is the current state:
+
+${worldLabContext}
+
+Current ${nodesLabel} to edit:
+${nodesInfo}
+
+User wants to: ${changeDescription}
+
+Please generate the updated node information. You can:
+- Update the node content/description
+- Update the label if needed
+- Change the category if appropriate
+- Suggest new edges or modifications to existing edges
+- Suggest related nodes that should be created
+
+IMPORTANT:
+- Do NOT include position coordinates
+- Respond ONLY with valid JSON, no other text before or after
+- For multiple nodes, provide an array of nodes in the "nodes" field
+
+Respond in JSON format:
+{
+  "nodes": [
+    {
+      "label": "Alice",
+      "category": "Character",
+      "content": "A brave warrior named Alice who grew up in a small village. She is known for her exceptional sword skills and kind heart."
+    }
+  ],
+  "edges": [
+    {"from": "label1", "to": "label2", "label": "...", "directional": true}
+  ],
+  "newNodes": [
+    {
+      "label": "Bob",
+      "category": "Character",
+      "content": "A wise mentor who guides Alice on her journey. Bob has extensive knowledge of ancient magic and combat techniques."
+    }
+  ]
+}`
+        break
+      }
+
+      case 'derive-story': {
+        // 获取用于 derive 的 nodes 和 edges
+        const { nodes: deriveNodes, edges: deriveEdges } = getDeriveNodesAndEdges()
+        
+        if (deriveNodes.length === 0) {
+          addOutputLine({
+            id: `err_${Date.now()}`,
+            type: 'error',
+            content: 'Error: No nodes available to derive story from',
+            timestamp: new Date().toISOString(),
+          })
+          return
+        }
+        
+        // 异步加载所有节点的内容
+        try {
+          const nodesWithContent = await Promise.all(
+            deriveNodes.map(async (node) => {
+              // Try to load node content from file if not already in data
+              let nodeContent = node.data?.content || ''
+              if (!nodeContent) {
+                try {
+                  const loadedContent = await worldLabApi.loadNodeContent(labName, node.id)
+                  if (loadedContent) {
+                    nodeContent = loadedContent
+                  }
+                } catch (error) {
+                  console.warn(`[WorldLabTerminal] Failed to load content for node ${node.id}:`, error)
+                }
+              }
+              
+              return {
+                label: node.label,
+                category: node.category || 'Uncategorized',
+                content: nodeContent,
+              }
+            })
+          )
+          
+          // Build edges JSON with labels (convert IDs to labels)
+          const edgesJson = deriveEdges.map(edge => {
+            const sourceNode = deriveNodes.find(n => n.id === edge.source)
+            const targetNode = deriveNodes.find(n => n.id === edge.target)
+            const edgeObj: {
+              from: string
+              to: string
+              label?: string
+              directional?: boolean
+            } = {
+              from: sourceNode?.label || edge.source,
+              to: targetNode?.label || edge.target,
+            }
+            if (edge.label) {
+              edgeObj.label = edge.label
+            }
+            edgeObj.directional = edge.type !== 'default' && edge.type !== undefined
+            return edgeObj
+          })
+          
+          const deriveContext = JSON.stringify({
+            nodes: nodesWithContent,
+            edges: edgesJson,
+          }, null, 2)
+          
+          const nodeCount = deriveNodes.length
+          const edgeCount = deriveEdges.length
+          
+          aiPrompt = `You are helping derive a story from a WorldLab (world-building system). Based on the following nodes and edges, create a narrative story.
+
+${deriveContext}
+
+Requirements:
+1. This should be a SUMMARY-TYPE STORY (概要型故事), not a full literary text
+2. It can be a complete narrative with emotions and should "read like a story"
+3. The story should be derived from the relationships and content of the provided nodes and edges
+4. Make it engaging and coherent, showing how the nodes and edges connect to form a narrative
+5. Include emotional depth and narrative flow
+
+IMPORTANT: 
+- Start your response with: "Derived from: ${nodeCount} nodes, ${edgeCount} edges"
+- Then write the story
+- Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.
+- This is a one-time generation result, not an authoritative text - it can be regenerated and will change based on the structure`
+        } catch (error) {
+          addOutputLine({
+            id: `err_${Date.now()}`,
+            type: 'error',
+            content: `Error loading node content: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            timestamp: new Date().toISOString(),
+          })
+          return
+        }
         break
       }
 
@@ -1457,36 +1410,79 @@ IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no
     }
     currentAILineIdRef.current = aiLine.id
     currentAIOutputRef.current = ''
+    // For create and edit commands, immediately mark streaming as started to hide "Processing…"
+    if (command === 'create-node-ai' || command === 'edit-node-ai') {
+      setHasStartedStreaming(true)
+    } else {
+      setHasStartedStreaming(false) // Reset streaming state
+    }
     addOutputLine(aiLine)
 
-    try {
-      // Log before calling AI API
-      const hasGoogleKey = !!googleApiKey && googleApiKey.trim().length > 0
-      const hasOpenaiKey = !!openaiApiKey && openaiApiKey.trim().length > 0
-      console.log('[WorldLabTerminal] Executing AI command:', {
-        command,
-        selectedModel,
-        hasGoogleKey,
-        hasOpenaiKey,
-        googleKeyLength: googleApiKey.length,
-        openaiKeyLength: openaiApiKey.length,
-        isGeminiModel: selectedModel?.startsWith('gemini-') || selectedModel?.includes('gemini'),
-        isGptModel: selectedModel?.startsWith('gpt-'),
-      })
+    // 添加日志：显示正在执行的操作
+    let logMessage = ''
+    if (command === 'create-node-ai') {
+      logMessage = `[AI] Creating node: "${args.description}"...`
+    } else if (command === 'edit-node-ai') {
+      // Support both single node (backward compatibility) and multiple nodes
+      const nodeIdentifiers = args.nodeIds || (args.nodeId ? [args.nodeId] : [])
+      const nodesToEdit = nodeIdentifiers.map((identifier: string) => {
+        let node = worldLabData.nodes.find(n => n.label === identifier)
+        if (!node) {
+          node = worldLabData.nodes.find(n => n.id === identifier)
+        }
+        return node
+      }).filter(Boolean) as WorldLabNode[]
       
-      // 调用 AI API - pass API keys from state to ensure they're used
+      if (nodesToEdit.length === 1) {
+        logMessage = `[AI] Editing node: "${nodesToEdit[0].label}"...`
+      } else if (nodesToEdit.length > 1) {
+        logMessage = `[AI] Editing ${nodesToEdit.length} nodes: ${nodesToEdit.map(n => n.label).join(', ')}...`
+      }
+    } else if (command === 'derive-story') {
+      // No log message for derive - the "Derived from" info is in the story output
+    } else if (command === 'natural-language') {
+      // No log message for natural language - just show the conversation
+    }
+    
+    if (logMessage) {
+      addOutputLine({
+        id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        type: 'info',
+        content: logMessage,
+        timestamp: new Date().toISOString(),
+      })
+    }
+
+    try {
+      // Always read API keys directly from localStorage to ensure we use the same keys as ChatInterface
+      // This ensures consistency even if state hasn't updated yet
+      const currentGoogleKey = localStorage.getItem('googleApiKey') || ''
+      const currentOpenaiKey = localStorage.getItem('openaiApiKey') || ''
+      
+      // Add user message to conversation history before calling AI
+      const userMessage: AIChatMessage = {
+        id: `msg_${Date.now()}_user`,
+        role: 'user',
+        content: rawInput?.trim() || aiPrompt,
+        timestamp: new Date().toISOString(),
+      }
+      const trimmedHistory = trimConversationHistory(conversationHistory)
+      const updatedHistoryWithUser = [...trimmedHistory, userMessage]
+      
+      // 调用 AI API - pass API keys directly from localStorage to ensure we use the same keys as ChatInterface
+      // Pass conversation history for memory (backend will handle summarization when needed)
       const response = await aiApi.streamChat(
         aiPrompt,
         worldLabContext, // documentContent
         undefined, // documentId
-        [], // chatHistory
+        trimmedHistory, // chatHistory - pass conversation history for memory
         false, // useWebSearch
         selectedModel, // modelName - uses model selected based on available API keys
         undefined, // attachments
         'Normal', // style
         projectId, // projectId
-        googleApiKey, // googleApiKeyOverride - use state value
-        openaiApiKey // openaiApiKeyOverride - use state value
+        currentGoogleKey, // googleApiKeyOverride - read directly from localStorage to match ChatInterface
+        currentOpenaiKey // openaiApiKeyOverride - read directly from localStorage to match ChatInterface
       )
 
       const reader = response.body?.getReader()
@@ -1514,21 +1510,30 @@ IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no
               if (data.chunk) {
                 // Skip metadata chunks
                 if (!data.chunk.includes('__METADATA__')) {
+                  // Mark that streaming has started (hide "Processing…")
+                  if (!hasStartedStreaming) {
+                    setHasStartedStreaming(true)
+                  }
+                  
                   currentAIOutputRef.current += data.chunk
-                  // Clean markdown and update the output line
-                  const cleanedContent = cleanMarkdownForTerminal(currentAIOutputRef.current)
-                  setOutputLines(prev => {
-                    const updated = [...prev]
-                    const lineIndex = updated.findIndex(l => l.id === currentAILineIdRef.current)
-                    if (lineIndex !== -1) {
-                      updated[lineIndex] = {
-                        ...updated[lineIndex],
-                        content: cleanedContent,
+                  
+                  // For create-node-ai and edit-node-ai, don't show raw output, we'll parse and apply it
+                  if (command !== 'create-node-ai' && command !== 'edit-node-ai') {
+                    // Clean markdown and update the output line
+                    const cleanedContent = cleanMarkdownForTerminal(currentAIOutputRef.current)
+                    setOutputLines(prev => {
+                      const updated = [...prev]
+                      const lineIndex = updated.findIndex(l => l.id === currentAILineIdRef.current)
+                      if (lineIndex !== -1) {
+                        updated[lineIndex] = {
+                          ...updated[lineIndex],
+                          content: cleanedContent,
+                        }
                       }
-                    }
-                    return updated
-                  })
-                  scrollToBottom()
+                      return updated
+                    })
+                    scrollToBottom()
+                  }
                 }
               }
             } catch (e) {
@@ -1537,6 +1542,552 @@ IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no
           }
         }
       }
+
+          // After stream completes, handle create-node-ai and edit-node-ai responses
+      if (command === 'create-node-ai' || command === 'edit-node-ai') {
+        try {
+          // Parse the complete AI response as JSON
+          const fullResponse = currentAIOutputRef.current.trim()
+          
+          // Add log: AI response received
+          addOutputLine({
+            id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            type: 'info',
+            content: '[AI] Response received, parsing...',
+            timestamp: new Date().toISOString(),
+          })
+          
+          // Try to extract JSON from the response (might have markdown code blocks or other text)
+          let jsonStr = fullResponse
+          const jsonMatch = fullResponse.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            jsonStr = jsonMatch[0]
+          }
+          
+          const aiResponse = JSON.parse(jsonStr)
+          
+          // Add log: show what AI generated
+          if (command === 'create-node-ai' && aiResponse.nodes) {
+            const nodeCount = Array.isArray(aiResponse.nodes) ? aiResponse.nodes.length : 0
+            const edgeCount = Array.isArray(aiResponse.edges) ? aiResponse.edges.length : 0
+            addOutputLine({
+              id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              type: 'info',
+              content: `[AI] Generated ${nodeCount} node(s), ${edgeCount} edge(s)`,
+              timestamp: new Date().toISOString(),
+            })
+          } else if (command === 'edit-node-ai') {
+            const newNodeCount = Array.isArray(aiResponse.newNodes) ? aiResponse.newNodes.length : 0
+            const edgeCount = Array.isArray(aiResponse.edges) ? aiResponse.edges.length : 0
+            if (newNodeCount > 0 || edgeCount > 0) {
+              addOutputLine({
+                id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                type: 'info',
+                content: `[AI] Will create ${newNodeCount} new node(s), ${edgeCount} edge(s)`,
+                timestamp: new Date().toISOString(),
+              })
+            }
+          }
+          
+          const existingNodes = worldLabData.nodes
+          const existingEdges = worldLabData.edges
+          
+          // Build label-to-ID map for existing nodes first
+          const labelToIdMap = new Map<string, string>()
+          existingNodes.forEach(node => {
+            labelToIdMap.set(node.label, node.id)
+          })
+          
+          // Track used labels for deduplication
+          const usedLabels = new Set<string>(existingNodes.map(n => n.label))
+          
+          // Handle edit-node-ai: update existing node(s) and possibly create new nodes
+          if (command === 'edit-node-ai') {
+            // Support both single node (backward compatibility) and multiple nodes
+            const nodeIdsToEdit = args.nodeIds || (args.nodeId ? [args.nodeId] : [])
+            const nodesToEdit = existingNodes.filter(n => nodeIdsToEdit.includes(n.id))
+            
+            if (nodesToEdit.length === 0) {
+              throw new Error(`No nodes found to edit`)
+            }
+            
+            // Save current state to history before applying changes
+            onBeforeOperation?.()
+            
+            // Process updated nodes from AI response
+            // Support both old format (single "node") and new format (array "nodes")
+            const updatedNodesData = aiResponse.nodes || (aiResponse.node ? [aiResponse.node] : [])
+            const updatedNodes = [...existingNodes]
+            
+            // Create a map of label to updated data for matching
+            const updatedDataMap = new Map<string, any>()
+            updatedNodesData.forEach((nodeData: any) => {
+              if (nodeData.label) {
+                updatedDataMap.set(nodeData.label, nodeData)
+              }
+            })
+            
+            // Update each node that matches
+            for (const nodeToEdit of nodesToEdit) {
+              const nodeIndex = updatedNodes.findIndex(n => n.id === nodeToEdit.id)
+              if (nodeIndex === -1) continue
+              
+              // Find matching updated data by label (or use first one if only one node to edit)
+              let updatedNodeData: any = {}
+              if (updatedNodesData.length === 1 && nodesToEdit.length === 1) {
+                updatedNodeData = updatedNodesData[0]
+              } else if (updatedDataMap.has(nodeToEdit.label)) {
+                updatedNodeData = updatedDataMap.get(nodeToEdit.label) || {}
+              } else if (updatedNodesData.length === nodesToEdit.length) {
+                // If counts match, assume order matches
+                const nodeIndexInArray = nodesToEdit.findIndex(n => n.id === nodeToEdit.id)
+                if (nodeIndexInArray >= 0 && nodeIndexInArray < updatedNodesData.length) {
+                  updatedNodeData = updatedNodesData[nodeIndexInArray]
+                }
+              }
+              
+              // Update the node
+              const nextLabel = updatedNodeData.label || updatedNodes[nodeIndex].label
+              const nextCategory = updatedNodeData.category || updatedNodes[nodeIndex].category
+              updatedNodes[nodeIndex] = {
+                ...updatedNodes[nodeIndex],
+                label: nextLabel,
+                category: nextCategory,
+                data: {
+                  ...updatedNodes[nodeIndex].data,
+                  label: nextLabel,
+                  category: nextCategory,
+                  content: updatedNodeData.content || updatedNodes[nodeIndex].data?.content || '',
+                },
+              }
+              
+              // Update label in map if changed
+              if (updatedNodeData.label && updatedNodeData.label !== nodeToEdit.label) {
+                labelToIdMap.delete(nodeToEdit.label)
+                labelToIdMap.set(updatedNodeData.label, nodeToEdit.id)
+              }
+              
+              // Save updated node content to file
+              try {
+                const nodeContent = updatedNodeData.content || updatedNodes[nodeIndex].data?.content || ''
+                await worldLabApi.saveNode(labName, nodeToEdit.id, nodeContent)
+              } catch (error) {
+                console.error('[WorldLabTerminal] Error saving updated node:', error)
+              }
+            }
+            
+            if (nodesToEdit.length > 0) {
+              addOutputLine({
+                id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                type: 'info',
+                content: `[AI] Saved ${nodesToEdit.length} updated node file(s)...`,
+                timestamp: new Date().toISOString(),
+              })
+            }
+            
+            // Process new nodes from AI response (if any)
+            const newNodesFromEdit: WorldLabNode[] = []
+            if (aiResponse.newNodes && Array.isArray(aiResponse.newNodes)) {
+              const processedNewNodes: Array<{
+                originalLabel: string
+                finalLabel: string
+                category: string
+                content: string
+              }> = []
+              
+              aiResponse.newNodes.forEach((node: any) => {
+                let finalLabel = node.label || 'Unnamed Node'
+                let suffix = 2
+                
+                while (usedLabels.has(finalLabel)) {
+                  finalLabel = `${node.label}_${suffix}`
+                  suffix++
+                }
+                
+                usedLabels.add(finalLabel)
+                processedNewNodes.push({
+                  originalLabel: node.label || finalLabel,
+                  finalLabel,
+                  category: node.category || 'Uncategorized',
+                  content: node.content || '',
+                })
+              })
+              
+              // Generate IDs and create new nodes
+              const newNodeIds = new Set<string>()
+              processedNewNodes.forEach(node => {
+                const nodeId = `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                newNodeIds.add(nodeId)
+                labelToIdMap.set(node.finalLabel, nodeId)
+                
+                const position = calculateInitialPosition(
+                  nodeId,
+                  node.finalLabel,
+                  aiResponse.edges || [],
+                  existingNodes,
+                  labelToIdMap,
+                  newNodeIds
+                )
+                
+                newNodesFromEdit.push({
+                  id: nodeId,
+                  label: node.finalLabel,
+                  category: node.category,
+                  position,
+                  data: {
+                    label: node.finalLabel,
+                    category: node.category,
+                    content: node.content,
+                  },
+                })
+              })
+              
+              // Create node files
+              if (newNodesFromEdit.length > 0) {
+                addOutputLine({
+                  id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                  type: 'info',
+                  content: `[AI] Saving ${newNodesFromEdit.length} new node file(s)...`,
+                  timestamp: new Date().toISOString(),
+                })
+                for (const node of newNodesFromEdit) {
+                  try {
+                    await worldLabApi.createNode(labName, node.id, node.data?.content || '')
+                  } catch (error) {
+                    console.error('[WorldLabTerminal] Error creating new node file:', error)
+                  }
+                }
+              }
+              
+              updatedNodes.push(...newNodesFromEdit)
+            }
+            
+            // Update nodes
+            if (onNodesChange) {
+              onNodesChange(updatedNodes)
+            }
+            
+            // Process edges
+            const allEdges = aiResponse.edges || []
+            const newEdges: WorldLabEdge[] = []
+            allEdges.forEach((edge: any) => {
+              const fromId = labelToIdMap.get(edge.from)
+              const toId = labelToIdMap.get(edge.to)
+              
+              if (fromId && toId) {
+                const edgeExists = existingEdges.some(e => 
+                  e.source === fromId && e.target === toId
+                )
+                
+                if (!edgeExists) {
+                  const edgeId = `edge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                  newEdges.push({
+                    id: edgeId,
+                    source: fromId,
+                    target: toId,
+                    label: edge.label || undefined,
+                    type: edge.directional ? 'smoothstep' : 'default',
+                  })
+                }
+              }
+            })
+            
+            const updatedEdges = [...existingEdges, ...newEdges]
+            if (onEdgesChange) {
+              onEdgesChange(updatedEdges)
+            }
+            
+            // Explicitly save node positions and metadata for all nodes (including newly created ones)
+            // This ensures positions are persisted even if Canvas hasn't synced yet
+            try {
+              const nodePositions: Record<string, { x: number; y: number }> = {}
+              const nodeMetadata: Record<string, { label?: string; category?: string; elementName?: string }> = {}
+              
+              updatedNodes.forEach(node => {
+                nodePositions[node.id] = node.position
+                nodeMetadata[node.id] = {
+                  label: node.label,
+                  category: node.category,
+                  elementName: node.elementName,
+                }
+              })
+              
+              // Save edges with all node positions and metadata (including new nodes)
+              await worldLabApi.saveEdges(labName, updatedEdges, nodePositions, nodeMetadata)
+            } catch (error) {
+              console.error('[WorldLabTerminal] Error saving node positions:', error)
+              // Don't show error to user as this is a background operation
+            }
+            
+            // Add log: operation complete
+            addOutputLine({
+              id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              type: 'info',
+              content: '[AI] Operation completed successfully',
+              timestamp: new Date().toISOString(),
+            })
+            
+            // Update output line
+            const newNodeLabels = newNodesFromEdit.map(n => n.label).join(', ')
+            const edgeCount = newEdges.length
+            const updatedNodeLabels = nodesToEdit.map(n => n.label).join(', ')
+            setOutputLines(prev => {
+              const updated = [...prev]
+              const lineIndex = updated.findIndex(l => l.id === currentAILineIdRef.current)
+              if (lineIndex !== -1) {
+                updated[lineIndex] = {
+                  ...updated[lineIndex],
+                  content: `Updated ${nodesToEdit.length} node(s): ${updatedNodeLabels}${newNodesFromEdit.length > 0 ? `\nCreated ${newNodesFromEdit.length} new node(s): ${newNodeLabels}` : ''}${edgeCount > 0 ? `\nCreated ${edgeCount} edge(s)` : ''}`,
+                  type: 'info',
+                  nodeRefs: [...nodeIdsToEdit, ...newNodesFromEdit.map(n => n.id)],
+                }
+              }
+              return updated
+            })
+            
+          } else {
+            // Handle create-node-ai: create new nodes
+            if (!aiResponse.nodes || !Array.isArray(aiResponse.nodes)) {
+              throw new Error('Invalid AI response: missing nodes array')
+            }
+            
+            if (!aiResponse.edges || !Array.isArray(aiResponse.edges)) {
+              aiResponse.edges = []
+            }
+
+            // Process new nodes with label deduplication
+            const processedNodes: Array<{
+              originalLabel: string
+              finalLabel: string
+              category: string
+              content: string
+            }> = []
+            
+            aiResponse.nodes.forEach((node: any) => {
+              let finalLabel = node.label || 'Unnamed Node'
+              let suffix = 2
+              
+              // Handle label deduplication
+              while (usedLabels.has(finalLabel)) {
+                finalLabel = `${node.label}_${suffix}`
+                suffix++
+              }
+              
+              usedLabels.add(finalLabel)
+              processedNodes.push({
+                originalLabel: node.label || finalLabel,
+                finalLabel,
+                category: node.category || args.category || 'Uncategorized',
+                content: node.content || '',
+              })
+            })
+
+            // Generate IDs and build labelToIdMap, then create nodes with calculated positions
+            const newNodeIds = new Set<string>()
+            const newNodes: WorldLabNode[] = []
+            
+            // First pass: generate IDs and add to labelToIdMap
+            processedNodes.forEach(node => {
+              const nodeId = `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+              newNodeIds.add(nodeId)
+              labelToIdMap.set(node.finalLabel, nodeId)
+            })
+            
+            // Second pass: create nodes with calculated positions
+            processedNodes.forEach((node) => {
+              const nodeId = labelToIdMap.get(node.finalLabel)!
+              const position = calculateInitialPosition(
+                nodeId,
+                node.finalLabel,
+                aiResponse.edges,
+                existingNodes,
+                labelToIdMap,
+                newNodeIds
+              )
+              
+              newNodes.push({
+                id: nodeId,
+                label: node.finalLabel,
+                category: node.category,
+                position,
+                data: {
+                  label: node.finalLabel,
+                  category: node.category,
+                  content: node.content,
+                },
+              })
+            })
+
+            // Save current state to history before applying changes
+            onBeforeOperation?.()
+
+            // Add log: saving files
+            if (newNodes.length > 0) {
+              addOutputLine({
+                id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                type: 'info',
+                content: `[AI] Saving ${newNodes.length} node file(s)...`,
+                timestamp: new Date().toISOString(),
+              })
+            }
+
+            // Create node files in the backend before updating state
+            try {
+              for (const node of newNodes) {
+                const nodeContent = node.data?.content || ''
+                await worldLabApi.createNode(labName, node.id, nodeContent)
+              }
+            } catch (error) {
+              console.error('[WorldLabTerminal] Error creating node files:', error)
+              addOutputLine({
+                id: `err_${Date.now()}`,
+                type: 'error',
+                content: `Error creating node files: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                timestamp: new Date().toISOString(),
+              })
+            }
+
+            // Update nodes first
+            const updatedNodes = [...existingNodes, ...newNodes]
+            if (onNodesChange) {
+              onNodesChange(updatedNodes)
+            }
+
+            // Create edges (convert labels to IDs using labelToIdMap)
+            const newEdges: WorldLabEdge[] = []
+            aiResponse.edges.forEach((edge: any) => {
+              const fromId = labelToIdMap.get(edge.from)
+              const toId = labelToIdMap.get(edge.to)
+              
+              if (fromId && toId) {
+                // Check if edge already exists
+                const edgeExists = existingEdges.some(e => 
+                  e.source === fromId && e.target === toId
+                )
+                
+                if (!edgeExists) {
+                  const edgeId = `edge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+                  newEdges.push({
+                    id: edgeId,
+                    source: fromId,
+                    target: toId,
+                    label: edge.label || undefined,
+                    type: edge.directional ? 'smoothstep' : 'default',
+                  })
+                }
+              }
+            })
+
+            // Update edges
+            const updatedEdges = [...existingEdges, ...newEdges]
+            if (onEdgesChange) {
+              onEdgesChange(updatedEdges)
+            }
+
+            // Explicitly save node positions and metadata for newly created nodes
+            // This ensures positions are persisted even if Canvas hasn't synced yet
+            try {
+              const nodePositions: Record<string, { x: number; y: number }> = {}
+              const nodeMetadata: Record<string, { label?: string; category?: string; elementName?: string }> = {}
+              
+              updatedNodes.forEach(node => {
+                nodePositions[node.id] = node.position
+                nodeMetadata[node.id] = {
+                  label: node.label,
+                  category: node.category,
+                  elementName: node.elementName,
+                }
+              })
+              
+              // Save edges with all node positions and metadata (including new nodes)
+              await worldLabApi.saveEdges(labName, updatedEdges, nodePositions, nodeMetadata)
+            } catch (error) {
+              console.error('[WorldLabTerminal] Error saving node positions:', error)
+              // Don't show error to user as this is a background operation
+            }
+
+            // Add log: operation complete
+            addOutputLine({
+              id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              type: 'info',
+              content: '[AI] Operation completed successfully',
+              timestamp: new Date().toISOString(),
+            })
+
+            // Update output line with success message
+            const nodeLabels = newNodes.map(n => n.label).join(', ')
+            const edgeCount = newEdges.length
+            setOutputLines(prev => {
+              const updated = [...prev]
+              const lineIndex = updated.findIndex(l => l.id === currentAILineIdRef.current)
+              if (lineIndex !== -1) {
+                updated[lineIndex] = {
+                  ...updated[lineIndex],
+                  content: `Created ${newNodes.length} node(s): ${nodeLabels}${edgeCount > 0 ? `\nCreated ${edgeCount} edge(s)` : ''}`,
+                  type: 'info',
+                  nodeRefs: newNodes.map(n => n.id),
+                }
+              }
+              return updated
+            })
+          }
+          
+        } catch (parseError: any) {
+          // Update output line with error
+          setOutputLines(prev => {
+            const updated = [...prev]
+            const lineIndex = updated.findIndex(l => l.id === currentAILineIdRef.current)
+            if (lineIndex !== -1) {
+              updated[lineIndex] = {
+                ...updated[lineIndex],
+                content: `Error parsing AI response: ${parseError.message}\nRaw response: ${currentAIOutputRef.current.substring(0, 200)}...`,
+                type: 'error',
+              }
+            }
+            return updated
+          })
+        }
+      }
+      
+      // Update conversation history with assistant response
+      // For create-node-ai and edit-node-ai, use a summary of what was done
+      // For natural-language, use the cleaned response
+      let assistantContent = cleanMarkdownForTerminal(currentAIOutputRef.current.trim())
+      if (command === 'create-node-ai' || command === 'edit-node-ai') {
+        // For structured commands, create a summary instead of raw JSON
+        try {
+          const fullResponse = currentAIOutputRef.current.trim()
+          const jsonMatch = fullResponse.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            const aiResponse = JSON.parse(jsonMatch[0])
+            if (command === 'create-node-ai' && aiResponse.nodes) {
+              const nodeLabels = Array.isArray(aiResponse.nodes) 
+                ? aiResponse.nodes.map((n: any) => n.label || 'Unnamed').join(', ')
+                : ''
+              const edgeCount = Array.isArray(aiResponse.edges) ? aiResponse.edges.length : 0
+              assistantContent = `Created ${aiResponse.nodes.length} node(s): ${nodeLabels}${edgeCount > 0 ? `, ${edgeCount} edge(s)` : ''}`
+            } else if (command === 'edit-node-ai') {
+              assistantContent = `Updated node and ${aiResponse.newNodes?.length || 0} new node(s), ${aiResponse.edges?.length || 0} edge(s)`
+            }
+          }
+        } catch (e) {
+          // Fallback to raw content if parsing fails
+          assistantContent = currentAIOutputRef.current.trim()
+        }
+      }
+      
+      const assistantMessage: AIChatMessage = {
+        id: `msg_${Date.now()}_assistant`,
+        role: 'assistant',
+        content: assistantContent,
+        timestamp: new Date().toISOString(),
+      }
+      
+      // Update conversation history: add user message and assistant response
+      const updatedHistory = trimConversationHistory([...updatedHistoryWithUser, assistantMessage])
+      setConversationHistory(updatedHistory)
+      saveConversationHistory(labName, activeTerminalId, updatedHistory)
+      
     } catch (error: any) {
       const errorLine: TerminalLine = {
         id: `err_${Date.now()}`,
@@ -1554,8 +2105,49 @@ IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no
       streamReaderRef.current = null
       currentAILineIdRef.current = null
       currentAIOutputRef.current = ''
+      setHasStartedStreaming(false) // Reset streaming state
     }
-  }, [worldLabData, buildWorldLabContext, addOutputLine, scrollToBottom, projectId, labName, selectedModel, cleanMarkdownForTerminal])
+  }, [worldLabData, buildWorldLabContext, addOutputLine, scrollToBottom, projectId, labName, selectedModel, cleanMarkdownForTerminal, calculateInitialPosition, onBeforeOperation, onNodesChange, onEdgesChange, conversationHistory, activeTerminalId])
+
+  // 处理粘贴事件 - 移除格式，只保留纯文本
+  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    
+    // 获取剪贴板中的纯文本
+    const text = e.clipboardData.getData('text/plain')
+    
+    if (!text || !inputRef.current) return
+    
+    // 获取当前选择范围
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0) return
+    
+    const range = selection.getRangeAt(0)
+    
+    // 删除选中的内容（如果有）
+    range.deleteContents()
+    
+    // 插入纯文本
+    const textNode = document.createTextNode(text)
+    range.insertNode(textNode)
+    
+    // 移动光标到插入文本的末尾
+    range.setStartAfter(textNode)
+    range.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    
+    // 更新输入状态
+    const newText = inputRef.current.textContent || ''
+    setCurrentInput(newText)
+    
+    // 滚动到底部
+    setTimeout(() => {
+      if (terminalRef.current) {
+        terminalRef.current.scrollTop = terminalRef.current.scrollHeight
+      }
+    }, 0)
+  }, [])
 
   // 处理输入提交
   const handleSubmit = useCallback(async (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -2195,7 +2787,7 @@ IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no
           overflowX: 'hidden',
           padding: '16px',
           paddingTop: '8px',
-          paddingBottom: '60px',
+          paddingBottom: '80px',
           position: 'relative',
         }}
       >
@@ -2291,6 +2883,7 @@ IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no
                 contentEditable
                 suppressContentEditableWarning
                 onKeyDown={handleSubmit}
+                onPaste={handlePaste}
                 onInput={(e) => {
                   const text = e.currentTarget.textContent || ''
                   setCurrentInput(text)
@@ -2312,7 +2905,7 @@ IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no
               />
             </div>
           )}
-          {isProcessing && (
+          {isProcessing && !hasStartedStreaming && (
             <div
               style={{
                 display: 'flex',

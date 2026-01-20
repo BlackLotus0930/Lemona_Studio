@@ -43,6 +43,7 @@ interface WorldLabCanvasProps {
   onUndoRedoReady?: (handlers: { undo: () => void; redo: () => void; canUndo: () => boolean; canRedo: () => boolean }) => void
   nodeDocumentContent?: string // Content for the node document editor
   onNodeDocumentSave?: (nodeId: string, content: string) => void // Callback to save node document
+  onBeforeExternalChange?: () => void // Called before external changes (from Terminal) are applied
 }
 
 // Enhanced category color palette with gradients
@@ -168,7 +169,7 @@ function getCategoryColor(category: string, theme: 'dark' | 'light'): {
         badgeBg: 'rgba(123, 31, 162, 0.1)',
       },
     },
-    Question: {
+    Time: {
       dark: {
         primary: '#66D9EF',
         secondary: '#4DD0E1',
@@ -216,7 +217,7 @@ function getCategoryColor(category: string, theme: 'dark' | 'light'): {
 }
 
 // Category list (Uncategorized is not shown in dropdown, only used as default for new nodes)
-const CATEGORIES = ['Character', 'Concept', 'Event', 'Place', 'Question']
+const CATEGORIES = ['Character', 'Concept', 'Event', 'Place', 'Time']
 
 // Beautiful custom node component representing "existences in the world"
 // Helper function to extract preview text from content (markdown or TipTap JSON)
@@ -935,6 +936,7 @@ function WorldLabCanvasInner({
   onUndoRedoReady,
   nodeDocumentContent,
   onNodeDocumentSave,
+  onBeforeExternalChange,
 }: WorldLabCanvasProps) {
   const { theme } = useTheme()
   const [nodes, setNodes, onNodesChangeInner] = useNodesState(
@@ -970,7 +972,8 @@ function WorldLabCanvasInner({
     })
   )
   const [renamingNodeId, setRenamingNodeId] = useState<string | null>(null)
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveNodesTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveEdgesTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null)
   const viewportSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const savedViewportRef = useRef<{ x: number; y: number; zoom: number } | null>(null)
@@ -1191,6 +1194,12 @@ function WorldLabCanvasInner({
       }
     }
   }, [floatingEditor])
+
+  // Copy/paste clipboard state
+  const clipboardRef = useRef<{
+    nodes: WorldLabNode[]
+    edges: WorldLabEdge[]
+  } | null>(null)
 
   // Undo/Redo state
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -1571,10 +1580,10 @@ function WorldLabCanvasInner({
   // Save nodes with debounce - persists to backend
   const saveNodes = useCallback(
     (nodesToSave: Node[]) => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current)
+      if (saveNodesTimeoutRef.current) {
+        clearTimeout(saveNodesTimeoutRef.current)
       }
-      saveTimeoutRef.current = setTimeout(async () => {
+      saveNodesTimeoutRef.current = setTimeout(async () => {
         const worldLabNodes = convertToWorldLabNodes(nodesToSave)
         
         // Update local state first for immediate UI feedback
@@ -1597,10 +1606,10 @@ function WorldLabCanvasInner({
   // FIXED: Now accepts nodes parameter to avoid closure stale state issue
   const saveEdges = useCallback(
     (edgesToSave: Edge[], nodesToSave?: Node[]) => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current)
+      if (saveEdgesTimeoutRef.current) {
+        clearTimeout(saveEdgesTimeoutRef.current)
       }
-      saveTimeoutRef.current = setTimeout(async () => {
+      saveEdgesTimeoutRef.current = setTimeout(async () => {
         const worldLabEdges = convertToWorldLabEdges(edgesToSave)
         
         // Use the nodes that were passed in (or current state if not provided)
@@ -1660,9 +1669,13 @@ function WorldLabCanvasInner({
   useEffect(() => {
     return () => {
       // Flush any pending saves before unmounting
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current)
-        saveTimeoutRef.current = null
+      if (saveNodesTimeoutRef.current) {
+        clearTimeout(saveNodesTimeoutRef.current)
+        saveNodesTimeoutRef.current = null
+      }
+      if (saveEdgesTimeoutRef.current) {
+        clearTimeout(saveEdgesTimeoutRef.current)
+        saveEdgesTimeoutRef.current = null
       }
       
       // Get current nodes from ref (always has latest values)
@@ -1687,7 +1700,7 @@ function WorldLabCanvasInner({
 
   // Add to history for undo/redo (MUST be defined before other handlers use it)
   const addToHistory = useCallback(
-    (newNodes: Node[], newEdges: Edge[]) => {
+    (newNodes: Node[], newEdges: Edge[], options?: { force?: boolean }) => {
       if (isUndoingRef.current) {
         return
       }
@@ -1714,8 +1727,9 @@ function WorldLabCanvasInner({
       })
       const nodesEqual = JSON.stringify(currentNodesWithoutSelection) === JSON.stringify(newNodesWithoutSelection)
       
+      const shouldForce = options?.force === true
       // If only selection changed, don't add to history
-      if (edgesEqual && nodesEqual) {
+      if (!shouldForce && edgesEqual && nodesEqual) {
         return
       }
 
@@ -2507,6 +2521,178 @@ function WorldLabCanvasInner({
         redo()
         return
       }
+      // Copy: Ctrl/Cmd + C
+      if (ctrlOrCmd && (e.key === 'c' || e.key === 'C')) {
+        // Get selected nodes
+        let selectedNodes: Node[] = []
+        if (reactFlowInstance.current) {
+          const currentNodes = reactFlowInstance.current.getNodes()
+          selectedNodes = currentNodes.filter((n: any) => n.selected)
+        } else {
+          selectedNodes = nodes.filter((n: any) => n.selected)
+        }
+        
+        if (selectedNodes.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          
+          // Get selected node IDs
+          const selectedNodeIds = new Set(selectedNodes.map((n: any) => n.id))
+          
+          // Get edges that connect selected nodes (both source and target must be selected)
+          const selectedEdges = edges.filter((edge: any) => 
+            selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target)
+          )
+          
+          // Convert to WorldLabNode format and load node content
+          Promise.all(
+            selectedNodes.map(async (node: any) => {
+              try {
+                const content = await worldLabApi.loadNodeContent(labName, node.id) || ''
+                return {
+                  id: node.id,
+                  label: node.data?.label || '',
+                  category: node.data?.category,
+                  elementName: node.data?.elementName,
+                  position: node.position,
+                  data: {
+                    ...node.data,
+                    content: content,
+                  },
+                } as WorldLabNode
+              } catch (error) {
+                console.error(`Failed to load content for node ${node.id}:`, error)
+                return {
+                  id: node.id,
+                  label: node.data?.label || '',
+                  category: node.data?.category,
+                  elementName: node.data?.elementName,
+                  position: node.position,
+                  data: {
+                    ...node.data,
+                    content: '',
+                  },
+                } as WorldLabNode
+              }
+            })
+          ).then((worldLabNodes) => {
+            // Convert edges to WorldLabEdge format
+            const worldLabEdges: WorldLabEdge[] = selectedEdges.map((edge: any) => ({
+              id: edge.id,
+              source: edge.source,
+              target: edge.target,
+              type: edge.type,
+              label: edge.label,
+              animated: edge.animated,
+              style: edge.style,
+              sourceHandle: edge.sourceHandle,
+              targetHandle: edge.targetHandle,
+              data: edge.data,
+            }))
+            
+            // Store in clipboard
+            clipboardRef.current = {
+              nodes: worldLabNodes,
+              edges: worldLabEdges,
+            }
+          })
+        }
+        return
+      }
+      // Paste: Ctrl/Cmd + V
+      if (ctrlOrCmd && (e.key === 'v' || e.key === 'V')) {
+        if (clipboardRef.current && clipboardRef.current.nodes.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          
+          // Notify before operation (for undo/redo)
+          if (onBeforeExternalChange) {
+            onBeforeExternalChange()
+          }
+          
+          // Calculate offset to paste nodes slightly offset from original position
+          const offsetX = 50
+          const offsetY = 50
+          
+          // Create ID mapping for new nodes
+          const nodeIdMap = new Map<string, string>()
+          clipboardRef.current.nodes.forEach((node) => {
+            const newNodeId = `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            nodeIdMap.set(node.id, newNodeId)
+          })
+          
+          // Create new nodes with new IDs and offset positions
+          const newNodes = clipboardRef.current.nodes.map((node) => {
+            const newNodeId = nodeIdMap.get(node.id)!
+            return {
+              id: newNodeId,
+              type: 'custom' as const,
+              position: {
+                x: node.position.x + offsetX,
+                y: node.position.y + offsetY,
+              },
+              selected: false,
+              data: {
+                label: node.label,
+                category: node.category,
+                elementName: node.elementName,
+                ...node.data,
+              },
+            }
+          })
+          
+          // Create new edges with new node IDs
+          const newEdges = clipboardRef.current.edges.map((edge) => {
+            const newSourceId = nodeIdMap.get(edge.source)!
+            const newTargetId = nodeIdMap.get(edge.target)!
+            return {
+              id: `edge_${newSourceId}_${newTargetId}_${Date.now()}`,
+              source: newSourceId,
+              target: newTargetId,
+              type: (edge.type || 'smoothstep') as string,
+              label: edge.label,
+              animated: edge.animated,
+              style: edge.style,
+              sourceHandle: edge.sourceHandle,
+              targetHandle: edge.targetHandle,
+              data: edge.data,
+            }
+          })
+          
+          // Add new nodes and edges to state
+          setNodes((nds) => {
+            const updatedNodes = [...nds, ...newNodes]
+            setEdges((eds) => {
+              const updatedEdges = [...eds, ...newEdges]
+              // Add to history after both nodes and edges are updated
+              addToHistory(updatedNodes as Node[], updatedEdges as Edge[])
+              // Save nodes and edges after state is updated
+              setTimeout(() => {
+                saveNodes(updatedNodes as Node[])
+                saveEdges(updatedEdges as Edge[], updatedNodes as Node[])
+              }, 0)
+              return updatedEdges
+            })
+            return updatedNodes
+          })
+          
+          // Create node files in backend
+          Promise.all(
+            clipboardRef.current.nodes.map(async (node) => {
+              const newNodeId = nodeIdMap.get(node.id)!
+              const content = node.data?.content || ''
+              try {
+                await worldLabApi.createNode(labName, newNodeId, content)
+              } catch (error) {
+                console.error(`Failed to create node file ${newNodeId}:`, error)
+              }
+            })
+          ).catch((error) => {
+            console.error('Failed to create node files during paste:', error)
+          })
+        }
+        return
+      }
       // Delete: Delete or Backspace
       else if (e.key === 'Delete' || e.key === 'Backspace') {
         // Check selection from our own state FIRST (in capture phase, before React Flow processes it)
@@ -2634,7 +2820,7 @@ function WorldLabCanvasInner({
       window.removeEventListener('keydown', handleKeyDown, true)
       window.removeEventListener('click', handleClick)
     }
-  }, [nodes, edges, undo, redo, setNodes, setEdges, addToHistory, saveNodes, saveEdges, contextMenu, renamingNodeId, editingNodeId, onCloseNodeEditor, labName])
+  }, [nodes, edges, undo, redo, setNodes, setEdges, addToHistory, saveNodes, saveEdges, contextMenu, renamingNodeId, editingNodeId, onCloseNodeEditor, labName, onBeforeExternalChange, convertToWorldLabNodes, convertToWorldLabEdges])
 
   // Record initial state in history (only once on mount)
   useEffect(() => {
@@ -2643,6 +2829,76 @@ function WorldLabCanvasInner({
       addToHistory(nodes, edges)
     }
   }, [nodes, edges, addToHistory]) // Initialize history when nodes are available
+
+  // Sync external changes (from Terminal) to internal state and save to history
+  const prevInitialNodesRef = useRef<WorldLabNode[]>(initialNodes)
+  const prevInitialEdgesRef = useRef<WorldLabEdge[]>(initialEdges)
+  
+  useEffect(() => {
+    // Check if external nodes/edges changed (from Terminal operations)
+    const nodesChanged = JSON.stringify(prevInitialNodesRef.current) !== JSON.stringify(initialNodes)
+    const edgesChanged = JSON.stringify(prevInitialEdgesRef.current) !== JSON.stringify(initialEdges)
+    
+    if (nodesChanged || edgesChanged) {
+      const internalNodes = convertToWorldLabNodes(nodes)
+      const internalEdges = convertToWorldLabEdges(edges)
+      const internalMatches =
+        JSON.stringify(internalNodes) === JSON.stringify(initialNodes) &&
+        JSON.stringify(internalEdges) === JSON.stringify(initialEdges)
+      
+      // Only apply when changes are truly external (Terminal)
+      if (!internalMatches) {
+        // Notify parent that external change is about to happen (for Terminal to save state)
+        if (onBeforeExternalChange) {
+          onBeforeExternalChange()
+        }
+        
+        // Ensure history is initialized and save current internal state before applying external changes
+        if (!historyInitializedRef.current) {
+          historyInitializedRef.current = true
+        }
+        addToHistory(nodes, edges, { force: true })
+        
+        // Convert external WorldLab nodes/edges to ReactFlow format and update internal state
+        const reactFlowNodes = initialNodes.map((node) => ({
+          id: node.id,
+          type: 'custom' as const,
+          position: node.position,
+          data: {
+            label: node.label,
+            category: node.category,
+            elementName: node.elementName,
+            ...node.data,
+          },
+        }))
+        
+        const reactFlowEdges = initialEdges.map((edge) => {
+          const edgeData = (edge as any).data || {}
+          const sourceHandle = edge.sourceHandle ?? edgeData.sourceHandle
+          const targetHandle = edge.targetHandle ?? edgeData.targetHandle
+          return {
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            type: edge.type || 'smoothstep',
+            label: edge.label,
+            animated: edge.animated,
+            style: edge.style,
+            data: edgeData,
+            sourceHandle: sourceHandle?.replace(/-target$/, '-source'),
+            targetHandle: targetHandle?.replace(/-source$/, '-target'),
+          }
+        })
+        
+        setNodes(reactFlowNodes)
+        setEdges(reactFlowEdges)
+      }
+    }
+    
+    // Update refs
+    prevInitialNodesRef.current = initialNodes
+    prevInitialEdgesRef.current = initialEdges
+  }, [initialNodes, initialEdges, addToHistory, onBeforeExternalChange, nodes, edges, setNodes, setEdges, convertToWorldLabNodes, convertToWorldLabEdges])
 
   // Expose undo/redo handlers to parent component
   useEffect(() => {
@@ -4081,6 +4337,8 @@ function WorldLabCanvasInner({
                         { keys: ['Ctrl/Cmd', 'Z'], desc: 'Undo' },
                         { keys: ['Ctrl/Cmd', 'Shift', 'Z'], desc: 'Redo' },
                         { keys: ['Ctrl/Cmd', 'Y'], desc: 'Redo' },
+                        { keys: ['Ctrl/Cmd', 'C'], desc: 'Copy selected nodes and edges' },
+                        { keys: ['Ctrl/Cmd', 'V'], desc: 'Paste copied nodes and edges' },
                         { keys: ['Delete'], desc: 'Delete selected elements' },
                         { keys: ['Backspace'], desc: 'Delete selected elements' },
                       ].map((item, idx) => (

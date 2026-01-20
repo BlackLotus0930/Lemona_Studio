@@ -718,6 +718,14 @@ code {
   border-color: #141414 !important;
 }
 
+/* Force all PanelResizeHandle to use ew-resize cursor (override react-resizable-panels defaults) */
+[data-panel-resize-handle-id],
+[data-panel-resize-handle-id] *,
+[data-panel-group-direction="horizontal"] [data-panel-resize-handle-id],
+[data-panel-group-direction="horizontal"] [data-panel-resize-handle-id] * {
+  cursor: ew-resize !important;
+}
+
 .dark-theme .resizable-image-wrapper.selected > div[style*="border"] {
   border-color: #4fc3f7 !important;
 }

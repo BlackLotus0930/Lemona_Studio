@@ -673,4 +673,32 @@ export const worldLabService = {
       return []
     }
   },
+
+  /**
+   * Delete a Lab directory and all its contents
+   */
+  async deleteLab(labName: string): Promise<boolean> {
+    try {
+      const labPath = getLabPath(labName)
+      console.log(`[worldLabService] deleteLab called for lab: ${labName}, labPath: ${labPath}`)
+      
+      // Check if directory exists
+      try {
+        await fs.access(labPath)
+      } catch {
+        // Directory doesn't exist, consider it already deleted
+        console.log(`[worldLabService] deleteLab - Lab directory does not exist: ${labPath}`)
+        return true
+      }
+      
+      // Delete the entire directory recursively
+      await fs.rm(labPath, { recursive: true, force: true })
+      console.log(`[worldLabService] deleteLab - Successfully deleted Lab directory: ${labPath}`)
+      
+      return true
+    } catch (error) {
+      console.error(`[worldLabService] Error deleting Lab ${labName}:`, error)
+      return false
+    }
+  },
 }

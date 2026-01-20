@@ -1266,5 +1266,14 @@ Rephrased text:`
     }
   })
 
+  ipcMain.handle('worldlab:deleteLab', async (_, labName: string) => {
+    try {
+      return await worldLabService.deleteLab(labName)
+    } catch (error) {
+      console.error('IPC worldlab:deleteLab error:', error)
+      throw error
+    }
+  })
+
 }
 

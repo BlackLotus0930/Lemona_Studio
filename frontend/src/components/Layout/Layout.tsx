@@ -369,6 +369,8 @@ export default function Layout(): JSX.Element {
   const [showCommitSuccessNotification, setShowCommitSuccessNotification] = useState<{ fileCount: number } | null>(null) // Track commit success notification
   const [restoredCommitParentId, setRestoredCommitParentId] = useState<string | null>(null) // Track restored commit ID for branch creation
   const [indexingCompletionNotifications, setIndexingCompletionNotifications] = useState<Map<string, { fileName: string; completedAt: number }>>(new Map()) // Track indexing completion notifications
+  const [isSeparatorHovered, setIsSeparatorHovered] = useState(false) // Track AI panel separator hover state
+  const [isFileExplorerSeparatorHovered, setIsFileExplorerSeparatorHovered] = useState(false) // Track file explorer separator hover state
   // WorldLab state
   const [isWorldLabMode, setIsWorldLabMode] = useState(false) // Track if current document is a WorldLab
   const [worldLabData, setWorldLabData] = useState<WorldLab | null>(null) // WorldLab data
@@ -2557,6 +2559,7 @@ export default function Layout(): JSX.Element {
         // Calculate order based on documents in the same folder
         const folderDocs = documents.filter(doc => 
           (folder === 'library' && doc.folder === 'library') ||
+          (folder === 'worldlab' && doc.folder === 'worldlab') ||
           (folder === 'project' && (!doc.folder || doc.folder === 'project'))
         )
         // Find the maximum order in the folder, or use folderDocs.length as fallback
@@ -6166,17 +6169,48 @@ export default function Layout(): JSX.Element {
           </div>
         </Panel>
         
-        <PanelResizeHandle 
-          id="file-explorer-resize-handle"
-          style={{ 
-            width: 0,
-            borderLeft: `1px solid ${borderColor}`,
-            cursor: 'col-resize',
-            transition: 'border-color 0.2s',
-            flexShrink: 0,
-            boxSizing: 'border-box'
-          }} 
-        />
+        <div
+          style={{
+            position: 'relative',
+            width: '8px',
+            marginLeft: '-4px',
+            marginRight: '-4px',
+            cursor: 'ew-resize',
+            display: 'flex',
+            alignItems: 'stretch',
+            justifyContent: 'center',
+            zIndex: 10
+          }}
+          onMouseEnter={() => setIsFileExplorerSeparatorHovered(true)}
+          onMouseLeave={() => setIsFileExplorerSeparatorHovered(false)}
+        >
+          <div
+            style={{
+              width: '1px',
+              borderLeft: `1px solid ${isFileExplorerSeparatorHovered ? (theme === 'dark' ? '#4a4a4a' : '#c0c0c0') : borderColor}`,
+              backgroundColor: isFileExplorerSeparatorHovered ? (theme === 'dark' ? 'rgba(74, 74, 74, 0.3)' : 'rgba(192, 192, 192, 0.2)') : 'transparent',
+              transition: 'all 0.2s ease',
+              boxSizing: 'border-box',
+              alignSelf: 'stretch',
+              cursor: 'ew-resize',
+              pointerEvents: 'none'
+            }}
+          />
+          <PanelResizeHandle 
+            id="file-explorer-resize-handle"
+            style={{ 
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: '100%',
+              cursor: 'ew-resize',
+              border: 'none',
+              backgroundColor: 'transparent'
+            }} 
+          />
+        </div>
         
         {/* Editor Panel */}
         <Panel 
@@ -6201,15 +6235,19 @@ export default function Layout(): JSX.Element {
               onNodeDoubleClick={handleNodeDoubleClick}
               onNodeClick={handleNodeSingleClick}
               onNodesChange={(nodes) => {
-                setWorldLabData({ ...worldLabData, nodes })
+                setWorldLabData(prev => (prev ? { ...prev, nodes } : prev))
               }}
               onEdgesChange={(edges) => {
-                setWorldLabData({ ...worldLabData, edges })
+                setWorldLabData(prev => (prev ? { ...prev, edges } : prev))
               }}
               onCloseNodeEditor={handleCloseNodeEditor}
               onUndoRedoReady={setWorldLabUndoRedo}
               nodeDocumentContent={nodeDocumentContent || undefined}
               onNodeDocumentSave={handleNodeDocumentSave}
+              onBeforeExternalChange={() => {
+                // Called by Canvas when external changes (from Terminal) are detected
+                // Canvas will automatically save current state to history before applying changes
+              }}
             />
           ) : (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -6279,13 +6317,48 @@ export default function Layout(): JSX.Element {
         </Panel>
         {isAIPanelOpen && (
           <>
-            <PanelResizeHandle style={{ 
-              width: 0,
-              borderRight: `1px solid ${borderColor}`,
-              cursor: 'col-resize',
-              transition: 'border-color 0.2s',
-              boxSizing: 'border-box'
-            }} />
+            <div
+              style={{
+                position: 'relative',
+                width: '8px',
+                marginLeft: '-4px',
+                marginRight: '-4px',
+                cursor: 'ew-resize',
+                display: 'flex',
+                alignItems: 'stretch',
+                justifyContent: 'center',
+                zIndex: 10
+              }}
+              onMouseEnter={() => setIsSeparatorHovered(true)}
+              onMouseLeave={() => setIsSeparatorHovered(false)}
+            >
+              <div
+                style={{
+                  width: '1px',
+                  borderRight: `1px solid ${isSeparatorHovered ? (theme === 'dark' ? '#4a4a4a' : '#c0c0c0') : borderColor}`,
+                  backgroundColor: isSeparatorHovered ? (theme === 'dark' ? 'rgba(74, 74, 74, 0.3)' : 'rgba(192, 192, 192, 0.2)') : 'transparent',
+                  transition: 'all 0.2s ease',
+                  boxSizing: 'border-box',
+                  alignSelf: 'stretch',
+                  cursor: 'ew-resize',
+                  pointerEvents: 'none'
+                }}
+              />
+              <PanelResizeHandle 
+                style={{ 
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: '100%',
+                  cursor: 'ew-resize',
+                  border: 'none',
+                  backgroundColor: 'transparent',
+                  pointerEvents: 'auto'
+                }} 
+              />
+            </div>
             <Panel 
               id="ai-panel"
               order={3}
@@ -6296,18 +6369,25 @@ export default function Layout(): JSX.Element {
             >
               {isWorldLabMode && worldLabData ? (
                 <WorldLabTerminal
+                  key={worldLabData.labName}
                   labName={worldLabData.labName}
                   worldLabData={worldLabData}
                   selectedNodeId={selectedNodeId}
                   onNodeSelect={handleTerminalNodeSelect}
                   onNodesChange={(nodes) => {
-                    setWorldLabData({ ...worldLabData, nodes })
+                    setWorldLabData(prev => (prev ? { ...prev, nodes } : prev))
                   }}
                   onEdgesChange={(edges) => {
-                    setWorldLabData({ ...worldLabData, edges })
+                    setWorldLabData(prev => (prev ? { ...prev, edges } : prev))
                   }}
                   projectId={document?.projectId}
                   onClose={handleAIPanelClose}
+                  onBeforeOperation={() => {
+                    // Called before Terminal operations that modify nodes/edges
+                    // Canvas will automatically detect the change via useEffect and save history
+                    // before applying the external changes
+                  }}
+                  undoRedoHandlers={worldLabUndoRedo}
                 />
               ) : (
                 <AIPanel document={document} onClose={handleAIPanelClose} />
@@ -6590,4 +6670,5 @@ export default function Layout(): JSX.Element {
     </>
   )
 }
+
 

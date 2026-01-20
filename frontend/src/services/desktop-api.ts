@@ -90,9 +90,28 @@ export const aiApi = {
     const openaiApiKey = openaiApiKeyOverride !== undefined ? openaiApiKeyOverride : getOpenaiApiKey()
 
     // Create a ReadableStream that reads from IPC events
+    // Store cleanup functions outside so they can be accessed by cancel
+    let cleanupFns: Array<() => void> = []
+    let isStreamClosed = false
+    
     const stream = new ReadableStream({
       async start(controller) {
-        let isStreamClosed = false
+        let cleanupCalled = false
+        
+        const cleanup = () => {
+          if (cleanupCalled) return
+          cleanupCalled = true
+          
+          // Call all cleanup functions returned by on()
+          cleanupFns.forEach(fn => {
+            try {
+              fn()
+            } catch (error) {
+              console.warn('[Desktop API] Error during cleanup:', error)
+            }
+          })
+          cleanupFns = []
+        }
         
         try {
           // Start stream and get streamId
@@ -136,15 +155,17 @@ export const aiApi = {
             }
           }
           
-          const cleanup = () => {
-            window.electron!.removeListener('ai:streamChunk', onChunk)
-            window.electron!.removeListener('ai:streamEnd', onEnd)
-            window.electron!.removeListener('ai:streamError', onError)
-          }
+          // Store cleanup functions returned by on() - these properly remove the listeners
+          const cleanupChunk = window.electron!.on('ai:streamChunk', onChunk)
+          const cleanupEnd = window.electron!.on('ai:streamEnd', onEnd)
+          const cleanupError = window.electron!.on('ai:streamError', onError)
           
-          window.electron!.on('ai:streamChunk', onChunk)
-          window.electron!.on('ai:streamEnd', onEnd)
-          window.electron!.on('ai:streamError', onError)
+          cleanupFns = [cleanupChunk, cleanupEnd, cleanupError]
+          
+          // If stream was cancelled before listeners were registered, clean them up now
+          if (isStreamClosed) {
+            cleanup()
+          }
         } catch (error) {
           if (!isStreamClosed) {
             isStreamClosed = true
@@ -154,7 +175,20 @@ export const aiApi = {
               console.warn('[Desktop API] Failed to error stream on init:', err)
             }
           }
+          cleanup()
         }
+      },
+      cancel() {
+        // Clean up listeners when stream is cancelled
+        isStreamClosed = true
+        cleanupFns.forEach(fn => {
+          try {
+            fn()
+          } catch (error) {
+            console.warn('[Desktop API] Error during cancel cleanup:', error)
+          }
+        })
+        cleanupFns = []
       }
     })
 
@@ -306,5 +340,7 @@ export const worldLabApi = {
     invokeOrFetch('worldlab:labExists', labName),
   getAllLabNames: (): Promise<string[]> =>
     invokeOrFetch('worldlab:getAllLabNames'),
+  deleteLab: (labName: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:deleteLab', labName),
 }
 
