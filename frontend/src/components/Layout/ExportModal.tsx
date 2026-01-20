@@ -91,12 +91,12 @@ export default function ExportModal({
     if (showFileDropdown) {
       // Use a small delay to avoid closing immediately when opening
       const timeoutId = setTimeout(() => {
-        document.addEventListener('mousedown', handleClickOutsideDropdown)
-      }, 100)
+        document.addEventListener('mousedown', handleClickOutsideDropdown, true)
+      }, 50)
       
       return () => {
         clearTimeout(timeoutId)
-        document.removeEventListener('mousedown', handleClickOutsideDropdown)
+        document.removeEventListener('mousedown', handleClickOutsideDropdown, true)
       }
     }
   }, [showFileDropdown])
@@ -203,7 +203,7 @@ export default function ExportModal({
         maxHeight: '600px',
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden',
+        overflow: showFileDropdown ? 'visible' : 'hidden',
         backdropFilter: 'blur(20px)',
         transition: 'opacity 0.2s ease, transform 0.2s ease'
       }}
@@ -349,16 +349,23 @@ export default function ExportModal({
           </button>
 
           {/* Dropdown Menu */}
-          {showFileDropdown && workspaceDocuments.length > 0 && (() => {
-            const buttonRect = fileSelectButtonRef.current?.getBoundingClientRect()
-            return (
+          {showFileDropdown && workspaceDocuments.length > 0 && (
               <div
                 ref={fileDropdownRef}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
                 style={{
-                  position: 'fixed',
-                  top: buttonRect ? `${buttonRect.bottom + 8}px` : '100%',
-                  left: buttonRect ? `${buttonRect.left}px` : 0,
-                  width: buttonRect ? `${buttonRect.width}px` : '100%',
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  left: 0,
+                  right: 0,
+                  width: '100%',
                   backgroundColor: dropdownBg,
                   border: `1px solid ${dropdownBorder}`,
                   borderRadius: '8px',
@@ -471,22 +478,11 @@ export default function ExportModal({
                       }}>
                         {doc.title}
                       </span>
-                      {doc.order !== undefined && (
-                        <span style={{
-                          fontSize: '11px',
-                          color: theme === 'dark' ? '#858585' : '#5f6368',
-                          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                          opacity: 0.7
-                        }}>
-                          #{doc.order + 1}
-                        </span>
-                      )}
                     </div>
                   )
                 })}
               </div>
-            )
-          })()}
+          )}
         </div>
 
         {workspaceDocuments.length === 0 && (
