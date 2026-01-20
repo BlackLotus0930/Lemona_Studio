@@ -122,6 +122,62 @@ async function resolveFileMentions(
   return resolvedIds
 }
 
+const FILE_EXISTENCE_CACHE_TTL_MS = 60_000
+const fileExistenceCache = new Map<string, { exists: boolean; timestamp: number }>()
+
+/**
+ * Verify file existence and filter out results for non-existent or deleted files.
+ * Uses a short-lived cache to reduce repeated lookups.
+ * 
+ * @param results - Search results to filter
+ * @returns Filtered results containing only existing files
+ */
+async function filterByFileExistence(results: SearchResult[]): Promise<SearchResult[]> {
+  if (results.length === 0) {
+    return []
+  }
+
+  const now = Date.now()
+  const uniqueFileIds = [...new Set(results.map(r => r.chunk.fileId))]
+  const fileExistenceMap = new Map<string, boolean>()
+  const missingFileIds: string[] = []
+
+  for (const fileId of uniqueFileIds) {
+    const cached = fileExistenceCache.get(fileId)
+    if (cached && now - cached.timestamp <= FILE_EXISTENCE_CACHE_TTL_MS) {
+      fileExistenceMap.set(fileId, cached.exists)
+    } else {
+      missingFileIds.push(fileId)
+    }
+  }
+
+  if (missingFileIds.length > 0) {
+    await Promise.all(
+      missingFileIds.map(async (fileId) => {
+        try {
+          const doc = await documentService.getById(fileId)
+          const exists = doc !== null && doc.deleted !== true
+          fileExistenceMap.set(fileId, exists)
+          fileExistenceCache.set(fileId, { exists, timestamp: now })
+        } catch (error) {
+          fileExistenceMap.set(fileId, false)
+          fileExistenceCache.set(fileId, { exists: false, timestamp: now })
+        }
+      })
+    )
+  }
+
+  const filteredResults = results.filter(result => {
+    const exists = fileExistenceMap.get(result.chunk.fileId) ?? false
+    if (!exists) {
+      console.log(`[SemanticSearch] Filtering out result for non-existent file: ${result.chunk.fileId}`)
+    }
+    return exists
+  })
+
+  return filteredResults
+}
+
 /**
  * Format search results for AI context injection
  */
@@ -330,11 +386,14 @@ export async function searchLibraryWithMentions(
     k
   )
 
+  // Outer-layer existence validation for library-only searches
+  const filteredResults = await filterByFileExistence(results)
+
   // Format results for AI context
-  const formattedResults = formatSearchResults(results)
+  const formattedResults = formatSearchResults(filteredResults)
 
   return {
-    results,
+    results: filteredResults,
     mentions,
     formattedResults,
   }
@@ -644,7 +703,11 @@ export async function searchWorkspaceAndLibrary(
   // Diversify by file to avoid over-representing one document
   const diversified = diversifyByFile(rerankedResults, 2)
 
-  return diversified.slice(0, k)
+  // Filter by file existence - ensure all results are for existing, non-deleted files
+  // This is a final safety check even though searchLibrary/searchProjectFiles already filter
+  const finalResults = await filterByFileExistence(diversified.slice(0, k))
+
+  return finalResults
 }
 
 // Search configuration for library folder

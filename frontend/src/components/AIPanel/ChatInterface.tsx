@@ -137,6 +137,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [allDocuments, setAllDocuments] = useState<Document[]>([])
   const [isLibraryIndexed, setIsLibraryIndexed] = useState<boolean>(false)
   const [libraryFileIndexingStatuses, setLibraryFileIndexingStatuses] = useState<Map<string, IndexingStatus | null>>(new Map())
+  const [documentTitleCache, setDocumentTitleCache] = useState<Map<string, string>>(new Map()) // Cache for document titles
   const mentionStartIndexRef = useRef<number>(-1)
   const [showMentionDropdown, setShowMentionDropdown] = useState(false)
   const mentionDropdownRef = useRef<HTMLDivElement>(null)
@@ -2052,11 +2053,36 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                                     opacity: 0.8
                                   }}
                                 >
-                                  {data.fileIds.map((fileId: string) => {
+                                  {Array.from(new Set(data.fileIds)).map((fileId: string) => {
                                     const doc = allDocuments.find((d: Document) => d.id === fileId)
+                                    // Note: Backend already filters out non-existent files, so fileIds should only contain existing files.
+                                    // However, allDocuments may not be up-to-date (only loaded on specific triggers),
+                                    // so we asynchronously load missing documents for display.
+                                    if (!doc && !documentTitleCache.has(fileId)) {
+                                      // Load document asynchronously to get its title
+                                      documentApi.get(fileId).then((loadedDoc: Document | null) => {
+                                        if (loadedDoc) {
+                                          setDocumentTitleCache(prev => new Map(prev).set(fileId, loadedDoc.title))
+                                          // Also update allDocuments to avoid future lookups
+                                          setAllDocuments(prev => {
+                                            if (!prev.find(d => d.id === fileId)) {
+                                              return [...prev, loadedDoc]
+                                            }
+                                            return prev
+                                          })
+                                        }
+                                      }).catch((error) => {
+                                        // File should exist (backend filtered), but loading failed.
+                                        // This could be a network error or file was deleted after search.
+                                        // Don't cache a fallback - let it retry on next render if needed.
+                                        console.warn(`[ChatInterface] Failed to load document ${fileId}:`, error)
+                                      })
+                                    }
+                                    // Display title from allDocuments, cache, or fallback to fileId (should be rare)
+                                    const displayTitle = doc ? doc.title : (documentTitleCache.get(fileId) || fileId.substring(0, 8) + '...')
                                     return (
                                       <div key={fileId} style={{ marginTop: '2px' }}>
-                                        {doc ? doc.title : fileId.substring(0, 8) + '...'}
+                                        {displayTitle}
                                       </div>
                                     )
                                   })}

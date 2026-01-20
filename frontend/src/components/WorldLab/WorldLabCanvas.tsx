@@ -56,6 +56,20 @@ function getCategoryColor(category: string, theme: 'dark' | 'light'): {
   const categoryKey = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase()
   
   const colors: Record<string, { dark: any; light: any }> = {
+    Uncategorized: {
+      dark: {
+        primary: '#9E9E9E',
+        secondary: '#757575',
+        glow: 'rgba(158, 158, 158, 0.25)',
+        badgeBg: 'rgba(158, 158, 158, 0.12)',
+      },
+      light: {
+        primary: '#757575',
+        secondary: '#616161',
+        glow: 'rgba(117, 117, 117, 0.15)',
+        badgeBg: 'rgba(117, 117, 117, 0.08)',
+      },
+    },
     Character: {
       dark: {
         primary: '#5BA3FF',
@@ -201,7 +215,7 @@ function getCategoryColor(category: string, theme: 'dark' | 'light'): {
   return theme === 'dark' ? cat.dark : cat.light
 }
 
-// Category list
+// Category list (Uncategorized is not shown in dropdown, only used as default for new nodes)
 const CATEGORIES = ['Character', 'Concept', 'Event', 'Place', 'Question']
 
 // Beautiful custom node component representing "existences in the world"
@@ -322,8 +336,8 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
     return ''
   }, [data.content])
   
-  // Always use a category - default to 'Character' if none set
-  const nodeCategory = data.category || 'Character'
+  // Always use a category - default to 'Uncategorized' if none set
+  const nodeCategory = data.category || 'Uncategorized'
   const categoryColors = getCategoryColor(nodeCategory, theme)
 
   // Handle configuration - handles on all four sides for both source and target
@@ -397,6 +411,7 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
     const handleClickOutside = (event: MouseEvent) => {
       if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(event.target as HTMLElement)) {
         setIsCategoryDropdownOpen(false)
+        setIsHovered(false) // Clear hover state when dropdown closes
       }
     }
 
@@ -410,6 +425,9 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
         clearTimeout(timeoutId)
         document.removeEventListener('mousedown', handleClickOutside, true)
       }
+    } else {
+      // Clear hover state when dropdown closes (e.g., when clicking category button again)
+      setIsHovered(false)
     }
   }, [isCategoryDropdownOpen])
 
@@ -420,6 +438,7 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
 
   const handleCategorySelect = (category: string) => {
     setIsCategoryDropdownOpen(false)
+    setIsHovered(false) // Clear hover state when category is selected
     onCategoryChange(category)
   }
 
@@ -626,6 +645,8 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
         {isCategoryDropdownOpen && (
           <div
             onClick={(e) => e.stopPropagation()}
+            onMouseEnter={() => setIsHovered(false)} // Clear hover when mouse enters dropdown
+            onMouseLeave={() => setIsHovered(false)} // Ensure hover is cleared when mouse leaves dropdown
             style={{
               position: 'absolute',
               top: '0',
@@ -645,7 +666,7 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
           >
             {CATEGORIES.map((cat) => {
               const catColors = getCategoryColor(cat, theme)
-              const isSelected = (data.category || 'Character') === cat
+              const isSelected = (data.category || 'Uncategorized') === cat
               return (
                 <div
                   key={cat}
@@ -2157,6 +2178,7 @@ function WorldLabCanvasInner({
           if (node.id === nodeId) {
             return {
               ...node,
+              selected: false, // Deselect node after category change to hide connection handles
               data: {
                 ...node.data,
                 category: newCategory,
@@ -2238,7 +2260,7 @@ function WorldLabCanvasInner({
             selected: false, // Don't select the node to prevent auto-zoom
             data: {
               label: 'New Element',
-              category: undefined,
+              category: 'Uncategorized',
               elementName: undefined,
             },
           }

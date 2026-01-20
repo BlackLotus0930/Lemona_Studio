@@ -400,6 +400,7 @@ class VectorStore {
   private dimension: number = EMBEDDING_DIMENSION
   private isInitialized: boolean = false
   private saveLock: Promise<void> | null = null // Prevent concurrent saves
+  private metadataDirty: boolean = false // Mark metadata to be saved on next safe save
   private currentProjectId: string | undefined = undefined // Current project ID (pure semantic ID)
   private currentFolder: 'library' | 'project' = 'library' // Current folder type
   private indexFile: string = '' // Current index file path
@@ -566,6 +567,82 @@ class VectorStore {
   }
 
   /**
+   * Repair metadata inconsistencies by synchronizing idToLabel and labelToId
+   * Removes orphaned entries and ensures both maps are consistent
+   */
+  private repairMetadata(data: any): { repaired: boolean; data: any } {
+    try {
+      if (!data || typeof data !== 'object') {
+        return { repaired: false, data }
+      }
+
+      if (!Array.isArray(data.metadata) || 
+          !Array.isArray(data.idToLabel) || 
+          !Array.isArray(data.labelToId)) {
+        return { repaired: false, data }
+      }
+
+      const originalIdToLabelSize = data.idToLabel.length
+      const originalLabelToIdSize = data.labelToId.length
+      const originalMetadataSize = data.metadata.length
+
+      // Rebuild maps from metadata (metadata is the source of truth)
+      const rebuiltLabelToId = new Map<number, string>()
+      const rebuiltIdToLabel = new Map<string, number>()
+      const rebuiltMetadata: Array<[number, any]> = []
+      let duplicateLabels = 0
+      let duplicateIds = 0
+
+      for (const [label, metadata] of data.metadata as Array<[number, any]>) {
+        const chunkId = metadata?.id
+        if (typeof label !== 'number' || !chunkId) {
+          continue
+        }
+        if (rebuiltLabelToId.has(label)) {
+          duplicateLabels++
+          continue
+        }
+        if (rebuiltIdToLabel.has(chunkId)) {
+          duplicateIds++
+          continue
+        }
+        rebuiltLabelToId.set(label, chunkId)
+        rebuiltIdToLabel.set(chunkId, label)
+        rebuiltMetadata.push([label, metadata])
+      }
+
+      data.idToLabel = Array.from(rebuiltIdToLabel.entries())
+      data.labelToId = Array.from(rebuiltLabelToId.entries())
+      data.metadata = rebuiltMetadata
+
+      // Update nextLabel to be max(label) + 1 if needed
+      let maxLabel = -1
+      for (const label of rebuiltLabelToId.keys()) {
+        if (label > maxLabel) {
+          maxLabel = label
+        }
+      }
+      if (data.nextLabel <= maxLabel) {
+        data.nextLabel = maxLabel + 1
+      }
+
+      const removedIdToLabel = originalIdToLabelSize - data.idToLabel.length
+      const removedLabelToId = originalLabelToIdSize - data.labelToId.length
+      const removedMetadata = originalMetadataSize - data.metadata.length
+      const repaired = removedIdToLabel > 0 || removedLabelToId > 0 || removedMetadata > 0 || duplicateLabels > 0 || duplicateIds > 0
+
+      if (repaired) {
+        console.log(`[VectorStore] Repaired metadata: removed ${removedIdToLabel} idToLabel, ${removedLabelToId} labelToId, ${removedMetadata} metadata entries (duplicates: labels=${duplicateLabels}, ids=${duplicateIds})`)
+      }
+
+      return { repaired, data }
+    } catch (error) {
+      console.error('[VectorStore] Metadata repair error:', error)
+      return { repaired: false, data }
+    }
+  }
+
+  /**
    * Validate metadata integrity
    */
   private validateMetadata(data: any): boolean {
@@ -584,14 +661,29 @@ class VectorStore {
       
       // Validate consistency between maps
       if (data.idToLabel.length !== data.labelToId.length) {
-        console.warn('[VectorStore] Metadata inconsistency: idToLabel and labelToId have different lengths')
         return false
       }
       
+      // Check that idToLabel and labelToId are consistent (bidirectional)
+      const idToLabelMap = new Map<string, number>(data.idToLabel)
+      const labelToIdMap = new Map<number, string>(data.labelToId)
+      
+      for (const [chunkId, label] of idToLabelMap.entries()) {
+        if (!labelToIdMap.has(label) || labelToIdMap.get(label) !== chunkId) {
+          return false
+        }
+      }
+      
+      for (const [label, chunkId] of labelToIdMap.entries()) {
+        if (!idToLabelMap.has(chunkId) || idToLabelMap.get(chunkId) !== label) {
+          return false
+        }
+      }
+      
       // Check that metadata entries match labels
-      for (const [label, metadata] of data.metadata) {
-        if (!data.labelToId.some(([l, id]: [number, string]) => l === label && id === metadata.id)) {
-          console.warn(`[VectorStore] Metadata inconsistency: label ${label} not found in labelToId`)
+      const metadataMap = new Map<number, any>(data.metadata)
+      for (const [label, metadata] of metadataMap.entries()) {
+        if (!labelToIdMap.has(label) || labelToIdMap.get(label) !== metadata.id) {
           return false
         }
       }
@@ -604,7 +696,6 @@ class VectorStore {
             typeof config.M !== 'number' ||
             typeof config.efConstruction !== 'number' ||
             typeof config.maxElements !== 'number') {
-          console.warn('[VectorStore] Invalid hnswConfig in metadata')
           return false
         }
       }
@@ -736,9 +827,27 @@ class VectorStore {
         
         // Validate metadata integrity
         if (!this.validateMetadata(savedData)) {
-          console.warn('[VectorStore] Metadata validation failed, rebuilding index')
-          await this.rebuildIndexFromMetadata()
-          return
+          console.warn('[VectorStore] Metadata validation failed, attempting repair...')
+
+          // Try to repair metadata inconsistencies
+          const repairResult = this.repairMetadata(savedData)
+          if (repairResult.repaired) {
+            savedData = repairResult.data
+            // Validate again after repair
+            if (this.validateMetadata(savedData)) {
+              console.log('[VectorStore] Metadata repair successful, continuing with repaired metadata')
+              // Mark as dirty so it gets saved on the next safe save operation
+              this.metadataDirty = true
+            } else {
+              console.warn('[VectorStore] Metadata repair failed, rebuilding index')
+              await this.rebuildIndexFromMetadata()
+              return
+            }
+          } else {
+            console.warn('[VectorStore] Could not repair metadata, rebuilding index')
+            await this.rebuildIndexFromMetadata()
+            return
+          }
         }
       } catch (parseError: any) {
         console.error('[VectorStore] Failed to parse metadata file (corrupted):', parseError.message)
@@ -1089,6 +1198,9 @@ class VectorStore {
             console.error(`[VectorStore] ✗ Verification failed: saved count=${verifyCount}, expected=${currentCount}`)
             throw new Error(`Index verification failed: saved ${verifyCount} elements but expected ${currentCount}`)
           }
+
+          // Metadata and index are now consistent on disk
+          this.metadataDirty = false
           
         } catch (writeError: any) {
           console.error('[VectorStore] Failed to write or verify index:', writeError)
