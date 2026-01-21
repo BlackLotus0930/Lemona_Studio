@@ -155,11 +155,9 @@ function calculateWorkspaceWordCount(documents: Document[] | undefined): WordCou
     }
   }
 
-  // Filter workspace documents (exclude library and README.md)
+  // Filter workspace documents (exclude library)
   const workspaceDocs = documents.filter(
     doc => (!doc.folder || doc.folder === 'project') && 
-           doc.title !== 'README.md' && 
-           doc.title.toLowerCase() !== 'readme.md' &&
            !doc.title.toLowerCase().endsWith('.pdf') // Exclude PDFs
   )
 

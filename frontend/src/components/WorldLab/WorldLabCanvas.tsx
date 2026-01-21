@@ -33,6 +33,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 
 interface WorldLabCanvasProps {
   labName: string
+  projectId: string
   initialNodes: WorldLabNode[]
   initialEdges: WorldLabEdge[]
   onNodeDoubleClick?: (nodeId: string) => void
@@ -1017,6 +1018,7 @@ interface HistoryEntry {
 
 function WorldLabCanvasInner({
   labName,
+  projectId,
   initialNodes,
   initialEdges,
   onNodeDoubleClick,
@@ -1102,6 +1104,7 @@ function WorldLabCanvasInner({
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
   const [editorPosition, setEditorPosition] = useState<{ x: number; y: number } | null>(null)
   const editorRef = useRef<HTMLDivElement>(null)
+  const editorScrollRef = useRef<HTMLDivElement>(null)
   const canvasContainerRef = useRef<HTMLDivElement>(null)
   
   // Connection dragging state - track when user is dragging a connection
@@ -1265,6 +1268,27 @@ function WorldLabCanvasInner({
     }
   }, [floatingEditor, editingNodeId])
   
+  // Handle scrollbar visibility for editor
+  useEffect(() => {
+    const scrollContainer = editorScrollRef.current
+    if (!scrollContainer) return
+    
+    let scrollTimeout: ReturnType<typeof setTimeout>
+    const handleScroll = () => {
+      scrollContainer.classList.add('scrolling')
+      clearTimeout(scrollTimeout)
+      scrollTimeout = setTimeout(() => {
+        scrollContainer.classList.remove('scrolling')
+      }, 150)
+    }
+    
+    scrollContainer.addEventListener('scroll', handleScroll)
+    return () => {
+      scrollContainer.removeEventListener('scroll', handleScroll)
+      clearTimeout(scrollTimeout)
+    }
+  }, [editingNodeId])
+  
   // Save editor content when it changes
   useEffect(() => {
     if (!floatingEditor || !editingNodeId || !onNodeDocumentSave) return
@@ -1323,8 +1347,6 @@ function WorldLabCanvasInner({
   // Track hover state for edge labels
   const [hoveredEdgeLabelId, setHoveredEdgeLabelId] = useState<string | null>(null)
 
-  // Keyboard shortcuts modal state
-  const [showShortcutsModal, setShowShortcutsModal] = useState(false)
 
   // Normalize handle IDs to match expected source/target suffix
   const normalizeHandleId = useCallback((handleId: string | null | undefined, expected: 'source' | 'target') => {
@@ -1696,7 +1718,7 @@ function WorldLabCanvasInner({
         
         // Persist nodes to backend (positions and metadata)
         try {
-          await worldLabApi.saveNodePositions(labName, worldLabNodes)
+          await worldLabApi.saveNodePositions(labName, worldLabNodes, projectId)
         } catch (error) {
           // Error handling
         }
@@ -1734,7 +1756,7 @@ function WorldLabCanvasInner({
         
         try {
           // Save edges along with current node positions and metadata
-          await worldLabApi.saveEdges(labName, worldLabEdges, nodePositions, nodeMetadata)
+          await worldLabApi.saveEdges(labName, worldLabEdges, projectId, nodePositions, nodeMetadata)
           if (onEdgesChange) {
             onEdgesChange(worldLabEdges)
           }
@@ -1752,13 +1774,15 @@ function WorldLabCanvasInner({
 
   // Store refs for cleanup access
   const labNameRef = useRef(labName)
+  const projectIdRef = useRef(projectId)
   const convertToWorldLabNodesRef = useRef(convertToWorldLabNodes)
   const onNodesChangeRef = useRef(onNodesChange)
   
   // Update refs when values change
   useEffect(() => {
     labNameRef.current = labName
-  }, [labName])
+    projectIdRef.current = projectId
+  }, [labName, projectId])
   
   useEffect(() => {
     convertToWorldLabNodesRef.current = convertToWorldLabNodes
@@ -1791,7 +1815,7 @@ function WorldLabCanvasInner({
         onNodesChangeRef.current(worldLabNodes)
       }
       // Save to backend synchronously (fire and forget)
-      worldLabApi.saveNodePositions(labNameRef.current, worldLabNodes).catch((error) => {
+      worldLabApi.saveNodePositions(labNameRef.current, worldLabNodes, projectIdRef.current).catch((error) => {
         console.error('[WorldLab] Failed to save nodes on unmount:', error)
       })
     }
@@ -2161,7 +2185,7 @@ function WorldLabCanvasInner({
       const closedNodeId = prevEditingNodeIdRef.current
       
       // Reload node content and update node data
-      worldLabApi.loadNodeContent(labName, closedNodeId)
+      worldLabApi.loadNodeContent(labName, closedNodeId, projectId)
         .then((content) => {
           if (content !== null) {
             // Update node's data.content to refresh preview text
@@ -2264,11 +2288,11 @@ function WorldLabCanvasInner({
       if (newLabel && newLabel.trim() !== '' && newLabel !== 'New Element') {
         try {
           // Check if node file exists by trying to load it
-          const existingContent = await worldLabApi.loadNodeContent(labName, nodeId)
+          const existingContent = await worldLabApi.loadNodeContent(labName, nodeId, projectId)
           // If node file doesn't exist, create it empty (title is shown separately)
           if (!existingContent) {
             // Create empty markdown content - title is shown in node label, not in editor
-            await worldLabApi.createNode(labName, nodeId, '')
+            await worldLabApi.createNode(labName, nodeId, projectId, '')
           }
         } catch (error) {
           // Continue even if file creation fails - node metadata is already saved
@@ -2315,10 +2339,10 @@ function WorldLabCanvasInner({
       const nodeLabel = node?.data?.label || ''
       if (nodeLabel && nodeLabel.trim() !== '' && nodeLabel !== 'New Element') {
         try {
-          const existingContent = await worldLabApi.loadNodeContent(labName, nodeId)
+          const existingContent = await worldLabApi.loadNodeContent(labName, nodeId, projectId)
           if (!existingContent) {
             // Create empty markdown content - title is shown in node label, not in editor
-            await worldLabApi.createNode(labName, nodeId, '')
+            await worldLabApi.createNode(labName, nodeId, projectId, '')
           }
         } catch (error) {
           // Error handling
@@ -2487,12 +2511,12 @@ function WorldLabCanvasInner({
     viewportSaveTimeoutRef.current = setTimeout(async () => {
       try {
         // Load current metadata to preserve other fields
-        const currentMetadata = await worldLabApi.loadMetadata(labName)
+        const currentMetadata = await worldLabApi.loadMetadata(labName, projectId)
         const updatedMetadata = {
           ...currentMetadata,
           viewport,
         }
-        await worldLabApi.saveMetadata(labName, updatedMetadata)
+        await worldLabApi.saveMetadata(labName, updatedMetadata, projectId)
         savedViewportRef.current = viewport
       } catch (error) {
         console.error('[WorldLabCanvas] Error saving viewport:', error)
@@ -2507,7 +2531,7 @@ function WorldLabCanvasInner({
     
     const loadViewport = async () => {
       try {
-        const metadata = await worldLabApi.loadMetadata(labName)
+        const metadata = await worldLabApi.loadMetadata(labName, projectId)
         if (metadata?.viewport) {
           savedViewportRef.current = metadata.viewport
           // Set viewport if ReactFlow instance is already initialized
@@ -2536,12 +2560,12 @@ function WorldLabCanvasInner({
             savedViewportRef.current.y !== currentViewport.y ||
             savedViewportRef.current.zoom !== currentViewport.zoom) {
           // Save synchronously on unmount
-          worldLabApi.loadMetadata(labName).then((currentMetadata) => {
+          worldLabApi.loadMetadata(labName, projectIdRef.current).then((currentMetadata) => {
             const updatedMetadata = {
               ...currentMetadata,
               viewport: currentViewport,
             }
-            worldLabApi.saveMetadata(labName, updatedMetadata).catch((error) => {
+            worldLabApi.saveMetadata(labName, updatedMetadata, projectIdRef.current).catch((error) => {
               console.error('[WorldLabCanvas] Error saving viewport on unmount:', error)
             })
           }).catch((error) => {
@@ -2561,7 +2585,7 @@ function WorldLabCanvasInner({
         instance.setViewport(savedViewportRef.current, { duration: 0 })
       } else {
         // If viewport not loaded yet, try loading it
-        worldLabApi.loadMetadata(labName).then((metadata) => {
+        worldLabApi.loadMetadata(labName, projectId).then((metadata) => {
           if (metadata?.viewport && reactFlowInstance.current) {
             savedViewportRef.current = metadata.viewport
             reactFlowInstance.current.setViewport(metadata.viewport, { duration: 0 })
@@ -2588,6 +2612,19 @@ function WorldLabCanvasInner({
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
       const ctrlOrCmd = isMac ? e.metaKey : e.ctrlKey
       
+      // If focus or selection is inside the WorldLab terminal, don't handle canvas shortcuts
+      const activeElement = document.activeElement as HTMLElement | null
+      const isTerminalActive = !!activeElement?.closest?.('[data-worldlab-terminal="true"]')
+      const selection = window.getSelection()
+      const selectionNode = selection?.anchorNode || selection?.focusNode
+      const selectionElement = selectionNode instanceof HTMLElement
+        ? selectionNode
+        : selectionNode?.parentElement
+      const isSelectionInTerminal = !!selectionElement?.closest?.('[data-worldlab-terminal="true"]')
+      if (isTerminalActive || isSelectionInTerminal) {
+        return
+      }
+      
       // Don't handle shortcuts if user is typing in the editor
       if (editingNodeId && editorRef.current?.contains(document.activeElement)) {
         // User is typing in editor, only handle Escape to close
@@ -2602,11 +2639,10 @@ function WorldLabCanvasInner({
       }
       
       // Don't handle shortcuts if user is typing in an input field (like rename input)
-      const activeElement = document.activeElement
       if (activeElement && (
         activeElement.tagName === 'INPUT' || 
         activeElement.tagName === 'TEXTAREA' ||
-        (activeElement as HTMLElement).isContentEditable
+        activeElement.isContentEditable
       )) {
         return
       }
@@ -2652,7 +2688,7 @@ function WorldLabCanvasInner({
           Promise.all(
             selectedNodes.map(async (node: any) => {
               try {
-                const content = await worldLabApi.loadNodeContent(labName, node.id) || ''
+                const content = await worldLabApi.loadNodeContent(labName, node.id, projectId) || ''
                 return {
                   id: node.id,
                   label: node.data?.label || '',
@@ -2786,7 +2822,7 @@ function WorldLabCanvasInner({
               const newNodeId = nodeIdMap.get(node.id)!
               const content = node.data?.content || ''
               try {
-                await worldLabApi.createNode(labName, newNodeId, content)
+                await worldLabApi.createNode(labName, newNodeId, projectId, content)
               } catch (error) {
                 console.error(`Failed to create node file ${newNodeId}:`, error)
               }
@@ -2847,7 +2883,7 @@ function WorldLabCanvasInner({
           Promise.all(
             selectedNodes.map(async (node) => {
               try {
-                const result = await worldLabApi.deleteNode(labName, node.id)
+                const result = await worldLabApi.deleteNode(labName, node.id, projectId)
                 return { nodeId: node.id, success: result }
               } catch (error) {
                 return { nodeId: node.id, success: false, error }
@@ -2901,12 +2937,6 @@ function WorldLabCanvasInner({
         setNodes((nds) => nds.map((n: any) => ({ ...n, selected: false })))
         setEdges((eds) => eds.map((e: any) => ({ ...e, selected: false })))
         setContextMenu(null)
-        setShowShortcutsModal(false)
-      }
-      // Show shortcuts: ? key
-      else if (e.key === '?' && !ctrlOrCmd && !e.shiftKey) {
-        e.preventDefault()
-        setShowShortcutsModal(true)
       }
     }
 
@@ -3963,6 +3993,74 @@ function WorldLabCanvasInner({
                 })
               })()}
             </EdgeLabelRenderer>
+            
+            {/* Empty State Indicator */}
+            {nodes.length === 0 && (
+              <ReactFlowPanel position="top-center" style={{ marginTop: 'calc(50vh - 100px)', pointerEvents: 'none', zIndex: 1 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '16px',
+                    opacity: 0.5,
+                    transition: 'opacity 0.3s ease',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '64px',
+                      height: '64px',
+                      borderRadius: '50%',
+                      border: `2px dashed ${theme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)'}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: theme === 'dark' ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.02)',
+                      animation: 'pulse 2s ease-in-out infinite',
+                    }}
+                  >
+                    <svg
+                      width="24"
+                      height="24"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke={theme === 'dark' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)'}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <line x1="12" y1="5" x2="12" y2="19"></line>
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      color: theme === 'dark' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.5)',
+                      letterSpacing: '-0.01em',
+                      textAlign: 'center',
+                      fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif",
+                    }}
+                  >
+                    Double-click here to create your first node
+                  </div>
+                </div>
+                <style>{`
+                  @keyframes pulse {
+                    0%, 100% {
+                      opacity: 0.5;
+                      transform: scale(1);
+                    }
+                    50% {
+                      opacity: 0.7;
+                      transform: scale(1.05);
+                    }
+                  }
+                `}</style>
+              </ReactFlowPanel>
+            )}
           </ReactFlow>
 
           {/* Right-click drag preview line */}
@@ -4375,249 +4473,6 @@ function WorldLabCanvasInner({
             )
           })()}
 
-          {/* Keyboard Shortcuts Modal */}
-          {showShortcutsModal && (
-            <div
-              style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: 'rgba(0, 0, 0, 0.5)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 10001,
-                backdropFilter: 'blur(4px)',
-              }}
-              onClick={() => setShowShortcutsModal(false)}
-            >
-              <div
-                style={{
-                  background: theme === 'dark' ? 'rgba(30, 30, 30, 0.98)' : 'rgba(255, 255, 255, 0.98)',
-                  border: `1px solid ${borderColor}`,
-                  borderRadius: '16px',
-                  boxShadow: theme === 'dark' ? '0 12px 48px rgba(0, 0, 0, 0.5)' : '0 12px 48px rgba(0, 0, 0, 0.2)',
-                  padding: '32px',
-                  maxWidth: '600px',
-                  maxHeight: '80vh',
-                  overflow: 'auto',
-                  backdropFilter: 'blur(20px)',
-                  fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif",
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '24px',
-                  }}
-                >
-                  <h2
-                    style={{
-                      fontSize: '20px',
-                      fontWeight: 600,
-                      color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                      margin: 0,
-                    }}
-                  >
-                    Keyboard Shortcuts
-                  </h2>
-                  <button
-                    onClick={() => setShowShortcutsModal(false)}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: theme === 'dark' ? '#9E9E9E' : '#6B6B6B',
-                      fontSize: '24px',
-                      cursor: 'pointer',
-                      padding: '0',
-                      width: '32px',
-                      height: '32px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderRadius: '6px',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent'
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  {/* Editing */}
-                  <div>
-                    <h3
-                      style={{
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: theme === 'dark' ? '#9E9E9E' : '#6B6B6B',
-                        marginBottom: '12px',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
-                      }}
-                    >
-                      Editing
-                    </h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {[
-                        { keys: ['Ctrl/Cmd', 'Z'], desc: 'Undo' },
-                        { keys: ['Ctrl/Cmd', 'Shift', 'Z'], desc: 'Redo' },
-                        { keys: ['Ctrl/Cmd', 'Y'], desc: 'Redo' },
-                        { keys: ['Ctrl/Cmd', 'C'], desc: 'Copy selected nodes and edges' },
-                        { keys: ['Ctrl/Cmd', 'V'], desc: 'Paste copied nodes and edges' },
-                        { keys: ['Delete'], desc: 'Delete selected elements' },
-                        { keys: ['Backspace'], desc: 'Delete selected elements' },
-                      ].map((item, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '8px 0',
-                          }}
-                        >
-                          <span style={{ color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A', fontSize: '14px' }}>
-                            {item.desc}
-                          </span>
-                          <div style={{ display: 'flex', gap: '4px' }}>
-                            {item.keys.map((key, keyIdx) => (
-                              <kbd
-                                key={keyIdx}
-                                style={{
-                                  padding: '4px 8px',
-                                  background: theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-                                  border: `1px solid ${borderColor}`,
-                                  borderRadius: '4px',
-                                  fontSize: '12px',
-                                  fontFamily: 'monospace',
-                                  color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                                  fontWeight: 500,
-                                }}
-                              >
-                                {key}
-                              </kbd>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Navigation */}
-                  <div>
-                    <h3
-                      style={{
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: theme === 'dark' ? '#9E9E9E' : '#6B6B6B',
-                        marginBottom: '12px',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
-                      }}
-                    >
-                      Navigation
-                    </h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {[
-                        { keys: ['Space', '+', 'Drag'], desc: 'Pan canvas' },
-                        { keys: ['Esc'], desc: 'Deselect / Close panel' },
-                      ].map((item, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '8px 0',
-                          }}
-                        >
-                          <span style={{ color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A', fontSize: '14px' }}>
-                            {item.desc}
-                          </span>
-                          <div style={{ display: 'flex', gap: '4px' }}>
-                            {item.keys.map((key, keyIdx) => (
-                              <kbd
-                                key={keyIdx}
-                                style={{
-                                  padding: '4px 8px',
-                                  background: theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-                                  border: `1px solid ${borderColor}`,
-                                  borderRadius: '4px',
-                                  fontSize: '12px',
-                                  fontFamily: 'monospace',
-                                  color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                                  fontWeight: 500,
-                                }}
-                              >
-                                {key}
-                              </kbd>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Help */}
-                  <div>
-                    <h3
-                      style={{
-                        fontSize: '14px',
-                        fontWeight: 600,
-                        color: theme === 'dark' ? '#9E9E9E' : '#6B6B6B',
-                        marginBottom: '12px',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
-                      }}
-                    >
-                      Help
-                    </h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '8px 0',
-                        }}
-                      >
-                        <span style={{ color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A', fontSize: '14px' }}>
-                          Show shortcuts
-                        </span>
-                        <kbd
-                          style={{
-                            padding: '4px 8px',
-                            background: theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
-                            border: `1px solid ${borderColor}`,
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            fontFamily: 'monospace',
-                            color: theme === 'dark' ? '#E8E8E8' : '#1A1A1A',
-                            fontWeight: 500,
-                          }}
-                        >
-                          ?
-                        </kbd>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          
           {/* Floating Node Editor - Fixed at bottom-right corner */}
           {editingNodeId && editorPosition && floatingEditor && (
             <div
@@ -4681,10 +4536,22 @@ function WorldLabCanvasInner({
               </div>
               {/* Editor Content */}
               <div
+                ref={editorScrollRef}
+                className={`scrollable-container show-scrollbar ${theme === 'dark' ? 'dark-theme' : ''}`}
                 style={{
                   flex: 1,
                   overflow: 'auto',
                   padding: '16px',
+                  minHeight: 0, // Important for flex children to allow scrolling
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.classList.add('show-scrollbar')
+                }}
+                onMouseLeave={(e) => {
+                  // Keep scrollbar visible if scrolling
+                  if (!e.currentTarget.classList.contains('scrolling')) {
+                    e.currentTarget.classList.remove('show-scrollbar')
+                  }
                 }}
               >
                 <EditorContent editor={floatingEditor} />
@@ -4695,6 +4562,7 @@ function WorldLabCanvasInner({
                     font-size: 12px;
                     line-height: 1.7;
                     letter-spacing: -0.01em;
+                    min-height: 100%;
                   }
                   .ProseMirror p {
                     margin: 0.75em 0;
@@ -4781,21 +4649,6 @@ function WorldLabCanvasInner({
                   }
                   .ProseMirror a:hover {
                     border-bottom-color: ${theme === 'dark' ? '#5BA3FF' : '#1976D2'};
-                  }
-                  /* Custom scrollbar */
-                  .ProseMirror::-webkit-scrollbar {
-                    width: 8px;
-                    height: 8px;
-                  }
-                  .ProseMirror::-webkit-scrollbar-track {
-                    background: transparent;
-                  }
-                  .ProseMirror::-webkit-scrollbar-thumb {
-                    background: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)'};
-                    border-radius: 4px;
-                  }
-                  .ProseMirror::-webkit-scrollbar-thumb:hover {
-                    background: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)'};
                   }
                 `}</style>
               </div>

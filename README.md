@@ -99,18 +99,81 @@ Access at `http://localhost:5173`
 
 ### Build Desktop App
 
+Lemona uses **Electron Builder** to package the application for distribution. The build process automatically:
+1. Builds the frontend React app
+2. Compiles TypeScript for the Electron main process and preload scripts
+3. Packages everything into platform-specific installers
+
+#### Prerequisites
+
+- **Node.js 18+** and **npm 9+**
+- All dependencies installed (`npm install` in `frontend/` and `desktop/`)
+- **Windows**: No additional tools needed
+- **macOS**: Requires Xcode Command Line Tools (for code signing, optional)
+- **Linux**: No additional tools needed
+
+#### Building for Your Platform
+
 ```bash
 cd desktop
 
-# Windows
+# Windows (creates NSIS installer)
 npm run dist:win
 
-# macOS
+# macOS (creates DMG)
 npm run dist:mac
 
-# Linux
+# Linux (creates AppImage)
 npm run dist:linux
+
+# Build for current platform
+npm run dist
 ```
+
+#### Output Location
+
+All packaged applications are saved to `desktop/release/`:
+
+- **Windows**: `Lemona-0.1.0-x64.exe` (NSIS installer)
+- **macOS**: `Lemona-0.1.0-x64.dmg` or `Lemona-0.1.0-arm64.dmg`
+- **Linux**: `Lemona-0.1.0-x64.AppImage`
+
+#### Build Configuration
+
+The packaging is configured in `desktop/package.json` under the `"build"` field:
+
+- **Windows**: NSIS installer with customizable installation directory
+- **macOS**: DMG with support for x64 and ARM64 architectures
+- **Linux**: AppImage format for universal compatibility
+- **Icons**: Uses `frontend/public/lemonalogo.ico` (Windows) and `lemonalogo.png` (macOS/Linux)
+
+#### Advanced Options
+
+**Build only (no packaging):**
+```bash
+cd desktop
+npm run build:all  # Builds frontend + desktop TypeScript
+```
+
+**Development mode:**
+```bash
+cd desktop
+npm run dev  # Runs Electron with hot reload
+```
+
+#### Code Signing (Optional)
+
+For production releases, you may want to sign your application:
+
+- **Windows**: Configure in `package.json` → `build.win.certificateFile` and `certificatePassword`
+- **macOS**: Set `CSC_LINK` and `CSC_KEY_PASSWORD` environment variables
+- **Linux**: Not required for AppImage
+
+#### Troubleshooting
+
+- **Build fails**: Ensure all dependencies are installed (`npm install` in both `frontend/` and `desktop/`)
+- **Large package size**: Normal for Electron apps (~100-200MB). The `files` array in `package.json` excludes unnecessary files
+- **Missing icons**: Ensure `frontend/public/lemonalogo.ico` and `lemonalogo.png` exist
 
 ---
 

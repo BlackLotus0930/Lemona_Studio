@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import { WorldLab, WorldLabNode, WorldLabEdge, AIChatMessage } from '@shared/types'
 import { aiApi } from '../../services/api'
@@ -55,36 +55,36 @@ interface TerminalSession {
   commandHistory: string[]
 }
 
-// Helper functions to persist active terminal session ID per lab
-function getActiveTerminalIdKey(labName: string): string {
-  return `activeTerminalId_${labName}`
+// Helper functions to persist active terminal session ID per lab and project
+function getActiveTerminalIdKey(labName: string, projectId: string): string {
+  return `activeTerminalId_${projectId}_${labName}`
 }
 
-function loadActiveTerminalId(labName: string): string | null {
+function loadActiveTerminalId(labName: string, projectId: string): string | null {
   try {
-    return localStorage.getItem(getActiveTerminalIdKey(labName))
+    return localStorage.getItem(getActiveTerminalIdKey(labName, projectId))
   } catch (error) {
     console.error('Failed to load active terminal ID:', error)
     return null
   }
 }
 
-function saveActiveTerminalId(labName: string, terminalId: string): void {
+function saveActiveTerminalId(labName: string, terminalId: string, projectId: string): void {
   try {
-    localStorage.setItem(getActiveTerminalIdKey(labName), terminalId)
+    localStorage.setItem(getActiveTerminalIdKey(labName, projectId), terminalId)
   } catch (error) {
     console.error('Failed to save active terminal ID:', error)
   }
 }
 
-// Helper functions to persist open terminal tabs per lab
-function getOpenTerminalTabsKey(labName: string): string {
-  return `openTerminalTabs_${labName}`
+// Helper functions to persist open terminal tabs per lab and project
+function getOpenTerminalTabsKey(labName: string, projectId: string): string {
+  return `openTerminalTabs_${projectId}_${labName}`
 }
 
-function loadOpenTerminalTabs(labName: string): string[] {
+function loadOpenTerminalTabs(labName: string, projectId: string): string[] {
   try {
-    const saved = localStorage.getItem(getOpenTerminalTabsKey(labName))
+    const saved = localStorage.getItem(getOpenTerminalTabsKey(labName, projectId))
     if (saved) {
       const parsed = JSON.parse(saved)
       return Array.isArray(parsed) ? parsed : []
@@ -95,18 +95,18 @@ function loadOpenTerminalTabs(labName: string): string[] {
   return []
 }
 
-function saveOpenTerminalTabs(labName: string, terminalIds: string[]): void {
+function saveOpenTerminalTabs(labName: string, terminalIds: string[], projectId: string): void {
   try {
-    localStorage.setItem(getOpenTerminalTabsKey(labName), JSON.stringify(terminalIds))
+    localStorage.setItem(getOpenTerminalTabsKey(labName, projectId), JSON.stringify(terminalIds))
   } catch (error) {
     console.error('Failed to save open terminal tabs:', error)
   }
 }
 
 // Helper function to load terminal session from localStorage
-function loadTerminalSession(labName: string, terminalId: string): TerminalSession | null {
+function loadTerminalSession(labName: string, terminalId: string, projectId: string): TerminalSession | null {
   try {
-    const storageKey = `worldlab_terminal_${labName}_${terminalId}`
+    const storageKey = `worldlab_terminal_${projectId}_${labName}_${terminalId}`
     const saved = localStorage.getItem(storageKey)
     if (saved) {
       const parsed = JSON.parse(saved)
@@ -124,9 +124,9 @@ function loadTerminalSession(labName: string, terminalId: string): TerminalSessi
 }
 
 // Helper function to save terminal session to localStorage
-function saveTerminalSession(labName: string, session: TerminalSession): void {
+function saveTerminalSession(labName: string, session: TerminalSession, projectId: string): void {
   try {
-    const storageKey = `worldlab_terminal_${labName}_${session.id}`
+    const storageKey = `worldlab_terminal_${projectId}_${labName}_${session.id}`
     localStorage.setItem(storageKey, JSON.stringify({
       name: session.name,
       lines: session.lines,
@@ -137,29 +137,29 @@ function saveTerminalSession(labName: string, session: TerminalSession): void {
   }
 }
 
-// Helper function to clear all terminal sessions for a lab
-function clearTerminalSessions(labName: string): void {
+// Helper function to clear all terminal sessions for a lab and project
+function clearTerminalSessions(labName: string, projectId: string): void {
   try {
     // Clear active terminal ID
-    localStorage.removeItem(getActiveTerminalIdKey(labName))
+    localStorage.removeItem(getActiveTerminalIdKey(labName, projectId))
     
     // Clear open terminal tabs
-    localStorage.removeItem(getOpenTerminalTabsKey(labName))
+    localStorage.removeItem(getOpenTerminalTabsKey(labName, projectId))
     
     // Clear all terminal sessions
-    const savedOpenTabs = loadOpenTerminalTabs(labName)
+    const savedOpenTabs = loadOpenTerminalTabs(labName, projectId)
     for (const terminalId of savedOpenTabs) {
-      const storageKey = `worldlab_terminal_${labName}_${terminalId}`
+      const storageKey = `worldlab_terminal_${projectId}_${labName}_${terminalId}`
       localStorage.removeItem(storageKey)
     }
     
     // Also clear conversation history for all terminals
     for (const terminalId of savedOpenTabs) {
-      const storageKey = `worldlab_conversation_${labName}_${terminalId}`
+      const storageKey = `worldlab_conversation_${projectId}_${labName}_${terminalId}`
       localStorage.removeItem(storageKey)
     }
     
-    console.log(`[WorldLabTerminal] Cleared all terminal sessions for lab: ${labName}`)
+    console.log(`[WorldLabTerminal] Cleared all terminal sessions for lab: ${labName}, project: ${projectId}`)
   } catch (error) {
     console.error('Failed to clear terminal sessions:', error)
   }
@@ -175,9 +175,9 @@ function generateTerminalName(firstCommand: string): string {
 const MAX_CONVERSATION_MESSAGES = 20 // Keep only recent 20 messages (frontend), backend will handle summarization
 
 // Helper function to load conversation history from localStorage
-function loadConversationHistory(labName: string, terminalId: string): AIChatMessage[] {
+function loadConversationHistory(labName: string, terminalId: string, projectId: string): AIChatMessage[] {
   try {
-    const storageKey = `worldlab_conversation_${labName}_${terminalId}`
+    const storageKey = `worldlab_conversation_${projectId}_${labName}_${terminalId}`
     const saved = localStorage.getItem(storageKey)
     if (saved) {
       const parsed = JSON.parse(saved)
@@ -190,9 +190,9 @@ function loadConversationHistory(labName: string, terminalId: string): AIChatMes
 }
 
 // Helper function to save conversation history to localStorage
-function saveConversationHistory(labName: string, terminalId: string, history: AIChatMessage[]): void {
+function saveConversationHistory(labName: string, terminalId: string, history: AIChatMessage[], projectId: string): void {
   try {
-    const storageKey = `worldlab_conversation_${labName}_${terminalId}`
+    const storageKey = `worldlab_conversation_${projectId}_${labName}_${terminalId}`
     localStorage.setItem(storageKey, JSON.stringify(history))
   } catch (error) {
     console.error('Failed to save conversation history:', error)
@@ -221,7 +221,8 @@ export default function WorldLabTerminal({
   // Terminal session management
   const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>([])
   const [activeTerminalId, setActiveTerminalId] = useState<string>(() => {
-    const saved = loadActiveTerminalId(labName)
+    if (!projectId) return 'terminal_default'
+    const saved = loadActiveTerminalId(labName, projectId)
     return saved || 'terminal_default'
   })
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
@@ -242,14 +243,16 @@ export default function WorldLabTerminal({
   const [historyIndex, setHistoryIndex] = useState<number>(-1)
   const [currentInput, setCurrentInput] = useState<string>('')
   const [outputLines, setOutputLines] = useState<TerminalLine[]>([])
+  const [promptWidth, setPromptWidth] = useState<number>(0)
   const [isProcessing, setIsProcessing] = useState<boolean>(false)
   const [hasStartedStreaming, setHasStartedStreaming] = useState<boolean>(false)
   const [googleApiKey, setGoogleApiKey] = useState<string>('')
   const [openaiApiKey, setOpenaiApiKey] = useState<string>('')
-  // Conversation history for AI memory (persisted per labName + terminal)
+  // Conversation history for AI memory (persisted per labName + terminal + project)
   const [conversationHistory, setConversationHistory] = useState<AIChatMessage[]>(() => {
-    const initialTerminalId = loadActiveTerminalId(labName) || 'terminal_default'
-    return loadConversationHistory(labName, initialTerminalId)
+    if (!projectId) return []
+    const initialTerminalId = loadActiveTerminalId(labName, projectId) || 'terminal_default'
+    return loadConversationHistory(labName, initialTerminalId, projectId)
   })
   // Initialize selectedModel based on available API keys from localStorage
   const [selectedModel, setSelectedModel] = useState<string>(() => {
@@ -286,6 +289,7 @@ export default function WorldLabTerminal({
   // Refs
   const terminalRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLDivElement>(null)
+  const promptRef = useRef<HTMLSpanElement>(null)
   const streamReaderRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null)
   const currentAIOutputRef = useRef<string>('')
   const currentAILineIdRef = useRef<string | null>(null)
@@ -317,6 +321,15 @@ export default function WorldLabTerminal({
     window.addEventListener('storage', handleStorageChange)
     return () => window.removeEventListener('storage', handleStorageChange)
   }, [])
+
+  // Measure prompt width so the caret sits immediately after "worldlab >"
+  useLayoutEffect(() => {
+    if (!promptRef.current) return
+    const nextWidth = promptRef.current.offsetWidth
+    if (nextWidth !== promptWidth) {
+      setPromptWidth(nextWidth)
+    }
+  }, [promptWidth])
 
   // Select appropriate model based on available API keys
   useEffect(() => {
@@ -379,18 +392,45 @@ export default function WorldLabTerminal({
       // If WorldLab was created within last 2 minutes, clear old terminal sessions
       if (ageInMinutes < 2) {
         console.log(`[WorldLabTerminal] Detected newly created WorldLab (${ageInMinutes.toFixed(2)} minutes old), clearing old terminal sessions`)
-        clearTerminalSessions(labName)
+        if (projectId) {
+          clearTerminalSessions(labName, projectId)
+        }
       }
     }
     
-    const savedActiveId = loadActiveTerminalId(labName)
-    const savedOpenTabs = loadOpenTerminalTabs(labName)
+    if (!projectId) {
+      // No projectId, initialize empty
+      const defaultId = 'terminal_default'
+      const defaultSession: TerminalSession = {
+        id: defaultId,
+        name: 'Terminal 1',
+        lines: [],
+        commandHistory: [],
+      }
+      setTerminalSessions([defaultSession])
+      setActiveTerminalId(defaultId)
+      isLoadingSessionRef.current = true
+      setOutputLines([])
+      setCommandHistory([])
+      setHistoryIndex(-1)
+      setCurrentInput('')
+      if (inputRef.current) {
+        inputRef.current.textContent = ''
+      }
+      setTimeout(() => {
+        isLoadingSessionRef.current = false
+      }, 0)
+      return
+    }
+    
+    const savedActiveId = loadActiveTerminalId(labName, projectId)
+    const savedOpenTabs = loadOpenTerminalTabs(labName, projectId)
     
     if (savedOpenTabs.length > 0) {
       // Load saved sessions
       const loadedSessions: TerminalSession[] = []
       for (const terminalId of savedOpenTabs) {
-        const session = loadTerminalSession(labName, terminalId)
+        const session = loadTerminalSession(labName, terminalId, projectId)
         if (session) {
           loadedSessions.push(session)
         } else {
@@ -402,7 +442,7 @@ export default function WorldLabTerminal({
             commandHistory: [],
           }
           loadedSessions.push(newSession)
-          saveTerminalSession(labName, newSession)
+          saveTerminalSession(labName, newSession, projectId)
         }
       }
       setTerminalSessions(loadedSessions)
@@ -424,31 +464,60 @@ export default function WorldLabTerminal({
         if (inputRef.current) {
           inputRef.current.textContent = ''
         }
-        saveActiveTerminalId(labName, activeId)
+        saveActiveTerminalId(labName, activeId, projectId)
         // Reset flag after state updates complete
         setTimeout(() => {
           isLoadingSessionRef.current = false
         }, 0)
       }
     } else {
-      // First time - create default session
+      // First time - create default session with initial help command
       const defaultId = 'terminal_default'
+      const now = new Date().toISOString()
+      const initialHelpLines: TerminalLine[] = [
+        {
+          id: `cmd_${Date.now()}`,
+          type: 'command',
+          content: 'worldlab > help',
+          timestamp: now,
+        },
+        {
+          id: `out_${Date.now() + 1}`,
+          type: 'output',
+          content: `CORE COMMANDS
+  create [description]
+  edit [node1] [node2] [description]
+  derive [description]
+  undo
+  redo
+  help
+
+CAPABILITIES
+  • Capture and build ideas
+  • Natural conversation
+  • Select nodes to focus AI operations  
+  • All changes are reversible (Ctrl+Z)`,
+          timestamp: now,
+        },
+      ]
       const defaultSession: TerminalSession = {
         id: defaultId,
         name: 'Terminal 1',
-        lines: [],
-        commandHistory: [],
+        lines: initialHelpLines,
+        commandHistory: ['help'],
       }
       setTerminalSessions([defaultSession])
       setActiveTerminalId(defaultId)
-      saveTerminalSession(labName, defaultSession)
-      saveOpenTerminalTabs(labName, [defaultId])
-      saveActiveTerminalId(labName, defaultId)
+      if (projectId) {
+        saveTerminalSession(labName, defaultSession, projectId)
+        saveOpenTerminalTabs(labName, [defaultId], projectId)
+        saveActiveTerminalId(labName, defaultId, projectId)
+      }
       
-      // Initialize empty lines and history for new session
+      // Initialize with help command lines and history
       isLoadingSessionRef.current = true
-      setOutputLines([])
-      setCommandHistory([])
+      setOutputLines(initialHelpLines)
+      setCommandHistory(['help'])
       setHistoryIndex(-1)
       setCurrentInput('')
       if (inputRef.current) {
@@ -458,13 +527,17 @@ export default function WorldLabTerminal({
         isLoadingSessionRef.current = false
       }, 0)
     }
-  }, [labName, worldLabData?.metadata?.createdAt])
+  }, [labName, worldLabData?.metadata?.createdAt, projectId])
 
-  // Load conversation history when labName or active terminal changes
+  // Load conversation history when labName, projectId, or active terminal changes
   useEffect(() => {
-    const history = loadConversationHistory(labName, activeTerminalId)
+    if (!projectId) {
+      setConversationHistory([])
+      return
+    }
+    const history = loadConversationHistory(labName, activeTerminalId, projectId)
     setConversationHistory(history)
-  }, [labName, activeTerminalId])
+  }, [labName, activeTerminalId, projectId])
 
   // Load active session data when activeTerminalId changes
   useEffect(() => {
@@ -479,7 +552,9 @@ export default function WorldLabTerminal({
       if (inputRef.current) {
         inputRef.current.textContent = ''
       }
-      saveActiveTerminalId(labName, activeTerminalId)
+      if (projectId) {
+        saveActiveTerminalId(labName, activeTerminalId, projectId)
+      }
       // Reset flag after state updates complete
       setTimeout(() => {
         isLoadingSessionRef.current = false
@@ -533,12 +608,14 @@ export default function WorldLabTerminal({
       }
       
       // Always save to localStorage immediately to ensure persistence
-      saveTerminalSession(labName, updatedSession)
+      if (projectId) {
+        saveTerminalSession(labName, updatedSession, projectId)
+      }
       
       // Update state - always update to ensure state stays in sync
       return prev.map(s => s.id === activeTerminalId ? updatedSession : s)
     })
-  }, [outputLines, commandHistory, activeTerminalId, labName])
+  }, [outputLines, commandHistory, activeTerminalId, labName, projectId])
 
   // Keep refs in sync with current state
   useEffect(() => {
@@ -577,11 +654,13 @@ export default function WorldLabTerminal({
         return session
       })
       
-      sessionsToSave.forEach(session => {
-        saveTerminalSession(labName, session)
-      })
+      if (projectId) {
+        sessionsToSave.forEach(session => {
+          saveTerminalSession(labName, session, projectId)
+        })
+      }
     }
-  }, [labName]) // Only depend on labName to avoid re-running unnecessarily
+  }, [labName, projectId]) // Only depend on labName and projectId to avoid re-running unnecessarily
 
   // 自动滚动到底部
   const scrollToBottom = useCallback(() => {
@@ -1098,8 +1177,15 @@ CAPABILITIES
       if (edge.label) {
         edgeObj.label = edge.label
       }
-      // Determine if edge is directional (default edges are bidirectional, others are directional)
-      edgeObj.directional = edge.type !== 'default' && edge.type !== undefined
+      // Determine if edge is directional
+      // directed: true means directional (with arrow), false/undefined means bidirectional (no arrow)
+      // Check data.directed first (most accurate), fallback to type check for backward compatibility
+      if (edge.data?.directed !== undefined) {
+        edgeObj.directional = edge.data.directed === true
+      } else {
+        // Fallback: check type (smoothstep usually means directional, default means bidirectional)
+        edgeObj.directional = edge.type !== 'default' && edge.type !== undefined
+      }
       return edgeObj
     })
     
@@ -1155,7 +1241,9 @@ Please help the user understand or interact with this WorldLab. You can:
 - Help explore the world structure
 - Provide insights about the world state
 
-IMPORTANT: Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.`
+IMPORTANT: 
+- Respond in the same language as the nodes and edges in the WorldLab (observe the language used in the node labels, content, and edge labels, and match that language)
+- Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.`
         break
       }
 
@@ -1175,6 +1263,7 @@ Please generate:
 4. edges: Connections to existing or new nodes
 
 IMPORTANT:
+- Respond in the same language as the nodes and edges in the WorldLab (observe the language used in the node labels, content, and edge labels, and use that language for all generated content including labels, descriptions, and edge labels)
 - Do NOT include position coordinates - system will calculate automatically
 - Ensure all node labels are unique (if you need multiple similar nodes, use distinct labels)
 - Edges should reference existing nodes by label, or new nodes you're creating
@@ -1211,15 +1300,48 @@ Respond in JSON format:
           return
         }
         
-        // Find all nodes to edit - first by label, then by ID
+        // Find all nodes to edit - first by label, then by ID, with normalization fallback
         const nodesToEdit: WorldLabNode[] = []
         const notFoundIdentifiers: string[] = []
+        const ambiguousIdentifiers: Record<string, string[]> = {}
+
+        const normalizeIdentifier = (value: string) =>
+          value.trim().replace(/^["']|["']$/g, '').toLowerCase().normalize('NFKC')
+
+        const normalizedNodeMap = new Map<string, WorldLabNode>()
+        worldLabData.nodes.forEach(node => {
+          const normalizedLabel = normalizeIdentifier(node.label)
+          const normalizedId = normalizeIdentifier(node.id)
+          if (!normalizedNodeMap.has(normalizedLabel)) {
+            normalizedNodeMap.set(normalizedLabel, node)
+          }
+          if (!normalizedNodeMap.has(normalizedId)) {
+            normalizedNodeMap.set(normalizedId, node)
+          }
+        })
         
         for (const identifier of nodeIdentifiers) {
-          let nodeToEdit = worldLabData.nodes.find(n => n.label === identifier)
+          const cleanedIdentifier = identifier.trim().replace(/^["']|["']$/g, '')
+          let nodeToEdit = worldLabData.nodes.find(n => n.label === cleanedIdentifier)
           if (!nodeToEdit) {
             // If not found by label, try by ID (backward compatibility)
-            nodeToEdit = worldLabData.nodes.find(n => n.id === identifier)
+            nodeToEdit = worldLabData.nodes.find(n => n.id === cleanedIdentifier)
+          }
+          if (!nodeToEdit) {
+            // Fallback to normalized lookup (case/width-insensitive)
+            nodeToEdit = normalizedNodeMap.get(normalizeIdentifier(cleanedIdentifier))
+          }
+          if (!nodeToEdit) {
+            // Fallback to partial match if there is exactly one candidate
+            const normalizedIdentifier = normalizeIdentifier(cleanedIdentifier)
+            const partialMatches = worldLabData.nodes.filter(node =>
+              normalizeIdentifier(node.label).includes(normalizedIdentifier)
+            )
+            if (partialMatches.length === 1) {
+              nodeToEdit = partialMatches[0]
+            } else if (partialMatches.length > 1) {
+              ambiguousIdentifiers[identifier] = partialMatches.map(node => node.label)
+            }
           }
           
           if (nodeToEdit) {
@@ -1229,11 +1351,20 @@ Respond in JSON format:
           }
         }
         
-        if (notFoundIdentifiers.length > 0) {
+        if (notFoundIdentifiers.length > 0 || Object.keys(ambiguousIdentifiers).length > 0) {
+          const errorMessages: string[] = []
+          if (notFoundIdentifiers.length > 0) {
+            errorMessages.push(`Node(s) not found: ${notFoundIdentifiers.join(', ')}`)
+          }
+          if (Object.keys(ambiguousIdentifiers).length > 0) {
+            Object.entries(ambiguousIdentifiers).forEach(([identifier, matches]) => {
+              errorMessages.push(`Multiple matches for "${identifier}": ${matches.join(', ')}`)
+            })
+          }
           addOutputLine({
             id: `err_${Date.now()}`,
             type: 'error',
-            content: `Error: Node(s) not found: ${notFoundIdentifiers.join(', ')}`,
+            content: `Error: ${errorMessages.join('\n')}`,
             timestamp: new Date().toISOString(),
           })
           return
@@ -1264,10 +1395,11 @@ Please generate the updated node information. You can:
 - Update the node content/description
 - Update the label if needed
 - Change the category if appropriate
-- Suggest new edges or modifications to existing edges
-- Suggest related nodes that should be created
+- Create new edges or modifications to existing edges
+- Create any additional related nodes that may be needed
 
 IMPORTANT:
+- Respond in the same language as the nodes and edges in the WorldLab (observe the language used in the node labels, content, and edge labels, and use that language for all generated content including labels, descriptions, and edge labels)
 - Do NOT include position coordinates
 - Respond ONLY with valid JSON, no other text before or after
 - For multiple nodes, provide an array of nodes in the "nodes" field
@@ -1317,7 +1449,7 @@ Respond in JSON format:
               let nodeContent = node.data?.content || ''
               if (!nodeContent) {
                 try {
-                  const loadedContent = await worldLabApi.loadNodeContent(labName, node.id)
+                  const loadedContent = await worldLabApi.loadNodeContent(labName, node.id, projectId || '')
                   if (loadedContent) {
                     nodeContent = loadedContent
                   }
@@ -1350,7 +1482,15 @@ Respond in JSON format:
             if (edge.label) {
               edgeObj.label = edge.label
             }
-            edgeObj.directional = edge.type !== 'default' && edge.type !== undefined
+            // Determine if edge is directional
+            // directed: true means directional (with arrow), false/undefined means bidirectional (no arrow)
+            // Check data.directed first (most accurate), fallback to type check for backward compatibility
+            if (edge.data?.directed !== undefined) {
+              edgeObj.directional = edge.data.directed === true
+            } else {
+              // Fallback: check type (smoothstep usually means directional, default means bidirectional)
+              edgeObj.directional = edge.type !== 'default' && edge.type !== undefined
+            }
             return edgeObj
           })
           
@@ -1362,22 +1502,31 @@ Respond in JSON format:
           const nodeCount = deriveNodes.length
           const edgeCount = deriveEdges.length
           
-          aiPrompt = `You are helping derive a story from a WorldLab (world-building system). Based on the following nodes and edges, create a narrative story.
+          aiPrompt = `You are helping derive story possibilities from a WorldLab (world-building system). Based on the following nodes and edges,
+          ${deriveContext}
 
-${deriveContext}
+What could happen next based on:
+- Current relationships and tensions
+- Unresolved conflicts
+- Pending character decisions
 
-Requirements:
-1. This should be a SUMMARY-TYPE STORY (概要型故事), not a full literary text
-2. It can be a complete narrative with emotions and should "read like a story"
-3. The story should be derived from the relationships and content of the provided nodes and edges
-4. Make it engaging and coherent, showing how the nodes and edges connect to form a narrative
-5. Include emotional depth and narrative flow
+Format (plain text, no markdown):
+Derived from: ${nodeCount} nodes, ${edgeCount} edges
+
+Possibility 1: [specific event]
+Why: [based on which nodes/edges]
+
+Possibility 2: [specific event]
+Why: [based on which nodes/edges]
+
+...
+
+Which direction interests you?
 
 IMPORTANT: 
-- Start your response with: "Derived from: ${nodeCount} nodes, ${edgeCount} edges"
-- Then write the story
-- Respond in plain text format only. Do NOT use markdown formatting (no **bold**, no # headers, no code blocks, no lists with markdown syntax). Use simple text with line breaks and indentation for structure.
-- This is a one-time generation result, not an authoritative text - it can be regenerated and will change based on the structure`
+- Use same language as nodes/edges
+- Plain text only (no **bold**, # headers, code blocks)
+- Start with "Derived from: X nodes, Y edges"`
         } catch (error) {
           addOutputLine({
             id: `err_${Date.now()}`,
@@ -1421,7 +1570,12 @@ IMPORTANT:
     // 添加日志：显示正在执行的操作
     let logMessage = ''
     if (command === 'create-node-ai') {
-      logMessage = `[AI] Creating node: "${args.description}"...`
+      // Truncate description to max 60 characters for log message
+      const description = args.description || ''
+      const truncatedDescription = description.length > 30
+        ? description.substring(0, 30) + '...' 
+        : description
+      logMessage = `[AI] Creating node: "${truncatedDescription}"`
     } else if (command === 'edit-node-ai') {
       // Support both single node (backward compatibility) and multiple nodes
       const nodeIdentifiers = args.nodeIds || (args.nodeId ? [args.nodeId] : [])
@@ -1549,13 +1703,6 @@ IMPORTANT:
           // Parse the complete AI response as JSON
           const fullResponse = currentAIOutputRef.current.trim()
           
-          // Add log: AI response received
-          addOutputLine({
-            id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            type: 'info',
-            content: '[AI] Response received, parsing...',
-            timestamp: new Date().toISOString(),
-          })
           
           // Try to extract JSON from the response (might have markdown code blocks or other text)
           let jsonStr = fullResponse
@@ -1565,6 +1712,9 @@ IMPORTANT:
           }
           
           const aiResponse = JSON.parse(jsonStr)
+          
+          const existingNodes = worldLabData.nodes
+          const existingEdges = worldLabData.edges || []
           
           // Add log: show what AI generated
           if (command === 'create-node-ai' && aiResponse.nodes) {
@@ -1577,20 +1727,18 @@ IMPORTANT:
               timestamp: new Date().toISOString(),
             })
           } else if (command === 'edit-node-ai') {
-            const newNodeCount = Array.isArray(aiResponse.newNodes) ? aiResponse.newNodes.length : 0
-            const edgeCount = Array.isArray(aiResponse.edges) ? aiResponse.edges.length : 0
-            if (newNodeCount > 0 || edgeCount > 0) {
+            // Get the nodes being edited from args
+            const nodeIdsToEdit = args.nodeIds || (args.nodeId ? [args.nodeId] : [])
+            const nodesToEdit = existingNodes.filter(n => nodeIdsToEdit.includes(n.id))
+            if (nodesToEdit.length > 0) {
               addOutputLine({
                 id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                 type: 'info',
-                content: `[AI] Will create ${newNodeCount} new node(s), ${edgeCount} edge(s)`,
+                content: `[AI] Editing ${nodesToEdit.length} node(s)...`,
                 timestamp: new Date().toISOString(),
               })
             }
           }
-          
-          const existingNodes = worldLabData.nodes
-          const existingEdges = worldLabData.edges
           
           // Build label-to-ID map for existing nodes first
           const labelToIdMap = new Map<string, string>()
@@ -1646,18 +1794,20 @@ IMPORTANT:
                 }
               }
               
-              // Update the node
-              const nextLabel = updatedNodeData.label || updatedNodes[nodeIndex].label
-              const nextCategory = updatedNodeData.category || updatedNodes[nodeIndex].category
+              // Update the node - explicitly preserve position from original node to prevent movement
+              const nextLabel = updatedNodeData.label || nodeToEdit.label
+              const nextCategory = updatedNodeData.category || nodeToEdit.category
               updatedNodes[nodeIndex] = {
-                ...updatedNodes[nodeIndex],
+                ...nodeToEdit, // Start with original node to preserve all properties including position
                 label: nextLabel,
                 category: nextCategory,
+                // Explicitly preserve position from original node
+                position: nodeToEdit.position,
                 data: {
-                  ...updatedNodes[nodeIndex].data,
+                  ...nodeToEdit.data,
                   label: nextLabel,
                   category: nextCategory,
-                  content: updatedNodeData.content || updatedNodes[nodeIndex].data?.content || '',
+                  content: updatedNodeData.content || nodeToEdit.data?.content || '',
                 },
               }
               
@@ -1670,7 +1820,7 @@ IMPORTANT:
               // Save updated node content to file
               try {
                 const nodeContent = updatedNodeData.content || updatedNodes[nodeIndex].data?.content || ''
-                await worldLabApi.saveNode(labName, nodeToEdit.id, nodeContent)
+                await worldLabApi.saveNode(labName, nodeToEdit.id, nodeContent, projectId || '')
               } catch (error) {
                 console.error('[WorldLabTerminal] Error saving updated node:', error)
               }
@@ -1752,7 +1902,7 @@ IMPORTANT:
                 })
                 for (const node of newNodesFromEdit) {
                   try {
-                    await worldLabApi.createNode(labName, node.id, node.data?.content || '')
+                    await worldLabApi.createNode(labName, node.id, projectId || '', node.data?.content || '')
                   } catch (error) {
                     console.error('[WorldLabTerminal] Error creating new node file:', error)
                   }
@@ -1767,19 +1917,39 @@ IMPORTANT:
               onNodesChange(updatedNodes)
             }
             
-            // Process edges
-            const allEdges = aiResponse.edges || []
+            // Process edges (create new or update existing)
+            const allEdges = Array.isArray(aiResponse.edges) ? aiResponse.edges : []
             const newEdges: WorldLabEdge[] = []
+            const updatedEdgesList: WorldLabEdge[] = [...existingEdges]
+            
             allEdges.forEach((edge: any) => {
               const fromId = labelToIdMap.get(edge.from)
               const toId = labelToIdMap.get(edge.to)
               
               if (fromId && toId) {
-                const edgeExists = existingEdges.some(e => 
+                // Check if edge already exists
+                const existingEdgeIndex = updatedEdgesList.findIndex(e => 
                   e.source === fromId && e.target === toId
                 )
                 
-                if (!edgeExists) {
+                if (existingEdgeIndex >= 0) {
+                  // Update existing edge (e.g., change directionality, label)
+                  const existingEdge = updatedEdgesList[existingEdgeIndex]
+                  updatedEdgesList[existingEdgeIndex] = {
+                    ...existingEdge,
+                    label: edge.label !== undefined ? edge.label : existingEdge.label,
+                    type: edge.directional !== undefined 
+                      ? (edge.directional ? 'smoothstep' : 'default')
+                      : existingEdge.type,
+                    data: {
+                      ...existingEdge.data,
+                      directed: edge.directional !== undefined 
+                        ? edge.directional 
+                        : (existingEdge.data?.directed || false),
+                    },
+                  }
+                } else {
+                  // Create new edge
                   const edgeId = `edge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
                   newEdges.push({
                     id: edgeId,
@@ -1787,14 +1957,20 @@ IMPORTANT:
                     target: toId,
                     label: edge.label || undefined,
                     type: edge.directional ? 'smoothstep' : 'default',
+                    data: {
+                      directed: edge.directional || false,
+                    },
                   })
                 }
               }
             })
             
-            const updatedEdges = [...existingEdges, ...newEdges]
-            if (onEdgesChange) {
-              onEdgesChange(updatedEdges)
+            // Add new edges to the updated list
+            const finalEdges = [...updatedEdgesList, ...newEdges]
+            
+            // Only update if there are changes (new edges or updated edges)
+            if ((newEdges.length > 0 || allEdges.length > 0) && onEdgesChange) {
+              onEdgesChange(finalEdges)
             }
             
             // Explicitly save node positions and metadata for all nodes (including newly created ones)
@@ -1813,7 +1989,7 @@ IMPORTANT:
               })
               
               // Save edges with all node positions and metadata (including new nodes)
-              await worldLabApi.saveEdges(labName, updatedEdges, nodePositions, nodeMetadata)
+              await worldLabApi.saveEdges(labName, finalEdges, projectId || '', nodePositions, nodeMetadata)
             } catch (error) {
               console.error('[WorldLabTerminal] Error saving node positions:', error)
               // Don't show error to user as this is a background operation
@@ -1829,15 +2005,23 @@ IMPORTANT:
             
             // Update output line
             const newNodeLabels = newNodesFromEdit.map(n => n.label).join(', ')
-            const edgeCount = newEdges.length
+            const updatedEdgesCount = allEdges.length - newEdges.length // Count of updated edges
             const updatedNodeLabels = nodesToEdit.map(n => n.label).join(', ')
+            let edgeSummary = ''
+            if (newEdges.length > 0 && updatedEdgesCount > 0) {
+              edgeSummary = `\nCreated ${newEdges.length} edge(s), updated ${updatedEdgesCount} edge(s)`
+            } else if (newEdges.length > 0) {
+              edgeSummary = `\nCreated ${newEdges.length} edge(s)`
+            } else if (updatedEdgesCount > 0) {
+              edgeSummary = `\nUpdated ${updatedEdgesCount} edge(s)`
+            }
             setOutputLines(prev => {
               const updated = [...prev]
               const lineIndex = updated.findIndex(l => l.id === currentAILineIdRef.current)
               if (lineIndex !== -1) {
                 updated[lineIndex] = {
                   ...updated[lineIndex],
-                  content: `Updated ${nodesToEdit.length} node(s): ${updatedNodeLabels}${newNodesFromEdit.length > 0 ? `\nCreated ${newNodesFromEdit.length} new node(s): ${newNodeLabels}` : ''}${edgeCount > 0 ? `\nCreated ${edgeCount} edge(s)` : ''}`,
+                  content: `Updated ${nodesToEdit.length} node(s): ${updatedNodeLabels}${newNodesFromEdit.length > 0 ? `\nCreated ${newNodesFromEdit.length} new node(s): ${newNodeLabels}` : ''}${edgeSummary}`,
                   type: 'info',
                   nodeRefs: [...nodeIdsToEdit, ...newNodesFromEdit.map(n => n.id)],
                 }
@@ -1935,7 +2119,7 @@ IMPORTANT:
             try {
               for (const node of newNodes) {
                 const nodeContent = node.data?.content || ''
-                await worldLabApi.createNode(labName, node.id, nodeContent)
+                await worldLabApi.createNode(labName, node.id, projectId || '', nodeContent)
               }
             } catch (error) {
               console.error('[WorldLabTerminal] Error creating node files:', error)
@@ -1973,6 +2157,9 @@ IMPORTANT:
                     target: toId,
                     label: edge.label || undefined,
                     type: edge.directional ? 'smoothstep' : 'default',
+                    data: {
+                      directed: edge.directional || false,
+                    },
                   })
                 }
               }
@@ -2000,7 +2187,7 @@ IMPORTANT:
               })
               
               // Save edges with all node positions and metadata (including new nodes)
-              await worldLabApi.saveEdges(labName, updatedEdges, nodePositions, nodeMetadata)
+              await worldLabApi.saveEdges(labName, updatedEdges, projectId || '', nodePositions, nodeMetadata)
             } catch (error) {
               console.error('[WorldLabTerminal] Error saving node positions:', error)
               // Don't show error to user as this is a background operation
@@ -2086,7 +2273,9 @@ IMPORTANT:
       // Update conversation history: add user message and assistant response
       const updatedHistory = trimConversationHistory([...updatedHistoryWithUser, assistantMessage])
       setConversationHistory(updatedHistory)
-      saveConversationHistory(labName, activeTerminalId, updatedHistory)
+      if (projectId) {
+        saveConversationHistory(labName, activeTerminalId, updatedHistory, projectId)
+      }
       
     } catch (error: any) {
       const errorLine: TerminalLine = {
@@ -2112,17 +2301,48 @@ IMPORTANT:
   // 处理粘贴事件 - 移除格式，只保留纯文本
   const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLDivElement>) => {
     e.preventDefault()
+    e.stopPropagation()
     
     // 获取剪贴板中的纯文本
     const text = e.clipboardData.getData('text/plain')
     
     if (!text || !inputRef.current) return
     
-    // 获取当前选择范围
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0) return
+    // 确保焦点在输入框上
+    inputRef.current.focus()
     
-    const range = selection.getRangeAt(0)
+    // 获取当前选择范围 - 确保在输入框内
+    const selection = window.getSelection()
+    if (!selection) return
+    
+    // 创建或获取正确的范围在输入框内
+    let range: Range
+    if (selection.rangeCount > 0) {
+      const currentRange = selection.getRangeAt(0)
+      // 检查选择是否在输入框内
+      const isInInput = inputRef.current.contains(currentRange.commonAncestorContainer) ||
+                        currentRange.commonAncestorContainer === inputRef.current ||
+                        (currentRange.commonAncestorContainer.nodeType === Node.TEXT_NODE && 
+                         inputRef.current.contains(currentRange.commonAncestorContainer.parentNode))
+      
+      if (isInInput) {
+        range = currentRange
+      } else {
+        // 选择不在输入框内，创建新范围在输入框末尾
+        range = document.createRange()
+        range.selectNodeContents(inputRef.current)
+        range.collapse(false) // 折叠到末尾
+        selection.removeAllRanges()
+        selection.addRange(range)
+      }
+    } else {
+      // 没有选择，创建新范围在输入框末尾
+      range = document.createRange()
+      range.selectNodeContents(inputRef.current)
+      range.collapse(false) // 折叠到末尾
+      selection.removeAllRanges()
+      selection.addRange(range)
+    }
     
     // 删除选中的内容（如果有）
     range.deleteContents()
@@ -2201,6 +2421,32 @@ IMPORTANT:
     }
   }, [currentInput, isProcessing, commandHistory, historyIndex, executeCommand])
 
+  // Handle keyboard events in terminal output area to allow Ctrl+C copy
+  const handleTerminalKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    // Don't interfere if the input field is focused - let handleSubmit handle it
+    if (inputRef.current && document.activeElement === inputRef.current) {
+      return
+    }
+    
+    // Allow Ctrl+C (or Cmd+C on Mac) when text is selected in output area
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
+    const ctrlOrCmd = isMac ? e.metaKey : e.ctrlKey
+    
+    // Check if text is selected
+    const selection = window.getSelection()
+    const hasSelection = selection && selection.toString().length > 0
+    
+    // If Ctrl+C/Cmd+C is pressed and text is selected, allow default copy behavior
+    // Don't prevent default or stop propagation - let browser handle copy
+    if (ctrlOrCmd && (e.key === 'c' || e.key === 'C') && hasSelection) {
+      // Explicitly allow the default copy behavior by not calling preventDefault
+      // and not stopping propagation - browser will handle the copy
+      return
+    }
+    
+    // For all other keys, don't interfere - let them bubble up normally
+  }, [])
+
   // Terminal management handlers
   const handleNewTerminal = () => {
     const newTerminalId = `terminal_${Date.now()}`
@@ -2213,9 +2459,11 @@ IMPORTANT:
     const newSessions = [...terminalSessions, newSession]
     setTerminalSessions(newSessions)
     setActiveTerminalId(newTerminalId)
-    saveTerminalSession(labName, newSession)
-    saveOpenTerminalTabs(labName, newSessions.map(s => s.id))
-    saveActiveTerminalId(labName, newTerminalId)
+    if (projectId) {
+      saveTerminalSession(labName, newSession, projectId)
+      saveOpenTerminalTabs(labName, newSessions.map(s => s.id), projectId)
+      saveActiveTerminalId(labName, newTerminalId, projectId)
+    }
     
     // Auto-focus the input field after creating new terminal
     setTimeout(() => {
@@ -2248,16 +2496,20 @@ IMPORTANT:
       }
       setTerminalSessions([newSession])
       setActiveTerminalId(newTerminalId)
-      saveTerminalSession(labName, newSession)
-      saveOpenTerminalTabs(labName, [newTerminalId])
-      saveActiveTerminalId(labName, newTerminalId)
+      if (projectId) {
+        saveTerminalSession(labName, newSession, projectId)
+        saveOpenTerminalTabs(labName, [newTerminalId], projectId)
+        saveActiveTerminalId(labName, newTerminalId, projectId)
+      }
     } else {
       // Remove the terminal from tabs
       const newSessions = terminalSessions.filter(s => s.id !== terminalId)
       setTerminalSessions(newSessions)
       
       // Update persisted open tabs list
-      saveOpenTerminalTabs(labName, newSessions.map(s => s.id))
+      if (projectId) {
+        saveOpenTerminalTabs(labName, newSessions.map(s => s.id), projectId)
+      }
       
       // If the closed terminal was active, switch to another one
       if (activeTerminalId === terminalId) {
@@ -2265,7 +2517,9 @@ IMPORTANT:
         const newActiveIndex = closedIndex > 0 ? closedIndex - 1 : 0
         const newActiveId = newSessions[newActiveIndex]?.id || newSessions[0]?.id
         setActiveTerminalId(newActiveId)
-        saveActiveTerminalId(labName, newActiveId)
+        if (projectId) {
+          saveActiveTerminalId(labName, newActiveId, projectId)
+        }
       }
     }
   }
@@ -2275,8 +2529,8 @@ IMPORTANT:
       const updated = prev.map(s => s.id === terminalId ? { ...s, name: newName } : s)
       // Update saved session with the updated session data
       const updatedSession = updated.find(s => s.id === terminalId)
-      if (updatedSession) {
-        saveTerminalSession(labName, updatedSession)
+      if (updatedSession && projectId) {
+        saveTerminalSession(labName, updatedSession, projectId)
       }
       return updated
     })
@@ -2328,7 +2582,9 @@ IMPORTANT:
         newSessions.splice(insertIndex, 0, draggedSession)
         
         setTerminalSessions(newSessions)
-        saveOpenTerminalTabs(labName, newSessions.map(s => s.id))
+        if (projectId) {
+          saveOpenTerminalTabs(labName, newSessions.map(s => s.id), projectId)
+        }
       }
     }
     
@@ -2345,15 +2601,18 @@ IMPORTANT:
 
   // Get all terminal sessions for history (including closed ones)
   const getAllTerminalSessions = (): TerminalSession[] => {
-    // Load all saved sessions from localStorage
+    // Load all saved sessions from localStorage for this project and lab
     const allSessions: TerminalSession[] = []
+    if (!projectId) return allSessions
+    
     try {
-      // Get all keys that match the pattern
+      // Get all keys that match the pattern: worldlab_terminal_{projectId}_{labName}_{terminalId}
+      const prefix = `worldlab_terminal_${projectId}_${labName}_`
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i)
-        if (key && key.startsWith(`worldlab_terminal_${labName}_`)) {
-          const terminalId = key.replace(`worldlab_terminal_${labName}_`, '')
-          const session = loadTerminalSession(labName, terminalId)
+        if (key && key.startsWith(prefix)) {
+          const terminalId = key.replace(prefix, '')
+          const session = loadTerminalSession(labName, terminalId, projectId)
           if (session) {
             allSessions.push(session)
           }
@@ -2464,6 +2723,7 @@ IMPORTANT:
 
   return (
     <div
+      data-worldlab-terminal="true"
       style={{
         width: '100%',
         height: '100%',
@@ -2524,7 +2784,9 @@ IMPORTANT:
                 onClick={() => {
                   if (!isDragging) {
                     setActiveTerminalId(session.id)
-                    saveActiveTerminalId(labName, session.id)
+                    if (projectId) {
+                      saveActiveTerminalId(labName, session.id, projectId)
+                    }
                   }
                 }}
                 onMouseEnter={() => {
@@ -2743,18 +3005,20 @@ IMPORTANT:
             // Check if terminal is already in tabs
             const terminalExists = terminalSessions.some(s => s.id === terminalId)
             
-            if (!terminalExists) {
+            if (!terminalExists && projectId) {
               // Load the terminal from localStorage and add it to tabs
-              const session = loadTerminalSession(labName, terminalId)
+              const session = loadTerminalSession(labName, terminalId, projectId)
               if (session) {
                 const newSessions = [...terminalSessions, session]
                 setTerminalSessions(newSessions)
-                saveOpenTerminalTabs(labName, newSessions.map(s => s.id))
+                saveOpenTerminalTabs(labName, newSessions.map(s => s.id), projectId)
               }
             }
             
             setActiveTerminalId(terminalId)
-            saveActiveTerminalId(labName, terminalId)
+            if (projectId) {
+              saveActiveTerminalId(labName, terminalId, projectId)
+            }
           }}
           onDeleteTerminal={(terminalId) => {
             // Remove from tabs if it's open
@@ -2781,6 +3045,7 @@ IMPORTANT:
       <div
         ref={terminalRef}
         className={`scrollable-container ${theme === 'dark' ? 'dark-theme' : ''}`}
+        onKeyDown={handleTerminalKeyDown}
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -2855,6 +3120,8 @@ IMPORTANT:
                 marginTop: isNewConversationRound ? '16px' : '0',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
+                userSelect: 'text',
+                WebkitUserSelect: 'text',
               }}
             >
               {highlightContent(line.content)}
@@ -2873,11 +3140,22 @@ IMPORTANT:
           {!isProcessing && (
             <div
               style={{
-                display: 'flex',
-                alignItems: 'flex-start',
+                position: 'relative',
               }}
             >
-              <span style={{ color: promptColor, marginRight: '8px' }}>worldlab &gt;</span>
+              <span 
+                ref={promptRef}
+                style={{ 
+                  color: promptColor, 
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  whiteSpace: 'nowrap',
+                  pointerEvents: 'none',
+                }}
+              >
+                worldlab &gt;
+              </span>
               <div
                 ref={inputRef}
                 contentEditable
@@ -2895,12 +3173,14 @@ IMPORTANT:
                   }, 0)
                 }}
                 style={{
-                  flex: 1,
                   outline: 'none',
                   color: textColor,
                   minHeight: '20px',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
+                  marginLeft: `${-promptWidth}px`,
+                  paddingLeft: `${promptWidth}px`,
+                  textIndent: `${promptWidth + 8}px`,
                 }}
               />
             </div>

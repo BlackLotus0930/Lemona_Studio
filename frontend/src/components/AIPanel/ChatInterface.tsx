@@ -240,11 +240,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       // Filter to only show workspace files (folder === 'project' or undefined/null)
       // Library files are handled separately in getFilteredMentions based on index status
       const mentionableDocs = docs.filter((doc: Document) => {
-        // Exclude README files
-        if (doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md') {
-          return false
-        }
-        
         // Only include workspace files (folder === 'project' or undefined/null)
         // Exclude library files (they will be shown separately if indexed)
         if (doc.folder === 'library') {
@@ -4224,6 +4219,31 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     try {
                       localStorage.setItem('smartIndexing', String(newValue))
                       await settingsApi.saveSmartIndexing(newValue)
+                      
+                      // If toggle is turned ON and we have projectId and API keys, start indexing
+                      if (newValue && projectId) {
+                        const hasApiKey = (googleApiKey && googleApiKey.trim().length > 0) ||
+                                         (openaiApiKey && openaiApiKey.trim().length > 0)
+                        
+                        if (hasApiKey) {
+                          console.log(`[Auto-Indexing] Library indexing toggle enabled, starting library file indexing for project ${projectId}...`)
+                          indexingApi.indexProjectLibraryFiles(
+                            projectId,
+                            googleApiKey || undefined,
+                            openaiApiKey || undefined,
+                            true // onlyUnindexed = true
+                          ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+                            const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+                            const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+                            if (successCount > 0 || errorCount > 0) {
+                              console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
+                            }
+                          }).catch((error) => {
+                            // Don't show error to user - indexing failures shouldn't interrupt workflow
+                            console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
+                          })
+                        }
+                      }
                     } catch (error) {
                       console.error('Failed to save Smart indexing setting:', error)
                     }

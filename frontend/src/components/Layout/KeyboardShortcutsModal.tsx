@@ -124,9 +124,15 @@ export default function KeyboardShortcutsModal({
       ]
     },
     {
-      category: 'General',
+      category: 'WorldLab',
       shortcuts: [
-        { action: 'Close modal/dialog', keys: ['Esc'] },
+        { action: 'Undo', keys: ['Ctrl', 'Z'] },
+        { action: 'Redo', keys: ['Ctrl', 'Shift', 'Z'] },
+        { action: 'Redo', keys: ['Ctrl', 'Y'] },
+        { action: 'Copy selected nodes and edges', keys: ['Ctrl', 'C'] },
+        { action: 'Paste copied nodes and edges', keys: ['Ctrl', 'V'] },
+        { action: 'Draw non-directional edge', keys: ['Left Mouse', '+', 'Drag'] },
+        { action: 'Draw directional edge', keys: ['Right Mouse', '+', 'Drag'] },
       ]
     }
   ]
@@ -140,6 +146,10 @@ export default function KeyboardShortcutsModal({
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
 
   const formatKey = (key: string): string => {
+    // Don't format mouse buttons or special text
+    if (key === 'Left Mouse' || key === 'Right Mouse' || key === 'Drag' || key === '+') {
+      return key
+    }
     if (isMac) {
       if (key === 'Ctrl') return '⌘'
       if (key === 'Shift') return '⇧'
@@ -153,24 +163,38 @@ export default function KeyboardShortcutsModal({
   }
 
   return (
-    <div 
-      ref={modalRef}
-      style={{
-        position: 'fixed',
-        top: rect ? `${rect.bottom + 4}px` : '100%',
-        left: '24px',
-        backgroundColor: theme === 'dark' ? '#181818' : '#ffffff',
-        border: `1px solid ${dropdownBorder}`,
-        borderRadius: '6px',
-        boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
-        zIndex: 10010,
-        width: '500px',
-        maxHeight: '600px',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden'
-      }}
-    >
+    <>
+      {/* Backdrop overlay - covers entire screen to catch all clicks */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 10009,
+          backgroundColor: 'transparent',
+        }}
+        onClick={onClose}
+      />
+      <div 
+        ref={modalRef}
+        style={{
+          position: 'fixed',
+          top: rect ? `${rect.bottom + 4}px` : '100%',
+          left: '24px',
+          backgroundColor: theme === 'dark' ? '#181818' : '#ffffff',
+          border: `1px solid ${dropdownBorder}`,
+          borderRadius: '6px',
+          boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
+          zIndex: 10010,
+          width: '500px',
+          maxHeight: '600px',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden'
+        }}
+      >
       {/* Header */}
       <div style={{
         padding: '16px 20px',
@@ -242,37 +266,51 @@ export default function KeyboardShortcutsModal({
                     alignItems: 'center',
                     gap: '4px'
                   }}>
-                    {shortcut.keys.map((key, keyIndex) => (
-                      <React.Fragment key={keyIndex}>
-                        <kbd style={{
-                          padding: '4px 8px',
-                          fontSize: '12px',
-                          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace",
-                          backgroundColor: theme === 'dark' ? '#252525' : '#f1f3f4',
-                          color: dropdownTextColor,
-                          border: `1px solid ${theme === 'dark' ? '#3a3a3a' : '#dadce0'}`,
-                          borderRadius: '6px',
-                          fontWeight: 500,
-                          minWidth: '24px',
-                          textAlign: 'center',
-                          display: 'inline-block',
-                          boxShadow: theme === 'dark' 
-                            ? '0 1px 2px rgba(0,0,0,0.3)' 
-                            : '0 1px 2px rgba(0,0,0,0.1)'
-                        }}>
-                          {formatKey(key)}
-                        </kbd>
-                        {keyIndex < shortcut.keys.length - 1 && (
-                          <span style={{
+                    {shortcut.keys.map((key, keyIndex) => {
+                      // Skip rendering "+" as a key badge, treat it as separator only
+                      if (key === '+') {
+                        return (
+                          <span key={keyIndex} style={{
                             color: theme === 'dark' ? '#555' : '#999',
                             fontSize: '12px',
                             margin: '0 2px'
                           }}>
                             +
                           </span>
-                        )}
-                      </React.Fragment>
-                    ))}
+                        )
+                      }
+                      return (
+                        <React.Fragment key={keyIndex}>
+                          <kbd style={{
+                            padding: '4px 8px',
+                            fontSize: '12px',
+                            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace",
+                            backgroundColor: theme === 'dark' ? '#252525' : '#f1f3f4',
+                            color: dropdownTextColor,
+                            border: `1px solid ${theme === 'dark' ? '#3a3a3a' : '#dadce0'}`,
+                            borderRadius: '6px',
+                            fontWeight: 500,
+                            minWidth: '24px',
+                            textAlign: 'center',
+                            display: 'inline-block',
+                            boxShadow: theme === 'dark' 
+                              ? '0 1px 2px rgba(0,0,0,0.3)' 
+                              : '0 1px 2px rgba(0,0,0,0.1)'
+                          }}>
+                            {formatKey(key)}
+                          </kbd>
+                          {keyIndex < shortcut.keys.length - 1 && shortcut.keys[keyIndex + 1] !== '+' && (
+                            <span style={{
+                              color: theme === 'dark' ? '#555' : '#999',
+                              fontSize: '12px',
+                              margin: '0 2px'
+                            }}>
+                              +
+                            </span>
+                          )}
+                        </React.Fragment>
+                      )
+                    })}
                   </div>
                 </div>
               ))}
@@ -281,6 +319,7 @@ export default function KeyboardShortcutsModal({
         ))}
       </div>
     </div>
+    </>
   )
 }
 

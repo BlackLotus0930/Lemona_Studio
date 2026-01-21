@@ -687,7 +687,7 @@ export default function Toolbar({
 
   const activeButtonStyle: React.CSSProperties = {
     ...buttonStyle,
-    backgroundColor: theme === 'dark' ? '#353535' : '#f0f0f0',
+    backgroundColor: theme === 'dark' ? '#2d2d2d' : '#f0f0f0',
     color: theme === 'dark' ? '#D6D6DD' : '#616161',
   }
 

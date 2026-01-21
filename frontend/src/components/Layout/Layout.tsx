@@ -70,10 +70,13 @@ function loadAIPanelState(): AIPanelState {
         width: parsed.width ?? 35
       }
     }
+    // First-time user: default to open
+    return { isOpen: true, width: 35 }
   } catch (error) {
     console.error('Failed to load AI panel state:', error)
+    // First-time user or error: default to open
+    return { isOpen: true, width: 35 }
   }
-  return { isOpen: true, width: 35 }
 }
 
 function saveAIPanelState(state: AIPanelState) {
@@ -393,6 +396,18 @@ export default function Layout(): JSX.Element {
   const lastRestoredDocIdRef = useRef<string | null>(null) // Track last document ID we restored search state for
   // Store Editor instances for each document (multi-editor architecture)
   const editorsMapRef = useRef<Map<string, Editor>>(new Map())
+  
+  // Open AI panel by default for first-time users when entering WorldLab mode
+  useEffect(() => {
+    if (isWorldLabMode && !isAIPanelOpen) {
+      // Check if this is a first-time user (no stored AI panel state)
+      const stored = localStorage.getItem(AI_PANEL_STORAGE_KEY)
+      if (!stored) {
+        // First-time user: open the panel
+        setIsAIPanelOpen(true)
+      }
+    }
+  }, [isWorldLabMode]) // Only run when WorldLab mode changes
   
   // Helper function to check if document content is empty
   const isDocumentEmpty = (content: any): boolean => {
@@ -823,9 +838,18 @@ export default function Layout(): JSX.Element {
           
           try {
             const labName = extractLabName(doc)
-            console.log(`[WorldLab] → Loading Lab: "${labName}"`)
+            const projectId = doc.projectId || ''
+            console.log(`[WorldLab] → Loading Lab: "${labName}" in project: ${projectId}`)
             
-            const worldLab = await worldLabApi.load(labName)
+            if (!projectId) {
+              console.warn(`[WorldLab] ⚠ No projectId for WorldLab file, cannot load`)
+              if (id === docId) {
+                setIsWorldLabMode(false)
+              }
+              return
+            }
+            
+            const worldLab = await worldLabApi.load(labName, projectId)
             
             if (worldLab && id === docId) {
               setWorldLabData(worldLab)
@@ -1034,6 +1058,8 @@ export default function Layout(): JSX.Element {
   useEffect(() => {
     if (document?.folder === 'library') {
       setSelectedFolder('library')
+    } else if (document?.folder === 'worldlab') {
+      setSelectedFolder('worldlab')
     } else if (document && (!document.folder || document.folder === 'project')) {
       setSelectedFolder('project')
     }
@@ -1648,7 +1674,10 @@ export default function Layout(): JSX.Element {
       })
       
       // Save edges with current node positions and metadata
-      await worldLabApi.saveEdges(labData.labName, labData.edges, nodePositions, nodeMetadata)
+      const projectId = document?.projectId || ''
+      if (projectId) {
+        await worldLabApi.saveEdges(labData.labName, labData.edges, projectId, nodePositions, nodeMetadata)
+      }
       console.log('[WorldLab] ✓ Saved changes before switching')
     } catch (error) {
       console.error('[WorldLab] ✗ Failed to save changes:', error)
@@ -1796,7 +1825,14 @@ export default function Layout(): JSX.Element {
       setEditingNodeId(nodeId)
 
       // Load node.md file content
-      const nodeMarkdown = await worldLabApi.loadNodeContent(labName, nodeId)
+      const projectId = document?.projectId || ''
+      if (!projectId) {
+        console.error('[WorldLab] No projectId available')
+        setEditingNodeId(null)
+        setNodeDocumentContent(null)
+        return
+      }
+      const nodeMarkdown = await worldLabApi.loadNodeContent(labName, nodeId, projectId)
       const nodeContent = JSON.stringify(markdownToTipTap(nodeMarkdown || ''))
       setNodeDocumentContent(nodeContent)
     } catch (error) {
@@ -1821,7 +1857,12 @@ export default function Layout(): JSX.Element {
       // Convert TipTap JSON to markdown
       const parsedContent = JSON.parse(content)
       const markdown = tipTapToMarkdown(parsedContent)
-      await worldLabApi.saveNode(labName, nodeId, markdown)
+      const projectId = document?.projectId || ''
+      if (!projectId) {
+        console.error('[WorldLab] No projectId available')
+        return
+      }
+      await worldLabApi.saveNode(labName, nodeId, markdown, projectId)
     } catch (error) {
       console.error('[WorldLab] Failed to save node content:', error)
     }
@@ -2305,13 +2346,13 @@ export default function Layout(): JSX.Element {
       // If current document was deleted, find next file to navigate to
       if (isCurrentDocument) {
         // Helper function to get documents in file explorer order:
-        // 1. README.md (if exists)
-        // 2. Library files (sorted by order or createdAt)
+        // 1. Library files (sorted by order or createdAt)
+        // 2. WorldLab files (sorted by order or createdAt)
         // 3. Project files (sorted by order or createdAt)
         const getDocumentsInFileExplorerOrder = (docs: Document[]): Document[] => {
-          const readmeDoc = docs.find(doc => doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md')
-          const libraryDocs = docs.filter(doc => doc.folder === 'library' && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
-          const projectDocs = docs.filter(doc => (!doc.folder || doc.folder === 'project') && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
+          const libraryDocs = docs.filter(doc => doc.folder === 'library')
+          const worldLabDocs = docs.filter(doc => doc.folder === 'worldlab')
+          const projectDocs = docs.filter(doc => (!doc.folder || doc.folder === 'project'))
           
           // Sort documents by order if available, otherwise by creation time
           const sortDocuments = (docsToSort: Document[]) => {
@@ -2324,10 +2365,8 @@ export default function Layout(): JSX.Element {
           }
           
           const orderedDocs: Document[] = []
-          if (readmeDoc) {
-            orderedDocs.push(readmeDoc)
-          }
           orderedDocs.push(...sortDocuments(libraryDocs))
+          orderedDocs.push(...sortDocuments(worldLabDocs))
           orderedDocs.push(...sortDocuments(projectDocs))
           
           return orderedDocs
@@ -2354,8 +2393,8 @@ export default function Layout(): JSX.Element {
           const deletedFolder = deletedDoc?.folder || 'project'
           
           // Get folder boundaries in the ORIGINAL ordered list to determine position
-          const originalReadmeDoc = documents.find(doc => doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md')
-          const originalLibraryDocs = documents.filter(doc => doc.folder === 'library' && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
+          const originalLibraryDocs = documents.filter(doc => doc.folder === 'library')
+          const originalWorldLabDocs = documents.filter(doc => doc.folder === 'worldlab')
           
           const sortDocuments = (docsToSort: Document[]) => {
             return [...docsToSort].sort((a, b) => {
@@ -2367,21 +2406,25 @@ export default function Layout(): JSX.Element {
           }
           
           const originalSortedLibraryDocs = sortDocuments(originalLibraryDocs)
+          const originalSortedWorldLabDocs = sortDocuments(originalWorldLabDocs)
           
           // Calculate folder start indices in the ORIGINAL ordered list
-          const originalLibraryStartIndex = originalReadmeDoc ? 1 : 0
-          const originalProjectStartIndex = originalLibraryStartIndex + originalSortedLibraryDocs.length
+          const originalLibraryStartIndex = 0
+          const originalWorldLabStartIndex = originalLibraryStartIndex + originalSortedLibraryDocs.length
+          const originalProjectStartIndex = originalWorldLabStartIndex + originalSortedWorldLabDocs.length
           
           // Get folder boundaries in the UPDATED ordered list
-          const updatedReadmeDoc = updatedDocuments.find(doc => doc.title === 'README.md' || doc.title.toLowerCase() === 'readme.md')
-          const updatedLibraryDocs = updatedDocuments.filter(doc => doc.folder === 'library' && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
-          const updatedProjectDocs = updatedDocuments.filter(doc => (!doc.folder || doc.folder === 'project') && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
+          const updatedLibraryDocs = updatedDocuments.filter(doc => doc.folder === 'library')
+          const updatedWorldLabDocs = updatedDocuments.filter(doc => doc.folder === 'worldlab')
+          const updatedProjectDocs = updatedDocuments.filter(doc => (!doc.folder || doc.folder === 'project'))
           
           const updatedSortedLibraryDocs = sortDocuments(updatedLibraryDocs)
+          const updatedSortedWorldLabDocs = sortDocuments(updatedWorldLabDocs)
           const updatedSortedProjectDocs = sortDocuments(updatedProjectDocs)
           
-          const updatedLibraryStartIndex = updatedReadmeDoc ? 1 : 0
-          const updatedProjectStartIndex = updatedLibraryStartIndex + updatedSortedLibraryDocs.length
+          const updatedLibraryStartIndex = 0
+          const updatedWorldLabStartIndex = updatedLibraryStartIndex + updatedSortedLibraryDocs.length
+          const updatedProjectStartIndex = updatedWorldLabStartIndex + updatedSortedWorldLabDocs.length
           
           let targetIndex: number
           
@@ -2395,7 +2438,24 @@ export default function Layout(): JSX.Element {
                 // Go to the first library file in the updated list
                 targetIndex = updatedLibraryStartIndex
               } else {
-                // No more files in library, go to the file above (README)
+                // No more files in library, go to the file above
+                targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
+              }
+            } else {
+              // Not the first file, go to the file above
+              targetIndex = deletedIndex - 1
+            }
+          } else if (deletedFolder === 'worldlab') {
+            // Check if this was the first file in the worldlab folder (in original list)
+            const isFirstInWorldLab = deletedIndex === originalWorldLabStartIndex
+            
+            if (isFirstInWorldLab) {
+              // If there's another file in the worldlab folder after deletion, go to it
+              if (updatedSortedWorldLabDocs.length > 0) {
+                // Go to the first worldlab file in the updated list
+                targetIndex = updatedWorldLabStartIndex
+              } else {
+                // No more files in worldlab, go to the file above (last library file)
                 targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
               }
             } else {
@@ -2413,7 +2473,7 @@ export default function Layout(): JSX.Element {
                 // Go to the first project file in the updated list
                 targetIndex = updatedProjectStartIndex
               } else {
-                // No more files in project, go to the file above (last library file or README)
+                // No more files in project, go to the file above (last worldlab file or library file)
                 targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
               }
             } else {
@@ -2518,9 +2578,18 @@ export default function Layout(): JSX.Element {
 
   const handleCreateDocument = async () => {
     try {
-      // Use selected folder if available, otherwise default to 'project'
-      // Ensure we always pass a string value, not null or undefined
-      const folder: 'library' | 'project' | 'worldlab' = selectedFolder === 'library' ? 'library' : selectedFolder === 'worldlab' ? 'worldlab' : 'project'
+      // Use selected folder if available, otherwise check current document's folder or isWorldLabMode
+      // If still not determined, default to 'project'
+      let folder: 'library' | 'project' | 'worldlab' = 'project'
+      if (selectedFolder === 'library' || selectedFolder === 'worldlab') {
+        folder = selectedFolder
+      } else if (isWorldLabMode || document?.folder === 'worldlab') {
+        folder = 'worldlab'
+      } else if (document?.folder === 'library') {
+        folder = 'library'
+      } else if (selectedFolder === 'project' || (!document?.folder || document?.folder === 'project')) {
+        folder = 'project'
+      }
       
       // Generate name based on folder: "Chapter X" for workspace, "Doc X" for library, "New world X.lab" for worldlab
       const namePrefix = folder === 'library' ? 'Doc' : folder === 'worldlab' ? 'New world' : 'Chapter'
@@ -2964,13 +3033,8 @@ export default function Layout(): JSX.Element {
             if (isLoadingDocumentRef.current || isNewlyCreatedDocRef.current) {
               return ''
             }
-            // Only show placeholder for README files
-            const docTitle = currentDocTitleRef.current
-            const isReadme = docTitle?.toLowerCase() === 'readme.md' || 
-                            docTitle?.toLowerCase() === 'readme'
-            return isReadme 
-              ? 'This README helps the AI learn about the project...'
-              : '' // No placeholder for regular documents
+            // No placeholder for documents
+            return ''
           },
         }),
         Underline,
@@ -6230,6 +6294,7 @@ export default function Layout(): JSX.Element {
             // WorldLab mode - render Canvas with floating editor
             <WorldLabCanvas
               labName={worldLabData.labName}
+              projectId={document?.projectId || ''}
               initialNodes={worldLabData.nodes}
               initialEdges={worldLabData.edges}
               onNodeDoubleClick={handleNodeDoubleClick}

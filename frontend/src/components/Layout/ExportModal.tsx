@@ -35,7 +35,7 @@ export default function ExportModal({
 
   // Filter documents: only show workspace files (folder === 'project' or undefined/null)
   const workspaceDocuments = documents
-    .filter(doc => (!doc.folder || doc.folder === 'project') && doc.title !== 'README.md' && doc.title.toLowerCase() !== 'readme.md')
+    .filter(doc => (!doc.folder || doc.folder === 'project'))
     .sort((a, b) => {
       if (a.order !== undefined && b.order !== undefined) {
         return a.order - b.order

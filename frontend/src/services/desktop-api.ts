@@ -312,35 +312,35 @@ export const versionApi = {
 }
 
 export const worldLabApi = {
-  load: (labName: string): Promise<WorldLab | null> =>
-    invokeOrFetch('worldlab:load', labName),
-  loadNodes: (labName: string): Promise<WorldLabNode[]> =>
-    invokeOrFetch('worldlab:loadNodes', labName),
-  loadEdges: (labName: string): Promise<WorldLabEdge[]> =>
-    invokeOrFetch('worldlab:loadEdges', labName),
-  loadMetadata: (labName: string): Promise<WorldLabMetadata | null> =>
-    invokeOrFetch('worldlab:loadMetadata', labName),
-  loadNodeContent: (labName: string, nodeId: string): Promise<string | null> =>
-    invokeOrFetch('worldlab:loadNodeContent', labName, nodeId),
-  loadMetadataContent: (labName: string): Promise<string | null> =>
-    invokeOrFetch('worldlab:loadMetadataContent', labName),
-  saveNode: (labName: string, nodeId: string, content: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:saveNode', labName, nodeId, content),
-  saveEdges: (labName: string, edges: WorldLabEdge[], nodePositions?: Record<string, { x: number; y: number }>, nodeMetadata?: Record<string, { label?: string; category?: string; elementName?: string }>): Promise<boolean> =>
-    invokeOrFetch('worldlab:saveEdges', labName, edges, nodePositions, nodeMetadata),
-  saveNodePositions: (labName: string, nodes: WorldLabNode[]): Promise<boolean> =>
-    invokeOrFetch('worldlab:saveNodePositions', labName, nodes),
-  createNode: (labName: string, nodeId: string, content?: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:createNode', labName, nodeId, content),
-  deleteNode: (labName: string, nodeId: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:deleteNode', labName, nodeId),
-  saveMetadata: (labName: string, metadata: WorldLabMetadata): Promise<boolean> =>
-    invokeOrFetch('worldlab:saveMetadata', labName, metadata),
-  labExists: (labName: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:labExists', labName),
-  getAllLabNames: (): Promise<string[]> =>
-    invokeOrFetch('worldlab:getAllLabNames'),
-  deleteLab: (labName: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:deleteLab', labName),
+  load: (labName: string, projectId: string): Promise<WorldLab | null> =>
+    invokeOrFetch('worldlab:load', labName, projectId),
+  loadNodes: (labName: string, projectId: string): Promise<WorldLabNode[]> =>
+    invokeOrFetch('worldlab:loadNodes', labName, projectId),
+  loadEdges: (labName: string, projectId: string): Promise<WorldLabEdge[]> =>
+    invokeOrFetch('worldlab:loadEdges', labName, projectId),
+  loadMetadata: (labName: string, projectId: string): Promise<WorldLabMetadata | null> =>
+    invokeOrFetch('worldlab:loadMetadata', labName, projectId),
+  loadNodeContent: (labName: string, nodeId: string, projectId: string): Promise<string | null> =>
+    invokeOrFetch('worldlab:loadNodeContent', labName, nodeId, projectId),
+  loadMetadataContent: (labName: string, projectId: string): Promise<string | null> =>
+    invokeOrFetch('worldlab:loadMetadataContent', labName, projectId),
+  saveNode: (labName: string, nodeId: string, content: string, projectId: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:saveNode', labName, nodeId, content, projectId),
+  saveEdges: (labName: string, edges: WorldLabEdge[], projectId: string, nodePositions?: Record<string, { x: number; y: number }>, nodeMetadata?: Record<string, { label?: string; category?: string; elementName?: string }>): Promise<boolean> =>
+    invokeOrFetch('worldlab:saveEdges', labName, edges, projectId, nodePositions, nodeMetadata),
+  saveNodePositions: (labName: string, nodes: WorldLabNode[], projectId: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:saveNodePositions', labName, nodes, projectId),
+  createNode: (labName: string, nodeId: string, projectId: string, content?: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:createNode', labName, nodeId, projectId, content),
+  deleteNode: (labName: string, nodeId: string, projectId: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:deleteNode', labName, nodeId, projectId),
+  saveMetadata: (labName: string, metadata: WorldLabMetadata, projectId: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:saveMetadata', labName, metadata, projectId),
+  labExists: (labName: string, projectId: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:labExists', labName, projectId),
+  getAllLabNames: (projectId: string): Promise<string[]> =>
+    invokeOrFetch('worldlab:getAllLabNames', projectId),
+  deleteLab: (labName: string, projectId: string): Promise<boolean> =>
+    invokeOrFetch('worldlab:deleteLab', labName, projectId),
 }
 

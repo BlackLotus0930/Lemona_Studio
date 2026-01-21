@@ -68,16 +68,14 @@ export default function DocumentList() {
       
       setProjects(sortedProjects)
       
-      // Load first workspace document (excluding README.md) for each project for preview and get actual document count
+      // Load first workspace document for each project for preview and get actual document count
       const projectsWithPreviews = await Promise.all(
         sortedProjects.map(async (project: any) => {
     try {
             const docs = await projectApi.getDocuments(project.id)
-            // Filter to get first workspace file (exclude README.md)
+            // Filter to get first workspace file
             const workspaceDocs = docs.filter((doc: any) => 
-              (!doc.folder || doc.folder === 'project') && 
-              doc.title !== 'README.md' && 
-              doc.title.toLowerCase() !== 'readme.md'
+              (!doc.folder || doc.folder === 'project')
             )
             const firstWorkspaceDoc = workspaceDocs.length > 0 ? workspaceDocs[0] : (docs[0] || null)
             return { ...project, firstDocument: firstWorkspaceDoc, actualDocumentCount: docs.length }
