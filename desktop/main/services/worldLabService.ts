@@ -26,11 +26,14 @@ ensureWorldLabDir()
 /**
  * Get the path to a Lab directory (with .worldlab extension)
  * Lab name should be like "WorldLab(1)" and will be stored as "WorldLab(1).worldlab"
+ * Project ID is included to scope labs per project
  */
-function getLabPath(labName: string): string {
+function getLabPath(labName: string, projectId: string): string {
   // Ensure lab name has .worldlab extension
   const labFolderName = labName.endsWith('.worldlab') ? labName : `${labName}.worldlab`
-  return path.join(WORLDLAB_DIR, labFolderName)
+  // Scope labs by project: /worldlab/{projectId}/{labName}.worldlab
+  const projectDir = path.join(WORLDLAB_DIR, projectId)
+  return path.join(projectDir, labFolderName)
 }
 
 /**
@@ -100,12 +103,16 @@ function extractTitleFromMarkdown(content: string): string {
 
 export const worldLabService = {
   /**
-   * Load a WorldLab by lab name
+   * Load a WorldLab by lab name and project ID
    */
-  async load(labName: string): Promise<WorldLab | null> {
+  async load(labName: string, projectId: string): Promise<WorldLab | null> {
     try {
-      const labPath = getLabPath(labName)
-      console.log(`[worldLabService] Loading Lab: labName=${labName}, labPath=${labPath}`)
+      const labPath = getLabPath(labName, projectId)
+      console.log(`[worldLabService] Loading Lab: labName=${labName}, projectId=${projectId}, labPath=${labPath}`)
+      
+      // Ensure project directory exists
+      const projectDir = path.join(WORLDLAB_DIR, projectId)
+      await fs.mkdir(projectDir, { recursive: true })
       
       // Check if Lab directory exists
       try {
@@ -128,15 +135,15 @@ export const worldLabService = {
       }
 
       // Load metadata
-      const metadata = await this.loadMetadata(labName)
+      const metadata = await this.loadMetadata(labName, projectId)
       console.log(`[worldLabService] Loaded metadata:`, metadata)
       
       // Load nodes
-      const nodes = await this.loadNodes(labName)
+      const nodes = await this.loadNodes(labName, projectId)
       console.log(`[worldLabService] Loaded ${nodes.length} nodes`)
       
       // Load edges
-      const edges = await this.loadEdges(labName)
+      const edges = await this.loadEdges(labName, projectId)
       console.log(`[worldLabService] Loaded ${edges.length} edges`)
 
       return {
@@ -150,7 +157,7 @@ export const worldLabService = {
       console.error(`[worldLabService] Error loading Lab ${labName}:`, error)
       // Return empty structure instead of null to allow empty canvas
       return {
-        labPath: getLabPath(labName),
+        labPath: getLabPath(labName, projectId),
         labName,
         metadata: {
           createdAt: new Date().toISOString(),
@@ -165,9 +172,9 @@ export const worldLabService = {
   /**
    * Load all nodes from a Lab
    */
-  async loadNodes(labName: string): Promise<WorldLabNode[]> {
+  async loadNodes(labName: string, projectId: string): Promise<WorldLabNode[]> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       const nodesDir = getNodesDirPath(labPath)
       
       // Ensure nodes directory exists
@@ -271,9 +278,9 @@ export const worldLabService = {
    * Load edges from edges.json
    * edges.json may contain both edges array and nodePositions object
    */
-  async loadEdges(labName: string): Promise<WorldLabEdge[]> {
+  async loadEdges(labName: string, projectId: string): Promise<WorldLabEdge[]> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       const edgesPath = getEdgesPath(labPath)
       
       try {
@@ -319,9 +326,9 @@ export const worldLabService = {
   /**
    * Load metadata from metadata.json
    */
-  async loadMetadata(labName: string): Promise<WorldLabMetadata | null> {
+  async loadMetadata(labName: string, projectId: string): Promise<WorldLabMetadata | null> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       const metadataPath = getMetadataPath(labPath)
       
       try {
@@ -343,9 +350,9 @@ export const worldLabService = {
   /**
    * Load a single node file content (raw markdown)
    */
-  async loadNodeContent(labName: string, nodeId: string): Promise<string | null> {
+  async loadNodeContent(labName: string, nodeId: string, projectId: string): Promise<string | null> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       const filePath = getNodeFilePath(labPath, nodeId)
       
       try {
@@ -364,9 +371,9 @@ export const worldLabService = {
   /**
    * Load metadata.json content as string
    */
-  async loadMetadataContent(labName: string): Promise<string | null> {
+  async loadMetadataContent(labName: string, projectId: string): Promise<string | null> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       const metadataPath = getMetadataPath(labPath)
       
       try {
@@ -388,9 +395,9 @@ export const worldLabService = {
   /**
    * Save a node file
    */
-  async saveNode(labName: string, nodeId: string, content: string): Promise<boolean> {
+  async saveNode(labName: string, nodeId: string, content: string, projectId: string): Promise<boolean> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       const nodesDir = getNodesDirPath(labPath)
       
       // Ensure nodes directory exists
@@ -400,7 +407,7 @@ export const worldLabService = {
       await fs.writeFile(filePath, content, 'utf-8')
       
       // Update metadata updatedAt
-      await this.updateMetadataTimestamp(labName)
+      await this.updateMetadataTimestamp(labName, projectId)
       
       return true
     } catch (error) {
@@ -416,11 +423,12 @@ export const worldLabService = {
   async saveEdges(
     labName: string, 
     edges: WorldLabEdge[], 
+    projectId: string,
     nodePositions?: Map<string, { x: number; y: number }>,
     nodeMetadata?: Map<string, { label?: string; category?: string; elementName?: string }>
   ): Promise<boolean> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       const edgesPath = getEdgesPath(labPath)
       
       // Ensure Lab directory exists
@@ -462,7 +470,7 @@ export const worldLabService = {
       await fs.writeFile(edgesPath, JSON.stringify(edgesData, null, 2), 'utf-8')
       
       // Update metadata updatedAt
-      await this.updateMetadataTimestamp(labName)
+      await this.updateMetadataTimestamp(labName, projectId)
       
       return true
     } catch (error) {
@@ -474,10 +482,10 @@ export const worldLabService = {
   /**
    * Save node positions and metadata (updates edges.json with positions and metadata)
    */
-  async saveNodePositions(labName: string, nodes: WorldLabNode[]): Promise<boolean> {
+  async saveNodePositions(labName: string, nodes: WorldLabNode[], projectId: string): Promise<boolean> {
     try {
       // Load existing edges
-      const edges = await this.loadEdges(labName)
+      const edges = await this.loadEdges(labName, projectId)
       
       // Create positions map
       const nodePositions = new Map<string, { x: number; y: number }>()
@@ -496,7 +504,7 @@ export const worldLabService = {
       })
       
       // Save edges with positions and metadata
-      return await this.saveEdges(labName, edges, nodePositions, nodeMetadata)
+      return await this.saveEdges(labName, edges, projectId, nodePositions, nodeMetadata)
     } catch (error) {
       console.error(`[worldLabService] Error saving node positions for Lab ${labName}:`, error)
       return false
@@ -506,9 +514,9 @@ export const worldLabService = {
   /**
    * Create a new node
    */
-  async createNode(labName: string, nodeId: string, content: string = ''): Promise<boolean> {
+  async createNode(labName: string, nodeId: string, projectId: string, content: string = ''): Promise<boolean> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       const nodesDir = getNodesDirPath(labPath)
       
       // Ensure nodes directory exists
@@ -529,7 +537,7 @@ export const worldLabService = {
       await fs.writeFile(filePath, content, 'utf-8')
       
       // Update metadata updatedAt
-      await this.updateMetadataTimestamp(labName)
+      await this.updateMetadataTimestamp(labName, projectId)
       
       return true
     } catch (error) {
@@ -541,10 +549,10 @@ export const worldLabService = {
   /**
    * Delete a node file
    */
-  async deleteNode(labName: string, nodeId: string): Promise<boolean> {
+  async deleteNode(labName: string, nodeId: string, projectId: string): Promise<boolean> {
     try {
-      console.log(`[worldLabService] deleteNode called for lab: ${labName}, nodeId: ${nodeId}`)
-      const labPath = getLabPath(labName)
+      console.log(`[worldLabService] deleteNode called for lab: ${labName}, nodeId: ${nodeId}, projectId: ${projectId}`)
+      const labPath = getLabPath(labName, projectId)
       const filePath = getNodeFilePath(labPath, nodeId)
       console.log(`[worldLabService] deleteNode - labPath: ${labPath}`)
       console.log(`[worldLabService] deleteNode - filePath: ${filePath}`)
@@ -579,18 +587,18 @@ export const worldLabService = {
       
       // Also remove edges connected to this node (even if file didn't exist)
       console.log(`[worldLabService] deleteNode - Loading edges to remove connections`)
-      const edges = await this.loadEdges(labName)
+      const edges = await this.loadEdges(labName, projectId)
       console.log(`[worldLabService] deleteNode - Loaded ${edges.length} edges`)
       const filteredEdges = edges.filter(
         edge => edge.source !== nodeId && edge.target !== nodeId
       )
       console.log(`[worldLabService] deleteNode - Filtered to ${filteredEdges.length} edges (removed ${edges.length - filteredEdges.length} edges connected to node)`)
-      await this.saveEdges(labName, filteredEdges)
+      await this.saveEdges(labName, filteredEdges, projectId)
       console.log(`[worldLabService] deleteNode - Saved filtered edges`)
       
       // Update metadata updatedAt
       console.log(`[worldLabService] deleteNode - Updating metadata timestamp`)
-      await this.updateMetadataTimestamp(labName)
+      await this.updateMetadataTimestamp(labName, projectId)
       console.log(`[worldLabService] deleteNode - Successfully completed deletion for node ${nodeId}`)
       
       return true
@@ -603,15 +611,15 @@ export const worldLabService = {
   /**
    * Update metadata timestamp
    */
-  async updateMetadataTimestamp(labName: string): Promise<void> {
+  async updateMetadataTimestamp(labName: string, projectId: string): Promise<void> {
     try {
-      const metadata = await this.loadMetadata(labName)
+      const metadata = await this.loadMetadata(labName, projectId)
       const updatedMetadata: WorldLabMetadata = {
         ...metadata,
         updatedAt: new Date().toISOString(),
       }
       
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       const metadataPath = getMetadataPath(labPath)
       
       await fs.mkdir(labPath, { recursive: true })
@@ -624,9 +632,9 @@ export const worldLabService = {
   /**
    * Save metadata
    */
-  async saveMetadata(labName: string, metadata: WorldLabMetadata): Promise<boolean> {
+  async saveMetadata(labName: string, metadata: WorldLabMetadata, projectId: string): Promise<boolean> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       const metadataPath = getMetadataPath(labPath)
       
       await fs.mkdir(labPath, { recursive: true })
@@ -648,9 +656,9 @@ export const worldLabService = {
   /**
    * Check if a Lab exists
    */
-  async labExists(labName: string): Promise<boolean> {
+  async labExists(labName: string, projectId: string): Promise<boolean> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       await fs.access(labPath)
       return true
     } catch {
@@ -659,17 +667,25 @@ export const worldLabService = {
   },
 
   /**
-   * Get all Lab names (returns names without .worldlab extension)
+   * Get all Lab names for a specific project (returns names without .worldlab extension)
    */
-  async getAllLabNames(): Promise<string[]> {
+  async getAllLabNames(projectId: string): Promise<string[]> {
     try {
       await ensureWorldLabDir()
-      const entries = await fs.readdir(WORLDLAB_DIR, { withFileTypes: true })
+      const projectDir = path.join(WORLDLAB_DIR, projectId)
+      // Check if project directory exists
+      try {
+        await fs.access(projectDir)
+      } catch {
+        // Project directory doesn't exist, return empty array
+        return []
+      }
+      const entries = await fs.readdir(projectDir, { withFileTypes: true })
       return entries
         .filter(entry => entry.isDirectory() && entry.name.endsWith('.worldlab'))
         .map(entry => extractLabName(entry.name))
     } catch (error) {
-      console.error('[worldLabService] Error getting all Lab names:', error)
+      console.error(`[worldLabService] Error getting all Lab names for project ${projectId}:`, error)
       return []
     }
   },
@@ -677,9 +693,9 @@ export const worldLabService = {
   /**
    * Delete a Lab directory and all its contents
    */
-  async deleteLab(labName: string): Promise<boolean> {
+  async deleteLab(labName: string, projectId: string): Promise<boolean> {
     try {
-      const labPath = getLabPath(labName)
+      const labPath = getLabPath(labName, projectId)
       console.log(`[worldLabService] deleteLab called for lab: ${labName}, labPath: ${labPath}`)
       
       // Check if directory exists

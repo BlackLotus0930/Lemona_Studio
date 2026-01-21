@@ -481,7 +481,13 @@ export const documentService = {
                         }
                         // Import worldLabService dynamically to avoid circular dependency
                         const { worldLabService } = await import('./worldLabService.js');
-                        await worldLabService.deleteLab(labName);
+                        const projectId = document.projectId || '';
+                        if (projectId) {
+                            await worldLabService.deleteLab(labName, projectId);
+                        }
+                        else {
+                            console.warn(`[documentService.deleteUnsafe] No projectId for WorldLab file, skipping directory deletion`);
+                        }
                         console.log(`[documentService.deleteUnsafe] Background: Successfully deleted WorldLab directory: ${labName}`);
                     }
                     catch (labError) {

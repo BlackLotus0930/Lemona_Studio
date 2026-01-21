@@ -1073,70 +1073,70 @@ Rephrased text:`;
         }
     });
     // WorldLab operations
-    ipcMain.handle('worldlab:load', async (_, labName) => {
+    ipcMain.handle('worldlab:load', async (_, labName, projectId) => {
         try {
-            return await worldLabService.load(labName);
+            return await worldLabService.load(labName, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:load error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:loadNodes', async (_, labName) => {
+    ipcMain.handle('worldlab:loadNodes', async (_, labName, projectId) => {
         try {
-            return await worldLabService.loadNodes(labName);
+            return await worldLabService.loadNodes(labName, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:loadNodes error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:loadEdges', async (_, labName) => {
+    ipcMain.handle('worldlab:loadEdges', async (_, labName, projectId) => {
         try {
-            return await worldLabService.loadEdges(labName);
+            return await worldLabService.loadEdges(labName, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:loadEdges error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:loadMetadata', async (_, labName) => {
+    ipcMain.handle('worldlab:loadMetadata', async (_, labName, projectId) => {
         try {
-            return await worldLabService.loadMetadata(labName);
+            return await worldLabService.loadMetadata(labName, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:loadMetadata error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:loadNodeContent', async (_, labName, nodeId) => {
+    ipcMain.handle('worldlab:loadNodeContent', async (_, labName, nodeId, projectId) => {
         try {
-            return await worldLabService.loadNodeContent(labName, nodeId);
+            return await worldLabService.loadNodeContent(labName, nodeId, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:loadNodeContent error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:loadMetadataContent', async (_, labName) => {
+    ipcMain.handle('worldlab:loadMetadataContent', async (_, labName, projectId) => {
         try {
-            return await worldLabService.loadMetadataContent(labName);
+            return await worldLabService.loadMetadataContent(labName, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:loadMetadataContent error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:saveNode', async (_, labName, nodeId, content) => {
+    ipcMain.handle('worldlab:saveNode', async (_, labName, nodeId, content, projectId) => {
         try {
-            return await worldLabService.saveNode(labName, nodeId, content);
+            return await worldLabService.saveNode(labName, nodeId, content, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:saveNode error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:saveEdges', async (_, labName, edges, nodePositions, nodeMetadata) => {
+    ipcMain.handle('worldlab:saveEdges', async (_, labName, edges, projectId, nodePositions, nodeMetadata) => {
         try {
             // Convert nodePositions from object to Map if provided
             let positionsMap;
@@ -1162,35 +1162,35 @@ Rephrased text:`;
                     }
                 });
             }
-            return await worldLabService.saveEdges(labName, edges, positionsMap, metadataMap);
+            return await worldLabService.saveEdges(labName, edges, projectId, positionsMap, metadataMap);
         }
         catch (error) {
             console.error('IPC worldlab:saveEdges error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:saveNodePositions', async (_, labName, nodes) => {
+    ipcMain.handle('worldlab:saveNodePositions', async (_, labName, nodes, projectId) => {
         try {
-            return await worldLabService.saveNodePositions(labName, nodes);
+            return await worldLabService.saveNodePositions(labName, nodes, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:saveNodePositions error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:createNode', async (_, labName, nodeId, content) => {
+    ipcMain.handle('worldlab:createNode', async (_, labName, nodeId, projectId, content) => {
         try {
-            return await worldLabService.createNode(labName, nodeId, content);
+            return await worldLabService.createNode(labName, nodeId, projectId, content);
         }
         catch (error) {
             console.error('IPC worldlab:createNode error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:deleteNode', async (_, labName, nodeId) => {
-        console.log(`[IPC] worldlab:deleteNode called - labName: ${labName}, nodeId: ${nodeId}`);
+    ipcMain.handle('worldlab:deleteNode', async (_, labName, nodeId, projectId) => {
+        console.log(`[IPC] worldlab:deleteNode called - labName: ${labName}, nodeId: ${nodeId}, projectId: ${projectId}`);
         try {
-            const result = await worldLabService.deleteNode(labName, nodeId);
+            const result = await worldLabService.deleteNode(labName, nodeId, projectId);
             console.log(`[IPC] worldlab:deleteNode result: ${result} for nodeId: ${nodeId}`);
             return result;
         }
@@ -1199,36 +1199,36 @@ Rephrased text:`;
             throw error;
         }
     });
-    ipcMain.handle('worldlab:saveMetadata', async (_, labName, metadata) => {
+    ipcMain.handle('worldlab:saveMetadata', async (_, labName, metadata, projectId) => {
         try {
-            return await worldLabService.saveMetadata(labName, metadata);
+            return await worldLabService.saveMetadata(labName, metadata, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:saveMetadata error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:labExists', async (_, labName) => {
+    ipcMain.handle('worldlab:labExists', async (_, labName, projectId) => {
         try {
-            return await worldLabService.labExists(labName);
+            return await worldLabService.labExists(labName, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:labExists error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:getAllLabNames', async () => {
+    ipcMain.handle('worldlab:getAllLabNames', async (_, projectId) => {
         try {
-            return await worldLabService.getAllLabNames();
+            return await worldLabService.getAllLabNames(projectId);
         }
         catch (error) {
             console.error('IPC worldlab:getAllLabNames error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:deleteLab', async (_, labName) => {
+    ipcMain.handle('worldlab:deleteLab', async (_, labName, projectId) => {
         try {
-            return await worldLabService.deleteLab(labName);
+            return await worldLabService.deleteLab(labName, projectId);
         }
         catch (error) {
             console.error('IPC worldlab:deleteLab error:', error);
