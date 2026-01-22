@@ -2,7 +2,7 @@
 
 **An Integrated Writing Environment**
 
-Lemona combines a sophisticated text editor with context-aware AI assistance, semantic search, and visual knowledge management in a privacy-focused desktop application.
+Lemona combines a sophisticated text editor with context-aware AI assistance and visual knowledge management.
 
 ---
 

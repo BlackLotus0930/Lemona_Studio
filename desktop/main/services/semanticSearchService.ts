@@ -2,6 +2,8 @@
 import { generateEmbedding } from './embeddingService.js'
 import { getVectorStore, SearchResult, getProjectLockManager } from './vectorStore.js'
 import { documentService } from './documentService.js'
+import { indexProjectLibraryFiles, indexProjectWorkspaceFiles } from './indexingService.js'
+import { getSmartIndexing } from './apiKeyStore.js'
 
 /**
  * Parsed mention information
@@ -34,7 +36,7 @@ export function parseMentions(message: string): ParsedMentions {
   // Pattern to match @mentions
   // Matches: @Library, @filename, @file-id, @"File Name.md", @'File Name.md'
   // Keep a leading whitespace group so we can preserve it in replacements.
-  const mentionPattern = /(^|\s)@("([^"]+)"|'([^']+)'|([^\s@]+))/g
+  const mentionPattern = /(^|\s)@\s*("([^"]+)"|'([^']+)'|([^\s@]+))/g
   const matches = Array.from(message.matchAll(mentionPattern))
 
   if (matches.length === 0) {
@@ -71,6 +73,98 @@ export function parseMentions(message: string): ParsedMentions {
   result.cleanedMessage = message.replace(mentionPattern, (_full, prefix) => prefix || '').trim()
 
   return result
+}
+
+const INDEX_RECOVERY_COOLDOWN_MS = 2 * 60 * 1000
+const indexRecoveryState = new Map<string, { inFlight: Promise<void> | null; lastAttempt: number }>()
+
+function getRecoveryKey(projectId: string, folder: 'library' | 'project'): string {
+  return `${projectId}:${folder}`
+}
+
+function isIndexableLibraryDocument(doc: { title?: string }): boolean {
+  const fileExt = (doc.title || '').toLowerCase().split('.').pop() || ''
+  return fileExt === 'pdf' || fileExt === 'docx'
+}
+
+async function shouldAttemptIndexRecovery(
+  projectId: string,
+  folder: 'library' | 'project',
+  indexCount: number,
+  metadataCount: number
+): Promise<boolean> {
+  if (metadataCount > 0 && indexCount === 0) {
+    return true
+  }
+
+  if (metadataCount === 0 && indexCount === 0) {
+    const allDocuments = await documentService.getAll()
+    if (folder === 'project') {
+      return allDocuments.some(doc => doc.projectId === projectId && doc.folder === 'project')
+    }
+
+    return allDocuments.some(
+      doc => doc.projectId === projectId && doc.folder === 'library' && isIndexableLibraryDocument(doc)
+    )
+  }
+
+  return false
+}
+
+async function recoverIndexIfNeeded(
+  projectId: string,
+  folder: 'library' | 'project',
+  geminiApiKey?: string,
+  openaiApiKey?: string
+): Promise<void> {
+  const hasGeminiKey = geminiApiKey && geminiApiKey.trim().length > 0
+  const hasOpenaiKey = openaiApiKey && openaiApiKey.trim().length > 0
+  if (!hasGeminiKey && !hasOpenaiKey) {
+    return
+  }
+
+  const key = getRecoveryKey(projectId, folder)
+  const state = indexRecoveryState.get(key) || { inFlight: null, lastAttempt: 0 }
+  const now = Date.now()
+  if (state.inFlight) {
+    await state.inFlight
+    return
+  }
+  if (now - state.lastAttempt < INDEX_RECOVERY_COOLDOWN_MS) {
+    return
+  }
+
+  state.lastAttempt = now
+  const recoveryPromise = (async () => {
+    try {
+      if (folder === 'project') {
+        console.warn(`[SemanticSearch] Rebuilding workspace index for project ${projectId}`)
+        await indexProjectWorkspaceFiles(projectId, geminiApiKey, openaiApiKey, true)
+        return
+      }
+
+      const smartIndexingEnabled = getSmartIndexing()
+      if (!smartIndexingEnabled) {
+        console.warn(`[SemanticSearch] Smart indexing disabled, skipping library index recovery for project ${projectId}`)
+        return
+      }
+
+      console.warn(`[SemanticSearch] Rebuilding library index for project ${projectId}`)
+      await indexProjectLibraryFiles(projectId, geminiApiKey, openaiApiKey, true)
+    } catch (error: any) {
+      console.error('[SemanticSearch] Index recovery failed:', error)
+    }
+  })()
+
+  state.inFlight = recoveryPromise
+  indexRecoveryState.set(key, state)
+
+  try {
+    await recoveryPromise
+  } finally {
+    state.inFlight = null
+    indexRecoveryState.set(key, state)
+  }
 }
 
 /**
@@ -285,6 +379,20 @@ export async function searchLibrary(
           releaseLock()
           releaseLock = await projectLockManager.acquireReadLock(projectId)
         }
+      }
+
+      const stats = vectorStore.getStats()
+      const shouldRecover = await shouldAttemptIndexRecovery(
+        projectId,
+        folder,
+        stats.indexCount,
+        stats.metadataCount
+      )
+      if (shouldRecover) {
+        releaseLock()
+        await recoverIndexIfNeeded(projectId, folder, geminiApiKey, openaiApiKey)
+        releaseLock = await projectLockManager.acquireReadLock(projectId)
+        await vectorStore.loadIndexUnsafe()
       }
 
       // Search - we hold read lock

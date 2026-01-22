@@ -685,6 +685,76 @@ export async function indexProjectLibraryFiles(
 }
 
 /**
+ * Index workspace files for a specific project (project folder)
+ * Uses incremental indexing and skips already indexed files when onlyUnindexed is true
+ * @param projectId - The project ID to index workspace files for
+ * @param geminiApiKey - Optional Gemini API key
+ * @param openaiApiKey - Optional OpenAI API key
+ * @param onlyUnindexed - If true, only index files that need indexing (default: true)
+ */
+export async function indexProjectWorkspaceFiles(
+  projectId: string,
+  geminiApiKey?: string,
+  openaiApiKey?: string,
+  onlyUnindexed: boolean = true
+): Promise<Array<{ documentId: string; status: IndexingStatus }>> {
+  if (!projectId) {
+    throw new Error('Project ID is required for indexing workspace files')
+  }
+
+  const allDocuments = await documentService.getAll()
+  const projectWorkspaceDocuments = allDocuments.filter(
+    doc => doc.folder === 'project' && doc.projectId === projectId
+  )
+
+  if (projectWorkspaceDocuments.length === 0) {
+    console.log(`[Indexing] No workspace files found for project ${projectId}`)
+    return []
+  }
+
+  const results: Array<{ documentId: string; status: IndexingStatus }> = []
+
+  for (const doc of projectWorkspaceDocuments) {
+    if (onlyUnindexed) {
+      const needsReindex = await shouldReindexFile(doc.id)
+      if (!needsReindex) {
+        continue
+      }
+    }
+
+    try {
+      const status = await incrementalIndexProjectFile(doc.id, geminiApiKey, openaiApiKey)
+      results.push({ documentId: doc.id, status })
+    } catch (error: any) {
+      if (isQuotaError(error)) {
+        console.error(`[Indexing] Quota error detected while indexing ${doc.id}, stopping workspace indexing:`, error.message)
+        results.push({
+          documentId: doc.id,
+          status: {
+            documentId: doc.id,
+            status: 'error',
+            error: `API quota exceeded: ${error.message}. Please check your API plan and billing details.`,
+          },
+        })
+        break
+      }
+
+      console.error(`[Indexing] Failed to index workspace file ${doc.title}:`, error.message)
+      results.push({
+        documentId: doc.id,
+        status: {
+          documentId: doc.id,
+          status: 'error',
+          error: error.message || 'Unknown error',
+        },
+      })
+    }
+  }
+
+  return results
+}
+
+/**
  * Index all library files (batch operation)
  * Groups files by project and indexes them to project-specific library indexes
  * NOTE: This indexes ALL projects. Use indexProjectLibraryFiles() for single-project indexing.
@@ -1334,6 +1404,7 @@ export const indexingService = {
   getIndexingStatus,
   indexAllLibraryFiles,
   indexProjectLibraryFiles,
+  indexProjectWorkspaceFiles,
   removeFromIndex,
   isIndexValid,
   shouldReindexFile,

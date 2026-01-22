@@ -322,14 +322,39 @@ export default function WorldLabTerminal({
     return () => window.removeEventListener('storage', handleStorageChange)
   }, [])
 
-  // Measure prompt width so the caret sits immediately after "worldlab >"
-  useLayoutEffect(() => {
+  const measurePromptWidth = useCallback(() => {
     if (!promptRef.current) return
     const nextWidth = promptRef.current.offsetWidth
-    if (nextWidth !== promptWidth) {
+    if (nextWidth && nextWidth !== promptWidth) {
       setPromptWidth(nextWidth)
     }
   }, [promptWidth])
+
+  // Measure prompt width so the caret sits immediately after "worldlab >"
+  useLayoutEffect(() => {
+    measurePromptWidth()
+  }, [measurePromptWidth])
+
+  // Re-measure after first paint / font load to avoid zero width on reopen
+  useEffect(() => {
+    const raf = requestAnimationFrame(measurePromptWidth)
+    const timeout = setTimeout(measurePromptWidth, 120)
+    let cancelled = false
+
+    if (typeof document !== 'undefined' && 'fonts' in document && document.fonts?.ready) {
+      document.fonts.ready.then(() => {
+        if (!cancelled) {
+          measurePromptWidth()
+        }
+      }).catch(() => undefined)
+    }
+
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+      clearTimeout(timeout)
+    }
+  }, [measurePromptWidth])
 
   // Select appropriate model based on available API keys
   useEffect(() => {
@@ -495,8 +520,7 @@ export default function WorldLabTerminal({
 CAPABILITIES
   • Capture and build ideas
   • Natural conversation
-  • Select nodes to focus AI operations  
-  • All changes are reversible (Ctrl+Z)`,
+  • All changes are reversible`,
           timestamp: now,
         },
       ]
@@ -836,6 +860,16 @@ CAPABILITIES
       }
     }
 
+    // model [modelName] - 显示或设置 AI 模型
+    if (command === 'model') {
+      const modelName = parts.slice(1).join(' ').trim()
+      return {
+        type: 'command',
+        command: 'model',
+        args: { modelName: modelName || null },
+      }
+    }
+
     // 如果无法解析，交给 AI 处理
     return {
       type: 'ai',
@@ -913,6 +947,7 @@ CAPABILITIES
   create [description]
   edit [node1] [node2] [description]
   derive [description]
+  model
   undo
   redo
   help
@@ -920,8 +955,7 @@ CAPABILITIES
 CAPABILITIES
   • Capture and build ideas
   • Natural conversation
-  • Select nodes to focus AI operations  
-  • All changes are reversible (Ctrl+Z)`
+  • All changes are reversible`
   
         addOutputLine({
           id: `out_${Date.now()}`,
@@ -998,6 +1032,122 @@ CAPABILITIES
         break
       }
 
+      case 'model': {
+        const modelName = _args.modelName as string | null
+        // Read API keys directly from localStorage to ensure we use the same keys as ChatInterface
+        // This ensures consistency even if state hasn't updated yet
+        const currentGoogleKey = localStorage.getItem('googleApiKey') || ''
+        const currentOpenaiKey = localStorage.getItem('openaiApiKey') || ''
+        const hasGoogleKey = !!currentGoogleKey && currentGoogleKey.trim().length > 0
+        const hasOpenaiKey = !!currentOpenaiKey && currentOpenaiKey.trim().length > 0
+        
+        // Update state to keep it in sync
+        if (currentGoogleKey !== googleApiKey) setGoogleApiKey(currentGoogleKey)
+        if (currentOpenaiKey !== openaiApiKey) setOpenaiApiKey(currentOpenaiKey)
+        
+        // Available models matching chat interface
+        const availableModels = [
+          { name: 'gemini-3-flash-preview', displayName: 'Gemini 3 Flash', requiresKey: 'google' },
+          { name: 'gemini-3-pro-preview', displayName: 'Gemini 3 Pro', requiresKey: 'google' },
+          { name: 'gpt-4.1-nano', displayName: 'GPT-4.1 Nano', requiresKey: 'openai' },
+          { name: 'gpt-5-mini', displayName: 'GPT-5 Mini', requiresKey: 'openai' },
+          { name: 'gpt-5.2', displayName: 'GPT-5.2', requiresKey: 'openai' },
+        ]
+
+        if (!modelName) {
+          // Check if current model is available
+          const currentModel = availableModels.find(m => m.name === selectedModel)
+          const isCurrentModelAvailable = currentModel ? (currentModel.requiresKey === 'google' ? hasGoogleKey : hasOpenaiKey) : false
+          const hasAnyAvailable = availableModels.some(model => {
+            const isAvailable = model.requiresKey === 'google' ? hasGoogleKey : hasOpenaiKey
+            return isAvailable
+          })
+          
+          let modelInfo: string
+          
+          if (!hasAnyAvailable) {
+            // No models available - only show current status
+            modelInfo = `Current: no api key`
+          } else {
+            // Show current model and available models
+            const currentModelDisplay = isCurrentModelAvailable 
+              ? (currentModel?.displayName || selectedModel)
+              : 'no api key'
+            
+            modelInfo = `Current: ${currentModelDisplay}\n\nAvailable:\n`
+            
+            availableModels.forEach(model => {
+              const isAvailable = model.requiresKey === 'google' ? hasGoogleKey : hasOpenaiKey
+              const isCurrent = model.name === selectedModel
+              if (isAvailable) {
+                if (isCurrent) {
+                  modelInfo += `  > ${model.displayName}\n`
+                } else {
+                  modelInfo += `    ${model.displayName}\n`
+                }
+              }
+            })
+            
+            modelInfo += `\nUse: model <name>`
+          }
+          
+          addOutputLine({
+            id: `out_${Date.now()}`,
+            type: 'output',
+            content: modelInfo,
+            timestamp: new Date().toISOString(),
+          })
+        } else {
+          // Set model - strip angle brackets and normalize
+          const cleanedModelName = modelName.replace(/^[<]|[>]$/g, '').trim()
+          const normalizedModelName = cleanedModelName.toLowerCase()
+          const targetModel = availableModels.find(
+            m => {
+              const modelNameLower = m.name.toLowerCase()
+              const displayNameLower = m.displayName.toLowerCase()
+              // Match by exact model name, or by display name (partial or full)
+              return modelNameLower === normalizedModelName || 
+                     displayNameLower === normalizedModelName ||
+                     displayNameLower.includes(normalizedModelName) ||
+                     normalizedModelName.includes(displayNameLower.replace(/\s+/g, ''))
+            }
+          )
+          
+          if (!targetModel) {
+            addOutputLine({
+              id: `err_${Date.now()}`,
+              type: 'error',
+              content: `Unknown model: ${modelName}`,
+              timestamp: new Date().toISOString(),
+            })
+            return
+          }
+          
+          // Check if API key is available for the selected model
+          const hasRequiredKey = targetModel.requiresKey === 'google' ? hasGoogleKey : hasOpenaiKey
+          if (!hasRequiredKey) {
+            const keyType = targetModel.requiresKey === 'google' ? 'Google' : 'OpenAI'
+            addOutputLine({
+              id: `err_${Date.now()}`,
+              type: 'error',
+              content: `${targetModel.displayName} requires ${keyType} API key`,
+              timestamp: new Date().toISOString(),
+            })
+            return
+          }
+          
+          // Set the model
+          setSelectedModel(targetModel.name)
+          addOutputLine({
+            id: `out_${Date.now()}`,
+            type: 'info',
+            content: `Switched to ${targetModel.displayName}`,
+            timestamp: new Date().toISOString(),
+          })
+        }
+        break
+      }
+
       default:
         addOutputLine({
           id: `err_${Date.now()}`,
@@ -1006,7 +1156,7 @@ CAPABILITIES
           timestamp: new Date().toISOString(),
         })
     }
-  }, [worldLabData, commandHistory, addOutputLine, onNodeSelect, onNodesChange, onEdgesChange, onBeforeOperation, undoRedoHandlers])
+  }, [worldLabData, commandHistory, addOutputLine, onNodeSelect, onNodesChange, onEdgesChange, onBeforeOperation, undoRedoHandlers, googleApiKey, openaiApiKey, selectedModel, setSelectedModel])
 
   // 计算节点初始位置 - 在创建节点时调用
   const calculateInitialPosition = useCallback((
@@ -3150,11 +3300,12 @@ IMPORTANT:
                   position: 'absolute',
                   left: 0,
                   top: 0,
-                  whiteSpace: 'nowrap',
+                  whiteSpace: 'pre',
+                  paddingRight: '8px',
                   pointerEvents: 'none',
                 }}
               >
-                worldlab &gt;
+                worldlab &gt; 
               </span>
               <div
                 ref={inputRef}
@@ -3180,7 +3331,7 @@ IMPORTANT:
                   wordBreak: 'break-word',
                   marginLeft: `${-promptWidth}px`,
                   paddingLeft: `${promptWidth}px`,
-                  textIndent: `${promptWidth + 8}px`,
+                  textIndent: `${promptWidth}px`,
                 }}
               />
             </div>

@@ -76,11 +76,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [isInputFocused, setIsInputFocused] = useState(false)
   const [useWebSearch, setUseWebSearch] = useState(false)
   // Load saved model from localStorage, or use default
-  const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-2.5-pro' | 'gpt-4.1-nano' | 'gpt-5-mini' | 'gpt-5.2'>(() => {
+  const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-3-pro-preview' | 'gpt-4.1-nano' | 'gpt-5-mini' | 'gpt-5.2'>(() => {
     try {
       const savedModel = localStorage.getItem('aiChatSelectedModel')
-      if (savedModel && ['gemini-3-flash-preview', 'gemini-2.5-pro', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2'].includes(savedModel)) {
-        return savedModel as 'gemini-3-flash-preview' | 'gemini-2.5-pro' | 'gpt-4.1-nano' | 'gpt-5-mini' | 'gpt-5.2'
+      if (savedModel && ['gemini-3-flash-preview', 'gemini-3-pro-preview', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2'].includes(savedModel)) {
+        return savedModel as 'gemini-3-flash-preview' | 'gemini-3-pro-preview' | 'gpt-4.1-nano' | 'gpt-5-mini' | 'gpt-5.2'
       }
     } catch (error) {
       console.error('Failed to load saved model:', error)
@@ -142,6 +142,13 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [showMentionDropdown, setShowMentionDropdown] = useState(false)
   const mentionDropdownRef = useRef<HTMLDivElement>(null)
   const [isInMentionMode, setIsInMentionMode] = useState(false)
+
+  const generateMessageId = () => {
+    if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
+      return `msg_${globalThis.crypto.randomUUID()}`
+    }
+    return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  }
   
   // Load API keys and Smart indexing setting from localStorage on mount and sync to main process
   useEffect(() => {
@@ -202,14 +209,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       }
     }
     // If user has Gemini model selected but no Google key, switch to GPT
-    else if ((selectedModel === 'gemini-3-flash-preview' || selectedModel === 'gemini-2.5-pro') && !hasGoogleKey) {
+    else if ((selectedModel === 'gemini-3-flash-preview' || selectedModel === 'gemini-3-pro-preview') && !hasGoogleKey) {
       if (hasOpenaiKey) {
         setSelectedModel('gpt-4.1-nano')
       }
     }
     // If both keys are available and current model is invalid, default to Gemini 2.5 Flash
     else if (hasGoogleKey && hasOpenaiKey) {
-      if (!['gemini-3-flash-preview', 'gemini-2.5-pro', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2'].includes(selectedModel)) {
+      if (!['gemini-3-flash-preview', 'gemini-3-pro-preview', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2'].includes(selectedModel)) {
         setSelectedModel('gemini-3-flash-preview')
       }
     }
@@ -1086,7 +1093,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
 
   // Highlight @mentions in message content
   const highlightMentions = (text: string): React.ReactNode => {
-    const mentionRegex = /@(Library|[^\s@]+)/g
+    const mentionRegex = /@\s*(Library|[^\s@]+)/g
     const parts: React.ReactNode[] = []
     let lastIndex = 0
     let match
@@ -1585,7 +1592,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     
     if (isOpenaiModel && !hasOpenaiKey) {
       const errorMessage: AIChatMessage = {
-        id: `msg_${Date.now()}`,
+        id: generateMessageId(),
         role: 'assistant',
         content: 'OpenAI API key is required for GPT models. Please add your OpenAI API key in Settings > API Keys.',
         timestamp: new Date().toISOString(),
@@ -1598,7 +1605,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     
     if (!isOpenaiModel && !hasGoogleKey) {
       const errorMessage: AIChatMessage = {
-        id: `msg_${Date.now()}`,
+        id: generateMessageId(),
         role: 'assistant',
         content: 'Google API key is required for Gemini models. Please add your Google API key in API Keys.',
         timestamp: new Date().toISOString(),
@@ -1613,7 +1620,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     const messageContent = input.trim()
 
     const userMessage: AIChatMessage = {
-      id: `msg_${Date.now()}`,
+      id: generateMessageId(),
       role: 'user',
       content: input,
       timestamp: new Date().toISOString(),
@@ -1657,7 +1664,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       const decoder = new TextDecoder()
 
       let assistantMessage: AIChatMessage = {
-        id: `msg_${Date.now() + 1}`,
+        id: generateMessageId(),
         role: 'assistant',
         content: '',
         timestamp: new Date().toISOString(),
@@ -1763,7 +1770,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       
       const friendlyError = formatErrorMessage(error)
       const errorMessage: AIChatMessage = {
-        id: `msg_${Date.now() + 2}`,
+        id: generateMessageId(),
         role: 'assistant',
         content: friendlyError, // formatErrorMessage already includes appropriate emoji
         timestamp: new Date().toISOString(),
@@ -1881,14 +1888,20 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             MozUserSelect: 'text',
             msUserSelect: 'text'
           }}>
-        {messages.map((message) => (
+        {messages.map((message, index) => {
+          const hasReasoningMetadata = Boolean(
+            message.reasoningMetadata &&
+            message.reasoningMetadata.actions &&
+            Object.keys(message.reasoningMetadata.actions).length > 0
+          )
+          return (
           <div
-            key={message.id}
+            key={`${message.id}-${index}`}
             style={{
               width: '100%',
               display: 'flex',
               flexDirection: 'column',
-              padding: message.role === 'assistant' ? '12px 16px' : '8px 16px',
+              padding: message.role === 'assistant' ? '8px 16px' : '6px 16px',
               backgroundColor: brighterBg,
             }}
           >
@@ -1997,7 +2010,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     style={{
                       fontSize: '12px',
                       color: theme === 'dark' ? '#888888' : '#999999',
-                      marginBottom: '4px',
+                      marginBottom: '0px',
                       opacity: 0.7,
                       lineHeight: '1.4'
                     }}
@@ -2170,7 +2183,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     h1: ({node, ...props}) => <h1 style={{ 
                       fontSize: '20px', 
                       fontWeight: 600, 
-                      marginTop: '28px', 
+                      marginTop: hasReasoningMetadata ? '16px' : '28px', 
                       marginBottom: '14px', 
                       color: textColor, 
                       lineHeight: '1.4',
@@ -2179,7 +2192,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     h2: ({node, ...props}) => <h2 style={{ 
                       fontSize: '17px', 
                       fontWeight: 600, 
-                      marginTop: '24px', 
+                      marginTop: hasReasoningMetadata ? '14px' : '24px', 
                       marginBottom: '12px', 
                       color: textColor, 
                       lineHeight: '1.4',
@@ -2188,7 +2201,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     h3: ({node, ...props}) => <h3 style={{ 
                       fontSize: '15px', 
                       fontWeight: 600, 
-                      marginTop: '20px', 
+                      marginTop: hasReasoningMetadata ? '12px' : '20px', 
                       marginBottom: '10px', 
                       color: textColor, 
                       lineHeight: '1.4'
@@ -2196,7 +2209,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     h4: ({node, ...props}) => <h4 style={{ 
                       fontSize: '14px', 
                       fontWeight: 600, 
-                      marginTop: '18px', 
+                      marginTop: hasReasoningMetadata ? '10px' : '18px', 
                       marginBottom: '8px', 
                       color: textColor, 
                       lineHeight: '1.4'
@@ -2204,7 +2217,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     h5: ({node, ...props}) => <h5 style={{ 
                       fontSize: '14px', 
                       fontWeight: 600, 
-                      marginTop: '16px', 
+                      marginTop: hasReasoningMetadata ? '8px' : '16px', 
                       marginBottom: '8px', 
                       color: textColor, 
                       lineHeight: '1.4'
@@ -2212,7 +2225,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     h6: ({node, ...props}) => <h6 style={{ 
                       fontSize: '13px', 
                       fontWeight: 600, 
-                      marginTop: '14px', 
+                      marginTop: hasReasoningMetadata ? '8px' : '14px', 
                       marginBottom: '6px', 
                       color: textColor, 
                       lineHeight: '1.4'
@@ -2513,7 +2526,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               </div>
             )}
           </div>
-        ))}
+          )
+        })}
         <div ref={messagesEndRef} />
       </div>
       
@@ -2711,7 +2725,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     const text = textareaRef.current.value
                     
                     // Find if cursor is within a mention
-                    const mentionRegex = /@(Library|[^\s@]+)/g
+                    const mentionRegex = /@\s*(Library|[^\s@]+)/g
                     let match
                     mentionRegex.lastIndex = 0
                     
@@ -2818,7 +2832,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           
           {/* Persistent Mention Highlighting Overlay - Backgrounds only */}
           {input && (() => {
-            const mentionRegex = /@(Library|[^\s@]+)/g
+            const mentionRegex = /@\s*(Library|[^\s@]+)/g
             const highlights: Array<{ start: number, end: number, text: string, isLibrary: boolean, isFile: boolean }> = []
             let match
             
@@ -3523,9 +3537,17 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 <button
                   ref={modelNameRef}
                   onClick={() => {
-                    setShowModelDropdown(!showModelDropdown)
-                    setShowSettingsModal(false)
-                    setShowPlusMenu(false)
+                    // If no API keys, open settings modal directly
+                    const hasNoApiKeys = (!googleApiKey || !googleApiKey.trim()) && (!openaiApiKey || !openaiApiKey.trim())
+                    if (hasNoApiKeys) {
+                      setShowSettingsModal(true)
+                      setShowModelDropdown(false)
+                      setShowPlusMenu(false)
+                    } else {
+                      setShowModelDropdown(!showModelDropdown)
+                      setShowSettingsModal(false)
+                      setShowPlusMenu(false)
+                    }
                   }}
                   disabled={isLoading}
                   style={{
@@ -3560,19 +3582,23 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     }
                   }}
                   title={
-                    selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash Preview - Faster responses' :
-                    selectedModel === 'gemini-2.5-pro' ? 'Gemini 3 Pro - More capable' :
-                    selectedModel === 'gpt-4.1-nano' ? 'GPT-4.1 Nano - Fast and efficient' :
-                    selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini - Balanced performance' :
-                    selectedModel === 'gpt-5.2' ? 'GPT-5.2 - Most capable' : ''
+                    (!googleApiKey || !googleApiKey.trim()) && (!openaiApiKey || !openaiApiKey.trim()) 
+                      ? 'Enter API Key to use AI models'
+                      : selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash Preview - Faster responses' :
+                        selectedModel === 'gemini-3-pro-preview' ? 'Gemini 3 Pro - More capable' :
+                        selectedModel === 'gpt-4.1-nano' ? 'GPT-4.1 Nano - Fast and efficient' :
+                        selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini - Balanced performance' :
+                        selectedModel === 'gpt-5.2' ? 'GPT-5.2 - Most capable' : ''
                   }
                 >
                   <span>{
-                    selectedModel === 'gemini-3-flash-preview' ? 'Flash 3' :
-                    selectedModel === 'gemini-2.5-pro' ? 'Pro 3' :
-                    selectedModel === 'gpt-4.1-nano' ? 'GPT-4.1 Nano' :
-                    selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini' :
-                    selectedModel === 'gpt-5.2' ? 'GPT-5.2' : 'Flash 2.5'
+                    (!googleApiKey || !googleApiKey.trim()) && (!openaiApiKey || !openaiApiKey.trim())
+                      ? 'Enter API Key'
+                      : selectedModel === 'gemini-3-flash-preview' ? 'Flash 3' :
+                        selectedModel === 'gemini-3-pro-preview' ? 'Pro 3' :
+                        selectedModel === 'gpt-4.1-nano' ? 'GPT-4.1 Nano' :
+                        selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini' :
+                        selectedModel === 'gpt-5.2' ? 'GPT-5.2' : 'Flash 2.5'
                   }</span>
                   <KeyboardArrowDownIcon style={{ fontSize: '14px' }} />
                 </button>
@@ -3650,16 +3676,16 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                           
                           <button
                             onClick={() => {
-                              setSelectedModel('gemini-2.5-pro')
+                              setSelectedModel('gemini-3-pro-preview')
                               setShowModelDropdown(false)
                             }}
                             disabled={isLoading}
                             style={{
                               padding: '10px 14px',
-                              backgroundColor: selectedModel === 'gemini-2.5-pro' 
+                              backgroundColor: selectedModel === 'gemini-3-pro-preview' 
                                 ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
                                 : 'transparent',
-                              color: selectedModel === 'gemini-2.5-pro'
+                              color: selectedModel === 'gemini-3-pro-preview'
                                 ? (theme === 'dark' ? '#ffffff' : '#202124')
                                 : (theme === 'dark' ? '#d6d6d6' : '#202124'),
                               border: 'none',
@@ -3674,12 +3700,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               width: '100%'
                             }}
                             onMouseEnter={(e) => {
-                              if (!isLoading && selectedModel !== 'gemini-2.5-pro') {
+                              if (!isLoading && selectedModel !== 'gemini-3-pro-preview') {
                                 e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
                               }
                             }}
                             onMouseLeave={(e) => {
-                              if (!isLoading && selectedModel !== 'gemini-2.5-pro') {
+                              if (!isLoading && selectedModel !== 'gemini-3-pro-preview') {
                                 e.currentTarget.style.backgroundColor = 'transparent'
                               }
                             }}

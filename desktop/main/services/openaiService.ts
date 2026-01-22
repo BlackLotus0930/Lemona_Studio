@@ -398,9 +398,17 @@ Use rich markdown formatting to make information visually clear:
         if (searchedFiles.size > 0) {
           actions['Searched'] = { fileCount: searchedFiles.size, fileIds: Array.from(searchedFiles) }
         }
+
+        if (reasoningResult.libraryRequestedNoResults) {
+          actions['Library search'] = { fileCount: 0 }
+        }
         
         if (Object.keys(actions).length > 0) {
           reasoningMetadata = { actions }
+        }
+
+        if (reasoningResult.libraryRequestedNoResults) {
+          systemInstruction += `\n\n## LIBRARY SEARCH NOTICE\n\nThe user explicitly requested Library context, but no matching library excerpts were found. In your response, briefly say this and suggest checking that the Library has indexed files or refining the query.`
         }
 
         if (reasoningResult.finalResults.length > 0 && reasoningResult.formattedResults) {
@@ -447,6 +455,14 @@ Use rich markdown formatting to make information visually clear:
 
           if (searchResult.results.length > 0 && searchResult.formattedResults) {
             systemInstruction += `\n\n## LIBRARY REFERENCES\n\nThe user has referenced the Library folder (@Library or @filename). Here are relevant excerpts from the library files:\n\n${searchResult.formattedResults}\n\nUse these references to inform your response, but do not assume they are the only relevant information. The user may be asking about specific aspects of these documents.`
+          }
+          if (searchResult.mentions.hasLibraryMention && searchResult.results.length === 0) {
+            reasoningMetadata = {
+              actions: {
+                'Library search': { fileCount: 0 },
+              },
+            }
+            systemInstruction += `\n\n## LIBRARY SEARCH NOTICE\n\nThe user explicitly requested Library context, but no matching library excerpts were found. In your response, briefly say this and suggest checking that the Library has indexed files or refining the query.`
           }
         }
       } catch (fallbackError: any) {

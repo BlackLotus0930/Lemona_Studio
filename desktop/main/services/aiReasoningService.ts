@@ -1,7 +1,7 @@
 // AI Reasoning Service - Retrieval orchestration system
 // System controls the flow, AI evaluates content relevance
 import { SearchResult } from './vectorStore.js'
-import { searchWorkspaceAndLibrary, parseMentions, resolveFileMentionsAll } from './semanticSearchService.js'
+import { searchLibrary, searchWorkspaceAndLibrary, parseMentions, resolveFileMentionsAll } from './semanticSearchService.js'
 import { documentService } from './documentService.js'
 import { generateEmbedding } from './embeddingService.js'
 
@@ -29,6 +29,8 @@ export interface ReasoningResult {
   formattedResults: string
   totalStepsUsed: number
   stoppedReason: 'budget_exhausted' | 'sufficient_context' | 'no_more_info'
+  libraryRequested?: boolean
+  libraryRequestedNoResults?: boolean
 }
 
 /**
@@ -144,23 +146,35 @@ export async function reason(
   // Parse mentions from query
   const mentions = parseMentions(query)
   const searchQuery = mentions.cleanedMessage || query
+  const useLibraryOnly = mentions.hasLibraryMention
 
   // Resolve file mentions if any
   if (mentions.fileMentions.length > 0) {
     const resolved = await resolveFileMentionsAll(mentions.fileMentions, projectId)
-    currentFileIds = [...resolved.workspaceIds, ...resolved.libraryIds]
+    currentFileIds = useLibraryOnly ? resolved.libraryIds : [...resolved.workspaceIds, ...resolved.libraryIds]
   }
 
   // Step 1: Initial search
   budgetRemaining--
-  const initialResults = await searchWorkspaceAndLibrary(
-    searchQuery,
-    projectId,
-    geminiApiKey,
-    openaiApiKey,
-    currentFileIds,
-    6 // Initial k
-  )
+  const effectiveFileIds = currentFileIds && currentFileIds.length > 0 ? currentFileIds : undefined
+  const initialResults = useLibraryOnly
+    ? await searchLibrary(
+        searchQuery,
+        projectId,
+        'library',
+        geminiApiKey,
+        openaiApiKey,
+        effectiveFileIds,
+        6 // Initial k
+      )
+    : await searchWorkspaceAndLibrary(
+        searchQuery,
+        projectId,
+        geminiApiKey,
+        openaiApiKey,
+        effectiveFileIds,
+        6 // Initial k
+      )
 
   allResults.push(...initialResults)
 
@@ -198,14 +212,24 @@ export async function reason(
       // For now, try searching without file filters to get broader results
       if (currentFileIds && currentFileIds.length > 0 && stepCount === 2) {
         // Second step: search without file filters to get broader context
-        const broaderResults = await searchWorkspaceAndLibrary(
-          searchQuery,
-          projectId,
-          geminiApiKey,
-          openaiApiKey,
-          undefined, // No file filter
-          6
-        )
+        const broaderResults = useLibraryOnly
+          ? await searchLibrary(
+              searchQuery,
+              projectId,
+              'library',
+              geminiApiKey,
+              openaiApiKey,
+              undefined,
+              6
+            )
+          : await searchWorkspaceAndLibrary(
+              searchQuery,
+              projectId,
+              geminiApiKey,
+              openaiApiKey,
+              undefined, // No file filter
+              6
+            )
 
         // Merge results, avoiding duplicates
         const existingChunkIds = new Set(allResults.map(r => r.chunk.id))
@@ -263,6 +287,8 @@ export async function reason(
     formattedResults: await formatSearchResults(finalResults),
     totalStepsUsed: maxSteps - budgetRemaining,
     stoppedReason,
+    libraryRequested: useLibraryOnly,
+    libraryRequestedNoResults: useLibraryOnly && finalResults.length === 0,
   }
 }
 
