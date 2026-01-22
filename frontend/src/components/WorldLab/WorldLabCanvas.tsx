@@ -398,6 +398,7 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
   const onStartRename = data.onStartRename || (() => {})
   const onCategoryChange = data.onCategoryChange || (() => {})
   const renameInputRef = useRef<HTMLTextAreaElement>(null)
+  const renameCommittedRef = useRef(false)
   const labelRef = useRef<HTMLDivElement>(null)
   const categoryDropdownRef = useRef<HTMLDivElement>(null)
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false)
@@ -477,6 +478,9 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
 
   // Focus textarea when renaming starts (without scrolling/zooming)
   useEffect(() => {
+    if (isRenaming) {
+      renameCommittedRef.current = false
+    }
     if (isRenaming && renameInputRef.current) {
       // Use requestAnimationFrame to ensure DOM is ready and prevent any viewport changes
       requestAnimationFrame(() => {
@@ -543,6 +547,7 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
         e.preventDefault()
         const newLabel = e.currentTarget.value.trim()
         if (newLabel) {
+          renameCommittedRef.current = true
           onRename(newLabel)
         } else {
           onRenameCancel()
@@ -571,7 +576,12 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
 
   const handleRenameBlur = (e: React.FocusEvent<HTMLTextAreaElement>) => {
     const newLabel = e.currentTarget.value.trim()
+    if (renameCommittedRef.current) {
+      renameCommittedRef.current = false
+      return
+    }
     if (newLabel) {
+      renameCommittedRef.current = true
       onRename(newLabel)
     } else {
       onRenameCancel()
@@ -1323,6 +1333,8 @@ function WorldLabCanvasInner({
   // Undo/Redo state
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
+  const historyIndexRef = useRef(historyIndex)
+  const historyByLabRef = useRef<Map<string, { history: HistoryEntry[]; historyIndex: number }>>(new Map())
   const isUndoingRef = useRef(false)
   const historyInitializedRef = useRef(false)
   const isLabSwitchingRef = useRef(false)
@@ -1343,6 +1355,7 @@ function WorldLabCanvasInner({
   const [inlineEditingEdgeId, setInlineEditingEdgeId] = useState<string | null>(null)
   const [inlineEditingPosition, setInlineEditingPosition] = useState<{ x: number; y: number } | null>(null)
   const inlineEdgeInputRef = useRef<HTMLTextAreaElement>(null)
+  const inlineEditCommittedRef = useRef(false)
   
   // Track hover state for edge labels
   const [hoveredEdgeLabelId, setHoveredEdgeLabelId] = useState<string | null>(null)
@@ -1583,6 +1596,8 @@ function WorldLabCanvasInner({
               adjustEdgeHandlesOnNodeMove(currentNodes, movedNodeIds)
             }, 0)
             
+            addToHistory(currentNodes, edgesRef.current, { force: true })
+
             // Save nodes to persist position changes to backend
             // This ensures positions are saved when switching away from WorldLab
             if (saveNodesRef.current) {
@@ -1614,15 +1629,29 @@ function WorldLabCanvasInner({
     const labNameChanged = prevLabNameRef.current !== labName
     
     if (labNameChanged) {
+      const previousLabName = prevLabNameRef.current
+      const previousKey = projectId ? `${projectId}:${previousLabName}` : previousLabName
+      historyByLabRef.current.set(previousKey, { history, historyIndex })
+
       // Lab name changed = external data source changed = WorldLab hydrate started
       prevLabNameRef.current = labName
       isLabSwitchingRef.current = true
       // Reset refresh flag when switching projects
       didRefreshNodeInternalsRef.current = false
-      // Reset undo/redo history when switching labs
-      setHistory([])
-      setHistoryIndex(-1)
-      historyInitializedRef.current = false
+      // Restore undo/redo history for this lab if available
+      const currentKey = projectId ? `${projectId}:${labName}` : labName
+      const cachedHistory = historyByLabRef.current.get(currentKey)
+      if (cachedHistory && cachedHistory.history.length > 0) {
+        setHistory(cachedHistory.history)
+        setHistoryIndex(cachedHistory.historyIndex)
+        historyIndexRef.current = cachedHistory.historyIndex
+        historyInitializedRef.current = true
+      } else {
+        setHistory([])
+        setHistoryIndex(-1)
+        historyIndexRef.current = -1
+        historyInitializedRef.current = false
+      }
       isUndoingRef.current = false
       
       // Sync memory state with external data source (from refs, which have latest props)
@@ -1826,6 +1855,10 @@ function WorldLabCanvasInner({
   // Note: ReactFlow's useNodesState and useEdgesState handle changes internally
   // We sync state through onNodesChangeInner and onEdgesChangeInner callbacks
 
+  useEffect(() => {
+    historyIndexRef.current = historyIndex
+  }, [historyIndex])
+
   // Add to history for undo/redo (MUST be defined before other handlers use it)
   const addToHistory = useCallback(
     (newNodes: Node[], newEdges: Edge[], options?: { force?: boolean }) => {
@@ -1878,7 +1911,7 @@ function WorldLabCanvasInner({
 
       setHistory((prev) => {
         // Remove future history if we're not at the end
-        const newHistory = prev.slice(0, historyIndex + 1)
+        const newHistory = prev.slice(0, historyIndexRef.current + 1)
         // Add new entry
         newHistory.push(newEntry)
         // Limit history to 50 entries
@@ -1888,10 +1921,11 @@ function WorldLabCanvasInner({
         const finalLength = newHistory.length
         // Update historyIndex to point to the new entry (last index in array = length - 1)
         setHistoryIndex(finalLength - 1)
+        historyIndexRef.current = finalLength - 1
         return newHistory
       })
     },
-    [historyIndex, edges, nodes]
+    [edges, nodes]
   )
 
   // Undo function
@@ -2022,6 +2056,7 @@ function WorldLabCanvasInner({
 
       setInlineEditingEdgeId(edge.id)
       setInlineEditingPosition({ x, y })
+      inlineEditCommittedRef.current = false
 
       // Focus textarea and set initial height after a short delay to ensure it's rendered
       setTimeout(() => {
@@ -2044,6 +2079,11 @@ function WorldLabCanvasInner({
     (edgeId: string, label: string) => {
       setEdges((eds) => {
         const trimmedLabel = label.trim()
+        const currentEdge = eds.find((edge) => edge.id === edgeId)
+        const currentLabel = (currentEdge?.label || '').trim()
+        if (currentLabel === trimmedLabel) {
+          return eds
+        }
         const updatedEdges = eds.map((edge) => {
           if (edge.id === edgeId) {
             return {
@@ -2266,8 +2306,14 @@ function WorldLabCanvasInner({
   const handleNodeRename = useCallback(
     async (nodeId: string, newLabel: string) => {
       setNodes((nds) => {
+        let didChange = false
         const updatedNodes = nds.map((node) => {
           if (node.id === nodeId) {
+            const currentLabel = typeof node.data.label === 'string' ? node.data.label : node.id
+            if (currentLabel === newLabel) {
+              return node
+            }
+            didChange = true
             return {
               ...node,
               data: {
@@ -2278,9 +2324,12 @@ function WorldLabCanvasInner({
           }
           return node
         })
-        addToHistory(updatedNodes, edges)
-        saveNodes(updatedNodes)
-        return updatedNodes
+        if (didChange) {
+          addToHistory(updatedNodes, edges)
+          saveNodes(updatedNodes)
+          return updatedNodes
+        }
+        return nds
       })
       setRenamingNodeId(null)
       
@@ -2615,13 +2664,7 @@ function WorldLabCanvasInner({
       // If focus or selection is inside the WorldLab terminal, don't handle canvas shortcuts
       const activeElement = document.activeElement as HTMLElement | null
       const isTerminalActive = !!activeElement?.closest?.('[data-worldlab-terminal="true"]')
-      const selection = window.getSelection()
-      const selectionNode = selection?.anchorNode || selection?.focusNode
-      const selectionElement = selectionNode instanceof HTMLElement
-        ? selectionNode
-        : selectionNode?.parentElement
-      const isSelectionInTerminal = !!selectionElement?.closest?.('[data-worldlab-terminal="true"]')
-      if (isTerminalActive || isSelectionInTerminal) {
+      if (isTerminalActive) {
         return
       }
       
@@ -3057,6 +3100,8 @@ function WorldLabCanvasInner({
         
         setNodes(reactFlowNodes)
         setEdges(reactFlowEdges)
+        // Record the external change so undo is available immediately
+        addToHistory(reactFlowNodes, reactFlowEdges, { force: true })
       }
     }
     
@@ -4227,11 +4272,13 @@ function WorldLabCanvasInner({
                     // Enter to save (for edge label editing)
                     if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
                       e.preventDefault()
+                      inlineEditCommittedRef.current = true
                       handleInlineEdgeLabelSave(inlineEditingEdgeId, e.currentTarget.value)
                     }
                     // Ctrl/Cmd+Enter to save (alternative)
                     else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                       e.preventDefault()
+                      inlineEditCommittedRef.current = true
                       handleInlineEdgeLabelSave(inlineEditingEdgeId, e.currentTarget.value)
                     } 
                     // Escape to cancel
@@ -4256,6 +4303,10 @@ function WorldLabCanvasInner({
                     textarea.style.height = `${textarea.scrollHeight}px`
                   }}
                   onBlur={() => {
+                    if (inlineEditCommittedRef.current) {
+                      inlineEditCommittedRef.current = false
+                      return
+                    }
                     if (inlineEdgeInputRef.current) {
                       handleInlineEdgeLabelSave(inlineEditingEdgeId, inlineEdgeInputRef.current.value)
                     }

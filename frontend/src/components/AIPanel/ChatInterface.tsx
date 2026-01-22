@@ -87,7 +87,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
     return 'gemini-3-flash-preview'
   })
-  const [selectedStyle, setSelectedStyle] = useState<'Normal' | 'Learning' | 'Concise' | 'Explanatory' | 'Formal'>('Normal')
+  const [selectedStyle, setSelectedStyle] = useState<'Normal' | 'Learning' | 'Concise' | 'Explanatory' | 'Formal'>('Concise')
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const [showPlusMenu, setShowPlusMenu] = useState(false)

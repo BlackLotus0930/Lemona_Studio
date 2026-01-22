@@ -130,7 +130,7 @@ function getCurrentEditingContext(documentContent, cursorPosition, maxTokens = 1
         return documentContent.slice(0, maxTokens * 4);
     }
 }
-async function buildContext(documentContent, projectId, chatHistory, cursorPosition, apiKey, userMessage, openaiApiKey) {
+async function buildContext(documentContent, projectId, chatHistory, cursorPosition, apiKey, userMessage, openaiApiKey, style) {
     let systemInstruction = `You are Lemona's AI writing companion.
 
 Keep responses concise. 
@@ -140,6 +140,23 @@ Use rich markdown formatting to make information visually clear:
 - Use **bold** for emphasis and key points
 - Use bullet lists for multiple items
 - Use code blocks for technical content`;
+    // Add style instructions
+    if (style && style !== 'Normal') {
+        switch (style) {
+            case 'Learning':
+                systemInstruction += '\n\nResponse Style: LEARNING\n- Explain concepts step-by-step\n- Provide examples and analogies\n- Break down complex ideas into simpler parts\n- Encourage questions and deeper understanding';
+                break;
+            case 'Concise':
+                systemInstruction += '\n\nResponse Style: CONCISE\n- Be brief and to the point\n- Avoid unnecessary elaboration\n- Focus on key information\n- Use bullet points or short paragraphs when appropriate';
+                break;
+            case 'Explanatory':
+                systemInstruction += '\n\nResponse Style: EXPLANATORY\n- Provide detailed explanations\n- Include context and background\n- Explain the "why" behind concepts\n- Use examples and illustrations';
+                break;
+            case 'Formal':
+                systemInstruction += '\n\nResponse Style: FORMAL\n- Use formal language and tone\n- Structure responses professionally\n- Avoid contractions and casual expressions\n- Maintain a respectful and authoritative tone';
+                break;
+        }
+    }
     // 1️⃣ Add project context FIRST (README, project overview, intent)
     // This gives AI the background about "what project am I working on"
     if (projectId) {
@@ -428,9 +445,9 @@ export const geminiService = {
             throw new Error(`Failed to generate response: ${error.message || 'Unknown error'}`);
         }
     },
-    async *streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, openaiApiKey) {
+    async *streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, style, openaiApiKey) {
         const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview');
-        const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey);
+        const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey, style);
         // Send metadata first (if available) as a special chunk
         if (reasoningMetadata) {
             // Add web_search action if enabled

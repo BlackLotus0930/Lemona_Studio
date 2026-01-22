@@ -256,7 +256,7 @@ export function setupIPC() {
                     let chunkCount = 0;
                     const stream = useOpenai
                         ? openaiService.streamChat(openaiApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, finalModelName, attachments, style, googleApiKey)
-                        : geminiService.streamChat(googleApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, finalModelName, attachments, openaiApiKey);
+                        : geminiService.streamChat(googleApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, finalModelName, attachments, style, openaiApiKey);
                     for await (const chunk of stream) {
                         chunkCount++;
                         webContents.send('ai:streamChunk', streamId, chunk);

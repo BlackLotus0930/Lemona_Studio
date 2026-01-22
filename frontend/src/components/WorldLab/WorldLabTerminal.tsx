@@ -910,56 +910,6 @@ CAPABILITIES
   }, [])
 
   // 执行命令
-  const executeCommand = useCallback(async (input: string) => {
-    if (isProcessing) return
-
-    setIsProcessing(true)
-    
-    // 添加命令到输出
-    const commandLine: TerminalLine = {
-      id: `cmd_${Date.now()}`,
-      type: 'command',
-      content: `worldlab > ${input}`,
-      timestamp: new Date().toISOString(),
-    }
-    addOutputLine(commandLine)
-
-    // 解析命令
-    const result = parseCommand(input)
-
-    if (result.type === 'error') {
-      const errorLine: TerminalLine = {
-        id: `err_${Date.now()}`,
-        type: 'error',
-        content: `Error: ${result.error}`,
-        timestamp: new Date().toISOString(),
-      }
-      addOutputLine(errorLine)
-      setIsProcessing(false)
-      return
-    }
-
-    // 执行命令
-    try {
-      if (result.type === 'command') {
-        await executeLocalCommand(result.command!, result.args || {})
-      } else if (result.type === 'ai') {
-        await executeAICommand(result.command!, result.args || {}, input)
-      }
-    } catch (error: any) {
-      const errorLine: TerminalLine = {
-        id: `err_${Date.now()}`,
-        type: 'error',
-        content: `Error: ${error.message || 'Unknown error'}`,
-        timestamp: new Date().toISOString(),
-      }
-      addOutputLine(errorLine)
-    } finally {
-      setIsProcessing(false)
-      setHasStartedStreaming(false) // Reset streaming state
-    }
-  }, [isProcessing, parseCommand, addOutputLine])
-
   // 执行本地命令
   const executeLocalCommand = useCallback(async (command: string, _args: Record<string, any>) => {
     if (!worldLabData) {
@@ -1814,7 +1764,7 @@ IMPORTANT:
         false, // useWebSearch
         selectedModel, // modelName - uses model selected based on available API keys
         undefined, // attachments
-        'Normal', // style
+        'Concise', // style
         projectId, // projectId
         currentGoogleKey, // googleApiKeyOverride - read directly from localStorage to match ChatInterface
         currentOpenaiKey // openaiApiKeyOverride - read directly from localStorage to match ChatInterface
@@ -2478,6 +2428,56 @@ IMPORTANT:
       setHasStartedStreaming(false) // Reset streaming state
     }
   }, [worldLabData, buildWorldLabContext, addOutputLine, scrollToBottom, projectId, labName, selectedModel, cleanMarkdownForTerminal, calculateInitialPosition, onBeforeOperation, onNodesChange, onEdgesChange, conversationHistory, activeTerminalId])
+
+  const executeCommand = useCallback(async (input: string) => {
+    if (isProcessing) return
+
+    setIsProcessing(true)
+    
+    // 添加命令到输出
+    const commandLine: TerminalLine = {
+      id: `cmd_${Date.now()}`,
+      type: 'command',
+      content: `worldlab > ${input}`,
+      timestamp: new Date().toISOString(),
+    }
+    addOutputLine(commandLine)
+
+    // 解析命令
+    const result = parseCommand(input)
+
+    if (result.type === 'error') {
+      const errorLine: TerminalLine = {
+        id: `err_${Date.now()}`,
+        type: 'error',
+        content: `Error: ${result.error}`,
+        timestamp: new Date().toISOString(),
+      }
+      addOutputLine(errorLine)
+      setIsProcessing(false)
+      return
+    }
+
+    // 执行命令
+    try {
+      if (result.type === 'command') {
+        await executeLocalCommand(result.command!, result.args || {})
+      } else if (result.type === 'ai') {
+        await executeAICommand(result.command!, result.args || {}, input)
+      }
+    } catch (error: any) {
+      const errorLine: TerminalLine = {
+        id: `err_${Date.now()}`,
+        type: 'error',
+        content: `Error: ${error.message || 'Unknown error'}`,
+        timestamp: new Date().toISOString(),
+      }
+      addOutputLine(errorLine)
+    } finally {
+      setIsProcessing(false)
+      setHasStartedStreaming(false) // Reset streaming state
+    }
+  }, [isProcessing, parseCommand, addOutputLine, executeLocalCommand, executeAICommand])
 
   // 处理粘贴事件 - 移除格式，只保留纯文本
   const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLDivElement>) => {

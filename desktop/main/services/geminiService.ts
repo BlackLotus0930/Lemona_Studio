@@ -158,7 +158,8 @@ async function buildContext(
   cursorPosition?: number,
   apiKey?: string,
   userMessage?: string,
-  openaiApiKey?: string
+  openaiApiKey?: string,
+  style?: string
 ): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: { actions?: { [key: string]: { fileCount: number; fileIds?: string[] } } } }> {
   let systemInstruction = `You are Lemona's AI writing companion.
 
@@ -169,6 +170,24 @@ Use rich markdown formatting to make information visually clear:
 - Use **bold** for emphasis and key points
 - Use bullet lists for multiple items
 - Use code blocks for technical content`
+
+  // Add style instructions
+  if (style && style !== 'Normal') {
+    switch (style) {
+      case 'Learning':
+        systemInstruction += '\n\nResponse Style: LEARNING\n- Explain concepts step-by-step\n- Provide examples and analogies\n- Break down complex ideas into simpler parts\n- Encourage questions and deeper understanding'
+        break
+      case 'Concise':
+        systemInstruction += '\n\nResponse Style: CONCISE\n- Be brief and to the point\n- Avoid unnecessary elaboration\n- Focus on key information\n- Use bullet points or short paragraphs when appropriate'
+        break
+      case 'Explanatory':
+        systemInstruction += '\n\nResponse Style: EXPLANATORY\n- Provide detailed explanations\n- Include context and background\n- Explain the "why" behind concepts\n- Use examples and illustrations'
+        break
+      case 'Formal':
+        systemInstruction += '\n\nResponse Style: FORMAL\n- Use formal language and tone\n- Structure responses professionally\n- Avoid contractions and casual expressions\n- Maintain a respectful and authoritative tone'
+        break
+    }
+  }
 
   // 1️⃣ Add project context FIRST (README, project overview, intent)
   // This gives AI the background about "what project am I working on"
@@ -505,10 +524,11 @@ export const geminiService = {
     useWebSearch?: boolean,
     modelName?: string,
     attachments?: ChatAttachment[],
+    style?: string,
     openaiApiKey?: string
   ): AsyncGenerator<string> {
     const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview')
-    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey)
+    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey, style)
     
     // Send metadata first (if available) as a special chunk
     if (reasoningMetadata) {
