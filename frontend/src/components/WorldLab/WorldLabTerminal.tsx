@@ -254,9 +254,31 @@ export default function WorldLabTerminal({
     const initialTerminalId = loadActiveTerminalId(labName, projectId) || 'terminal_default'
     return loadConversationHistory(labName, initialTerminalId, projectId)
   })
-  // Initialize selectedModel based on available API keys from localStorage
+  // Initialize selectedModel - first check for saved preference, then fall back to API key-based selection
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
+      // First, try to load saved model preference
+      const savedModel = localStorage.getItem('worldLabTerminalSelectedModel')
+      const validModels = ['gemini-3-flash-preview', 'gemini-3-pro-preview', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2']
+      
+      if (savedModel && validModels.includes(savedModel)) {
+        // Verify the saved model is compatible with available API keys
+        const googleKey = localStorage.getItem('googleApiKey') || ''
+        const openaiKey = localStorage.getItem('openaiApiKey') || ''
+        const hasGoogleKey = !!googleKey && googleKey.trim().length > 0
+        const hasOpenaiKey = !!openaiKey && openaiKey.trim().length > 0
+        
+        const isGeminiModel = savedModel.startsWith('gemini-')
+        const isGptModel = savedModel.startsWith('gpt-')
+        
+        // If saved model is compatible with available keys, use it
+        if ((isGeminiModel && hasGoogleKey) || (isGptModel && hasOpenaiKey)) {
+          return savedModel
+        }
+        // If saved model is incompatible, fall through to default selection
+      }
+      
+      // Fall back to API key-based selection if no saved preference or incompatible
       const googleKey = localStorage.getItem('googleApiKey') || ''
       const openaiKey = localStorage.getItem('openaiApiKey') || ''
       const hasGoogleKey = !!googleKey && googleKey.trim().length > 0
@@ -321,6 +343,15 @@ export default function WorldLabTerminal({
     window.addEventListener('storage', handleStorageChange)
     return () => window.removeEventListener('storage', handleStorageChange)
   }, [])
+
+  // Save selected model to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('worldLabTerminalSelectedModel', selectedModel)
+    } catch (error) {
+      console.error('[WorldLabTerminal] Failed to save selected model:', error)
+    }
+  }, [selectedModel])
 
   const measurePromptWidth = useCallback(() => {
     if (!promptRef.current) return
