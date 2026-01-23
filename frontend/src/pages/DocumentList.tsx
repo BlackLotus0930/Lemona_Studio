@@ -13,6 +13,122 @@ import MoreVertIcon from '@mui/icons-material/MoreVert'
 import logoImage from '../assets/lemonalogo.png'
 import thinkingMemeImage from '../assets/thinkingmeme.png'
 
+const FIRST_PROJECT_DOC_TITLE = 'Lemona'
+const FIRST_PROJECT_WORLDLAB_TITLE = 'New world 1.lab'
+const FIRST_PROJECT_WELCOME_CONTENT = {
+  type: 'doc',
+  content: [
+    {
+      type: 'heading',
+      attrs: { level: 1 },
+      content: [{ type: 'text', text: 'Welcome!' }],
+    },
+    {
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'Lemona is an integrated writing editor.' }],
+    },
+    {
+      type: 'bulletList',
+      content: [
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Rich text editor' }] },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Multi-file workspace' }] },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Version control for your drafts' }] },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Context-Aware AI' }] },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Three connected spaces' }] },
+          ],
+        },
+      ],
+    },
+    {
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'Your three connected spaces:' }],
+    },
+    {
+      type: 'bulletList',
+      content: [
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'WorldLab - a playground for all your ideas.' }] },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Library - keep your documentation (PDF, DOCX).' }] },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Workspace - write your documents.' }] },
+          ],
+        },
+      ],
+    },
+    {
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'Quick ways to get started:' }],
+    },
+    {
+      type: 'bulletList',
+      content: [
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: "Type '/' for commands and formatting." }] },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Select text to improve or rewrite it.' }] },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Ctrl Shift E to toggle the file explorer.' }] },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Ctrl S to save and index all workspace files.' }] },
+          ],
+        },
+      ],
+    },
+    {
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'You’re all set up! Hope you enjoy working on your project!' }],
+    },
+  ],
+}
+
 export default function DocumentList() {
   const { theme } = useTheme()
   const [projects, setProjects] = useState<Project[]>([])
@@ -101,6 +217,7 @@ export default function DocumentList() {
 
   const handleCreateProject = async () => {
     try {
+      const isFirstProject = projects.length === 0
       // Generate default name "Untitled (X)" based on existing projects
       const untitledPattern = /^Untitled \((\d+)\)$/
       const existingUntitledNumbers = projects
@@ -132,8 +249,14 @@ export default function DocumentList() {
         chapterNumber++
       }
       
-      const newFileName = `Chapter ${chapterNumber}`
+      const newFileName = isFirstProject ? FIRST_PROJECT_DOC_TITLE : `Chapter ${chapterNumber}`
       const workspaceDoc = await documentApi.create(newFileName, 'project')
+
+      if (isFirstProject) {
+        await documentApi.update(workspaceDoc.id, JSON.stringify(FIRST_PROJECT_WELCOME_CONTENT))
+        const worldLabDoc = await documentApi.create(FIRST_PROJECT_WORLDLAB_TITLE, 'worldlab')
+        await projectApi.addDocument(project.id, worldLabDoc.id, 1)
+      }
       
       // Add workspace file to project
       await projectApi.addDocument(project.id, workspaceDoc.id, 0)
@@ -241,8 +364,14 @@ export default function DocumentList() {
           chapterNumber++
         }
         
-        const newFileName = `Chapter ${chapterNumber}`
+        const isFirstProject = projects.length === 1 && projects[0]?.id === projectId
+        const newFileName = isFirstProject ? FIRST_PROJECT_DOC_TITLE : `Chapter ${chapterNumber}`
         const document = await documentApi.create(newFileName, 'project')
+        if (isFirstProject) {
+          await documentApi.update(document.id, JSON.stringify(FIRST_PROJECT_WELCOME_CONTENT))
+          const worldLabDoc = await documentApi.create(FIRST_PROJECT_WORLDLAB_TITLE, 'worldlab')
+          await projectApi.addDocument(projectId, worldLabDoc.id, 1)
+        }
         await projectApi.addDocument(projectId, document.id, 0)
         navigate(`/document/${document.id}`)
       }
@@ -723,7 +852,7 @@ export default function DocumentList() {
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '90px 20px 60px 20px',
+              padding: '130px 20px 60px 20px',
               minHeight: '400px'
             }}>
               <img 

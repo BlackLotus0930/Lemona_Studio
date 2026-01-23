@@ -4048,30 +4048,33 @@ function WorldLabCanvasInner({
                     flexDirection: 'column',
                     alignItems: 'center',
                     gap: '16px',
-                    opacity: 0.5,
+                    opacity: 0.85,
                     transition: 'opacity 0.3s ease',
                   }}
                 >
                   <div
                     style={{
-                      width: '64px',
-                      height: '64px',
+                      width: '72px',
+                      height: '72px',
                       borderRadius: '50%',
-                      border: `2px dashed ${theme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.2)'}`,
+                      border: `2px dashed ${theme === 'dark' ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.35)'}`,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      background: theme === 'dark' ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.02)',
-                      animation: 'pulse 2s ease-in-out infinite',
+                      background: theme === 'dark' ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)',
+                      boxShadow: theme === 'dark'
+                        ? '0 0 20px rgba(255, 255, 255, 0.08)'
+                        : '0 0 20px rgba(0, 0, 0, 0.08)',
+                      animation: 'pulse 4s ease-in-out infinite',
                     }}
                   >
                     <svg
-                      width="24"
-                      height="24"
+                      width="28"
+                      height="28"
                       viewBox="0 0 24 24"
                       fill="none"
-                      stroke={theme === 'dark' ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)'}
-                      strokeWidth="2"
+                      stroke={theme === 'dark' ? 'rgba(255, 255, 255, 0.75)' : 'rgba(0, 0, 0, 0.75)'}
+                      strokeWidth="2.25"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >

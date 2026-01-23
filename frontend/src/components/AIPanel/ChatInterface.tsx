@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { AIChatMessage, ChatAttachment, Document, IndexingStatus } from '@shared/types'
-import { aiApi, chatApi, documentApi, settingsApi } from '../../services/api'
+import { aiApi, chatApi, documentApi, projectApi, settingsApi } from '../../services/api'
 import { indexingApi } from '../../services/desktop-api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -39,6 +39,18 @@ import StopIcon from '@mui/icons-material/Stop'
 import FolderIcon from '@mui/icons-material/Folder'
 // @ts-ignore
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
+
+const ONBOARDING_DOCUMENT_TITLE = 'Lemona'
+const ONBOARDING_USER_MESSAGE = 'What can you do to help me?'
+const ONBOARDING_ASSISTANT_MESSAGE = [
+  "Welcome to Lemona! I'm your writing copilot. I use semantic search to find the most relevant context from your project and library, so my suggestions stay grounded in your work. It's faster, more accurate, and cheaper than sending whole documents to ChatGPT.",
+  '',
+  'Quick tips:',
+  '- Ctrl S to save and index your workspace files ($0.02-0.15 per 1M tokens).',
+  '- Turn on "library indexing" in the API key menu to auto-index /library.',
+  '- Use @ to mention a file for precise search.',
+  '- Use one API key for the best AI experience.',
+].join('\n')
 
 interface ChatInterfaceProps {
   documentId?: string
@@ -149,6 +161,47 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       return `msg_${globalThis.crypto.randomUUID()}`
     }
     return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  }
+
+  const buildOnboardingMessages = async (): Promise<AIChatMessage[] | null> => {
+    if (!documentId || !projectId || chatId !== 'chat_default') return null
+
+    const projects = await projectApi.getAll()
+    if (!Array.isArray(projects) || projects.length !== 1) return null
+    if (projects[0]?.id !== projectId) return null
+
+    const projectDocuments = await projectApi.getDocuments(projectId)
+    if (!Array.isArray(projectDocuments) || projectDocuments.length === 0) return null
+    const workspaceDocs = projectDocuments.filter(doc => !doc.folder || doc.folder === 'project')
+    if (workspaceDocs.length !== 1) return null
+    const onlyDoc = workspaceDocs[0]
+    if (!onlyDoc || onlyDoc.id !== documentId || onlyDoc.title !== ONBOARDING_DOCUMENT_TITLE) return null
+    const worldLabDocs = projectDocuments.filter(doc => doc.folder === 'worldlab')
+    if (worldLabDocs.length > 1) return null
+
+    const now = new Date().toISOString()
+    const userMessage: AIChatMessage = {
+      id: generateMessageId(),
+      role: 'user',
+      content: ONBOARDING_USER_MESSAGE,
+      timestamp: now,
+    }
+    const assistantMessage: AIChatMessage = {
+      id: generateMessageId(),
+      role: 'assistant',
+      content: ONBOARDING_ASSISTANT_MESSAGE,
+      timestamp: now,
+      reasoningMetadata: {
+        actions: {
+          searched: {
+            fileCount: 1,
+            fileIds: [documentId],
+          },
+        },
+      },
+    }
+
+    return [userMessage, assistantMessage]
   }
   
   // Load API keys and Smart indexing setting from localStorage on mount and sync to main process
@@ -797,11 +850,28 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         const loadedMessages = await chatApi.getChat(documentId, chatId)
         // Ensure messages is always an array
         const messages = Array.isArray(loadedMessages) ? loadedMessages : []
-        setMessages(messages)
-        // Initialize addedMessageIdsRef with existing message IDs
-        addedMessageIdsRef.current = new Set(messages.map(msg => msg.id))
-        // Reset notification flag if chat already has messages
-        hasNotifiedFirstMessage.current = messages.length > 0
+
+        if (messages.length === 0) {
+          const onboardingMessages = await buildOnboardingMessages()
+          if (onboardingMessages && onboardingMessages.length > 0) {
+            setMessages(onboardingMessages)
+            for (const message of onboardingMessages) {
+              await saveMessage(message, false)
+            }
+            addedMessageIdsRef.current = new Set(onboardingMessages.map(msg => msg.id))
+            hasNotifiedFirstMessage.current = true
+          } else {
+            setMessages(messages)
+            addedMessageIdsRef.current = new Set()
+            hasNotifiedFirstMessage.current = false
+          }
+        } else {
+          setMessages(messages)
+          // Initialize addedMessageIdsRef with existing message IDs
+          addedMessageIdsRef.current = new Set(messages.map(msg => msg.id))
+          // Reset notification flag if chat already has messages
+          hasNotifiedFirstMessage.current = true
+        }
         
         // Only scroll to bottom when opening a NEW chat (chatId changed)
         // If only documentId changed, restore the previous scroll position
@@ -1599,7 +1669,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       const errorMessage: AIChatMessage = {
         id: generateMessageId(),
         role: 'assistant',
-        content: 'Google API key is required for Gemini models. Please add your Google API key in API Keys.',
+        content: 'An API key is required. Please add an API key in Enter API Key.',
         timestamp: new Date().toISOString(),
       }
       setMessages(prev => [...prev, errorMessage])
@@ -2002,7 +2072,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     style={{
                       fontSize: '12px',
                       color: theme === 'dark' ? '#888888' : '#999999',
-                      marginBottom: '0px',
+                      marginBottom: '8px',
                       opacity: 0.7,
                       lineHeight: '1.4'
                     }}

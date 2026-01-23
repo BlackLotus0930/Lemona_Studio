@@ -548,7 +548,10 @@ export default function WorldLabTerminal({
 CAPABILITIES
   • Capture and build ideas
   • Natural conversation
-  • All changes are reversible`,
+  • All changes are reversible
+
+EXAMPLE
+  create In the broken city of Virelia, magic girl Elara and brave soldier Kael try to stop scary shadow monsters from eating everyone.`,
           timestamp: now,
         },
       ]
@@ -933,7 +936,10 @@ CAPABILITIES
 CAPABILITIES
   • Capture and build ideas
   • Natural conversation
-  • All changes are reversible`
+  • All changes are reversible
+
+EXAMPLE
+  create "In the broken city of Virelia, magic girl Elara and brave soldier Kael try to stop scary shadow monsters from eating everyone."`
   
         addOutputLine({
           id: `out_${Date.now()}`,
