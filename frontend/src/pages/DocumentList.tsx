@@ -171,6 +171,41 @@ export default function DocumentList() {
     }
   }, [location.pathname]) // Reload when navigating to /documents
 
+  // Clear last opened document when user is on home page and app closes
+  // This ensures that if user quits from home page, app won't auto-open project on next launch
+  useEffect(() => {
+    const handleWindowWillClose = () => {
+      // Clear last opened document so app starts at home page next time
+      try {
+        localStorage.removeItem('lastOpenedDocument')
+      } catch (error) {
+        console.error('Failed to clear last opened document:', error)
+      }
+    }
+
+    // Listen for window-will-close event from Electron main process
+    if (window.electron) {
+      const unsubscribe = window.electron.on('window-will-close', handleWindowWillClose)
+      return () => {
+        if (unsubscribe) unsubscribe()
+      }
+    }
+    
+    // Fallback to beforeunload for non-Electron environments (e.g., web)
+    const handleBeforeUnload = () => {
+      try {
+        localStorage.removeItem('lastOpenedDocument')
+      } catch (error) {
+        console.error('Failed to clear last opened document:', error)
+      }
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [])
+
   const loadProjects = async () => {
     try {
       const loadedProjects = await projectApi.getAll()

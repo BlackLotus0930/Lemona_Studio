@@ -2923,7 +2923,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     handleSend()
                   }
                 }}
-                placeholder="Type your message..."
+                placeholder="Type your message"
                 disabled={isLoading}
                 rows={1}
                 className={`scrollable-container ${theme === 'dark' ? 'dark-theme' : ''}`}
