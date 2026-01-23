@@ -43,7 +43,7 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 const ONBOARDING_DOCUMENT_TITLE = 'Lemona'
 const ONBOARDING_USER_MESSAGE = 'What can you do to help me?'
 const ONBOARDING_ASSISTANT_MESSAGE = [
-  "Welcome to Lemona! I'm your writing copilot. I use semantic search to find the most relevant context from your project and library, so my suggestions stay grounded in your work. It's faster, more accurate, and cheaper than sending whole documents to ChatGPT.",
+  "Welcome to Lemona! I'm your writing copilot. I use semantic search to find the most relevant context from your project and library, keeping my suggestions grounded in your work. It's faster, more accurate, and more efficient than uploading full documents to AI models.",
   '',
   'Quick tips:',
   '- Ctrl S to save and index your workspace files ($0.02-0.15 per 1M tokens).',

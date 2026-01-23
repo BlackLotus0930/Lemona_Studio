@@ -74,6 +74,7 @@ export default function KeyboardShortcutsModal({
         { action: 'Toggle File Explorer', keys: ['Ctrl', 'Shift', 'E'] },
         { action: 'Close current tab', keys: ['Ctrl', 'W'] },
         { action: 'Go to Home', keys: ['Ctrl', 'H'] },
+        { action: 'Zen Mode', keys: ['F11'] },
       ]
     },
     {

@@ -143,6 +143,15 @@ function createWindow() {
 
   // Enable zoom commands (Ctrl/Cmd + Plus, Minus, 0)
   mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F11') {
+      // Focus Mode: hide menu bar and toggle fullscreen
+      const shouldEnable = !mainWindow!.isFullScreen()
+      mainWindow!.setFullScreen(shouldEnable)
+      mainWindow!.setMenuBarVisibility(!shouldEnable)
+      mainWindow!.setAutoHideMenuBar(shouldEnable)
+      event.preventDefault()
+      return
+    }
     if (input.control || input.meta) {
       if (input.key === '+' || input.key === '=') {
         // Zoom in

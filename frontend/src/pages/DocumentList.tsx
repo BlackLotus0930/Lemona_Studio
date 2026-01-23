@@ -21,7 +21,7 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
     {
       type: 'heading',
       attrs: { level: 1 },
-      content: [{ type: 'text', text: 'Welcome!' }],
+      content: [{ type: 'text', text: ' Welcome to Lemona!' }],
     },
     {
       type: 'paragraph',
@@ -852,7 +852,7 @@ export default function DocumentList() {
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '130px 20px 60px 20px',
+              padding: '140px 20px 60px 20px',
               minHeight: '400px'
             }}>
               <img 
