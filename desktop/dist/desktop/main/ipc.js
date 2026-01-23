@@ -246,7 +246,7 @@ export function setupIPC() {
                 }
                 else {
                     // No keys available
-                    throw new Error('No API key configured. Please set either Google API key or OpenAI API key in Settings > API Keys.');
+                    throw new Error('No API key configured. Please add an API key in Settings > API Keys.');
                 }
             }
             // Start streaming in background
@@ -308,7 +308,7 @@ export function setupIPC() {
                 return await openaiService.autocomplete(openaiApiKey, text, cursorPosition, documentContent, projectId, 'gpt-4.1-nano');
             }
             else {
-                throw new Error('No API key configured. Please set either Google API key or OpenAI API key in Settings > API Keys.');
+                throw new Error('No API key configured. Please add an API key in Settings > API Keys.');
             }
         }
         catch (error) {
@@ -354,7 +354,7 @@ Rephrased text:`;
                 result = msg.content.trim();
             }
             else {
-                throw new Error('No API key configured. Please set either Google API key or OpenAI API key in Settings > API Keys.');
+                throw new Error('No API key configured. Please add an API key in Settings > API Keys.');
             }
             // Remove any "Next step" or similar follow-up text that might still appear
             const nextStepPatterns = [

@@ -252,6 +252,16 @@ export default function Layout(): JSX.Element {
       window.removeEventListener('unhandledrejection', handleUnhandledRejection)
     }
   }, [])
+
+  // Cleanup notification timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (commitNotificationTimeoutRef.current) {
+        clearTimeout(commitNotificationTimeoutRef.current)
+        commitNotificationTimeoutRef.current = null
+      }
+    }
+  }, [])
   
   const { theme } = useTheme()
   const navigate = useNavigate()
@@ -369,7 +379,8 @@ export default function Layout(): JSX.Element {
   const [showWordCountModal, setShowWordCountModal] = useState(false) // Track word count modal visibility
   const [isExporting, setIsExporting] = useState(false) // Track export loading state
   const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | null>(null) // Track export format
-  const [showCommitSuccessNotification, setShowCommitSuccessNotification] = useState<{ fileCount: number } | null>(null) // Track commit success notification
+  const [showCommitSuccessNotification, setShowCommitSuccessNotification] = useState<{ fileCount: number; isIndexing?: boolean } | null>(null) // Track commit success notification
+  const commitNotificationTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Track notification auto-hide timeout
   const [restoredCommitParentId, setRestoredCommitParentId] = useState<string | null>(null) // Track restored commit ID for branch creation
   const [indexingCompletionNotifications, setIndexingCompletionNotifications] = useState<Map<string, { fileName: string; completedAt: number }>>(new Map()) // Track indexing completion notifications
   const [isSeparatorHovered, setIsSeparatorHovered] = useState(false) // Track AI panel separator hover state
@@ -1220,11 +1231,11 @@ export default function Layout(): JSX.Element {
           return // No project, skip commit creation
         }
         
-        // Get all workspace documents (exclude library files)
+        // Get all workspace documents (exclude library and worldlab files)
         // Workspace files are those with folder === 'project' or folder === undefined/null
         const workspaceDocs = documents.filter(doc => 
           doc.projectId === currentProjectId && 
-          doc.folder !== 'library'
+          (doc.folder === 'project' || doc.folder === undefined || doc.folder === null)
         )
         
         if (workspaceDocs.length === 0) {
@@ -1322,14 +1333,6 @@ export default function Layout(): JSX.Element {
             // Clear restored commit parent after successful commit
             setRestoredCommitParentId(null)
             
-            // Show success notification
-            setShowCommitSuccessNotification({ fileCount: filteredSnapshots.length })
-            
-            // Auto-hide notification after 3 seconds
-            setTimeout(() => {
-              setShowCommitSuccessNotification(null)
-            }, 3000)
-
             // Trigger incremental indexing for workspace documents (async, non-blocking)
             // Only index documents that were included in the commit (filteredSnapshots)
             const workspaceDocumentIds = filteredSnapshots
@@ -1339,38 +1342,114 @@ export default function Layout(): JSX.Element {
               })
               .filter((id): id is string => id !== null)
 
+            // Check if indexing will happen
+            let willIndex = false
             if (workspaceDocumentIds.length > 0) {
+              try {
+                const keys = await settingsApi.getApiKeys()
+                const geminiApiKey = keys.geminiApiKey || undefined
+                const openaiApiKey = keys.openaiApiKey || undefined
+                willIndex = !!(geminiApiKey || openaiApiKey)
+              } catch (error) {
+                willIndex = false
+              }
+            }
+
+            // Clear any existing notification timeout
+            if (commitNotificationTimeoutRef.current) {
+              clearTimeout(commitNotificationTimeoutRef.current)
+              commitNotificationTimeoutRef.current = null
+            }
+
+            // Show success notification
+            // If indexing will happen, show "Indexing..." state, otherwise show with 0 files
+            setShowCommitSuccessNotification({ 
+              fileCount: 0, 
+              isIndexing: willIndex && workspaceDocumentIds.length > 0 
+            })
+            
+            // Only set auto-hide timer if indexing won't happen
+            // If indexing will happen, the timer will be set after indexing completes
+            if (!willIndex || workspaceDocumentIds.length === 0) {
+              commitNotificationTimeoutRef.current = setTimeout(() => {
+                setShowCommitSuccessNotification(null)
+                commitNotificationTimeoutRef.current = null
+              }, 3000)
+            }
+
+            if (workspaceDocumentIds.length > 0 && willIndex) {
               // Get API keys for indexing
               try {
                 const keys = await settingsApi.getApiKeys()
                 const geminiApiKey = keys.geminiApiKey || undefined
                 const openaiApiKey = keys.openaiApiKey || undefined
 
-                // Only proceed if at least one API key is available
-                if (geminiApiKey || openaiApiKey) {
-                  // Trigger incremental indexing asynchronously (don't await, don't block UI)
-                  indexingApi.incrementalIndexProjectFiles(
-                    currentProjectId,
-                    workspaceDocumentIds,
-                    geminiApiKey,
-                    openaiApiKey
-                  ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
-                    const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
-                    const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
-                    if (successCount > 0) {
-                      console.log(`[Indexing] Incrementally indexed ${successCount} workspace document(s)`)
-                    }
-                    if (errorCount > 0) {
-                      console.warn(`[Indexing] Failed to index ${errorCount} workspace document(s)`)
-                    }
-                  }).catch((error) => {
-                    // Don't show error to user - indexing failure shouldn't affect commit
-                    console.warn('[Indexing] Incremental indexing failed (non-blocking):', error)
-                  })
-                }
+                // Trigger incremental indexing asynchronously (don't await, don't block UI)
+                indexingApi.incrementalIndexProjectFiles(
+                  currentProjectId,
+                  workspaceDocumentIds,
+                  geminiApiKey,
+                  openaiApiKey
+                ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+                  const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+                  const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+                  
+                  // Clear any existing timeout before updating notification
+                  if (commitNotificationTimeoutRef.current) {
+                    clearTimeout(commitNotificationTimeoutRef.current)
+                    commitNotificationTimeoutRef.current = null
+                  }
+                  
+                  if (successCount > 0) {
+                    console.log(`[Indexing] Incrementally indexed ${successCount} workspace document(s)`)
+                    // Update notification with actual indexed count (no longer indexing)
+                    setShowCommitSuccessNotification({ fileCount: successCount, isIndexing: false })
+                    // Set auto-hide timer after indexing completes
+                    commitNotificationTimeoutRef.current = setTimeout(() => {
+                      setShowCommitSuccessNotification(null)
+                      commitNotificationTimeoutRef.current = null
+                    }, 3000)
+                  } else {
+                    // No files indexed successfully, hide notification after a short delay
+                    setShowCommitSuccessNotification({ fileCount: 0, isIndexing: false })
+                    commitNotificationTimeoutRef.current = setTimeout(() => {
+                      setShowCommitSuccessNotification(null)
+                      commitNotificationTimeoutRef.current = null
+                    }, 2000)
+                  }
+                  
+                  if (errorCount > 0) {
+                    console.warn(`[Indexing] Failed to index ${errorCount} workspace document(s)`)
+                  }
+                }).catch((error) => {
+                  // Don't show error to user - indexing failure shouldn't affect commit
+                  console.warn('[Indexing] Incremental indexing failed (non-blocking):', error)
+                  
+                  // Clear indexing state and hide notification after a short delay
+                  if (commitNotificationTimeoutRef.current) {
+                    clearTimeout(commitNotificationTimeoutRef.current)
+                    commitNotificationTimeoutRef.current = null
+                  }
+                  setShowCommitSuccessNotification({ fileCount: 0, isIndexing: false })
+                  commitNotificationTimeoutRef.current = setTimeout(() => {
+                    setShowCommitSuccessNotification(null)
+                    commitNotificationTimeoutRef.current = null
+                  }, 2000)
+                })
               } catch (error) {
                 // Silently fail - API key retrieval failure shouldn't affect commit
                 console.warn('[Indexing] Failed to get API keys for incremental indexing:', error)
+                
+                // Clear indexing state and hide notification
+                if (commitNotificationTimeoutRef.current) {
+                  clearTimeout(commitNotificationTimeoutRef.current)
+                  commitNotificationTimeoutRef.current = null
+                }
+                setShowCommitSuccessNotification({ fileCount: 0, isIndexing: false })
+                commitNotificationTimeoutRef.current = setTimeout(() => {
+                  setShowCommitSuccessNotification(null)
+                  commitNotificationTimeoutRef.current = null
+                }, 2000)
               }
             }
           } catch (error) {
@@ -6630,16 +6709,27 @@ export default function Layout(): JSX.Element {
                 marginBottom: '2px',
               }}
             >
-              Version created successfully
+              Version created
             </div>
-            <div
-              style={{
-                fontSize: '11px',
-                color: theme === 'dark' ? '#999' : '#666',
-              }}
-            >
-              {showCommitSuccessNotification.fileCount} file{showCommitSuccessNotification.fileCount !== 1 ? 's' : ''} indexed
-            </div>
+            {showCommitSuccessNotification.isIndexing ? (
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: theme === 'dark' ? '#999' : '#666',
+                }}
+              >
+                Indexing...
+              </div>
+            ) : showCommitSuccessNotification.fileCount > 0 ? (
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: theme === 'dark' ? '#999' : '#666',
+                }}
+              >
+                {showCommitSuccessNotification.fileCount} file{showCommitSuccessNotification.fileCount !== 1 ? 's' : ''} indexed
+              </div>
+            ) : null}
           </div>
           <style>{`
             @keyframes slideUp {
