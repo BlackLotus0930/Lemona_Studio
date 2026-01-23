@@ -632,14 +632,15 @@ export async function indexProjectLibraryFiles(
   // Check index validity for this project
   const indexValid = await isIndexValid(projectId, 'library')
   if (!indexValid) {
-    console.warn(`[Indexing] Index for project ${projectId}/library is invalid, will rebuild during indexing`)
+    console.warn(`[Indexing] Index for project ${projectId}/library is invalid, forcing full reindex to rebuild`)
   }
+  const effectiveOnlyUnindexed = onlyUnindexed && indexValid
 
   const results: Array<{ documentId: string; status: IndexingStatus }> = []
 
   for (const doc of indexableDocuments) {
     // If onlyUnindexed is true, use shouldReindexFile for strict checking
-    if (onlyUnindexed) {
+    if (effectiveOnlyUnindexed) {
       const needsReindex = await shouldReindexFile(doc.id)
       if (!needsReindex) {
         continue // Skip files that are correctly indexed
@@ -806,12 +807,13 @@ export async function indexAllLibraryFiles(
     // Check index validity for this project
     const indexValid = await isIndexValid(projectId, 'library')
     if (!indexValid) {
-      console.warn(`[Indexing] Index for project ${projectId}/library is invalid, will rebuild during indexing`)
+      console.warn(`[Indexing] Index for project ${projectId}/library is invalid, forcing full reindex to rebuild`)
     }
+    const effectiveOnlyUnindexed = onlyUnindexed && indexValid
 
     for (const doc of docs) {
       // If onlyUnindexed is true, use shouldReindexFile for strict checking
-      if (onlyUnindexed) {
+      if (effectiveOnlyUnindexed) {
         const needsReindex = await shouldReindexFile(doc.id)
         if (!needsReindex) {
           continue // Skip files that are correctly indexed

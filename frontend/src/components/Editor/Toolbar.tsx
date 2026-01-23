@@ -444,7 +444,7 @@ export default function Toolbar({
   const commitHistoryButtonRef = useRef<HTMLButtonElement>(null)
   const [showMathMenu, setShowMathMenu] = useState(false)
   const [showLinkDialog, setShowLinkDialog] = useState(false)
-  const [mathFormula, setMathFormula] = useState('E=mc^2')
+  const [mathFormula, setMathFormula] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
   const shareButtonRef = useRef<HTMLButtonElement>(null)
   const mathInputRef = useRef<HTMLInputElement>(null)
@@ -1090,7 +1090,7 @@ export default function Toolbar({
     closeAllMenusExcept(newState ? 'math' : null)
     setShowMathMenu(newState)
     if (newState) {
-      setMathFormula('E=mc^2')
+      setMathFormula('')
     }
   }
 
@@ -2211,7 +2211,7 @@ export default function Toolbar({
                 type="text"
                 value={mathFormula}
                 onChange={(e) => setMathFormula(e.target.value)}
-                placeholder="E.g., E=mc^2, \\frac{a}{b}"
+                placeholder="E=mc^2"
                 style={{
                   width: '100%',
                   padding: '8px 10px',
@@ -2256,12 +2256,16 @@ export default function Toolbar({
                     fontSize: '13px',
                     border: 'none',
                     borderRadius: '6px',
-                    backgroundColor: '#1a73e8',
+                    backgroundColor: theme === 'dark' ? '#7bb3d9' : '#8fc4e8',
                     color: '#ffffff',
                     cursor: 'pointer',
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1557b0'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#1a73e8'}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#6ba5c9' : '#7fb8de'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#7bb3d9' : '#8fc4e8'
+                  }}
                 >
                   Insert
                 </button>

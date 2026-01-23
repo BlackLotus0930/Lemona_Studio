@@ -743,7 +743,10 @@ code {
 
 .ProseMirror .math-node.math-inline {
   display: inline-block;
-  vertical-align: baseline;
+  vertical-align: middle;
+  overflow: visible;
+  line-height: normal;
+  max-height: none;
 }
 
 .ProseMirror .math-node.selected {

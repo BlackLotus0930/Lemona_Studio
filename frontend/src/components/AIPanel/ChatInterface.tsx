@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
+import katex from 'katex'
 import { useTheme } from '../../contexts/ThemeContext'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
@@ -585,8 +586,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#9aa0a6'
   const userMessageBg = theme === 'dark' ? '#1E1E1E' : '#f0f0ed'
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    container.scrollTo({ top: container.scrollHeight, behavior })
   }
 
   // Save scroll position when leaving a chat
@@ -634,7 +637,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       const container = scrollContainerRef.current
       const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
       if (isNearBottom) {
-        scrollToBottom()
+        scrollToBottom('smooth')
       }
     }
 
@@ -673,10 +676,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           
           // Debounce scroll slightly for smoother performance during rapid updates
           streamingScrollTimeoutRef.current = setTimeout(() => {
-            if (messagesEndRef.current && scrollContainerRef.current) {
-              // Use instant scroll for streaming (smoother than smooth during rapid updates)
-              messagesEndRef.current.scrollIntoView({ behavior: 'auto' })
-            }
+            scrollToBottom('auto')
           }, 50) // Small debounce for performance
         }
       }
@@ -809,19 +809,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           // Always scroll to bottom when opening a new chat
           // Use requestAnimationFrame to ensure DOM is fully updated before scrolling
           requestAnimationFrame(() => {
-            if (messagesEndRef.current && scrollContainerRef.current) {
-              // Use instant scroll (auto) for immediate positioning, then smooth if needed
-              messagesEndRef.current.scrollIntoView({ behavior: 'auto' })
-              // Also ensure scroll container is at bottom
-              scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
-            }
+            scrollToBottom('auto')
           })
           // Double-check with another frame to ensure it sticks
           requestAnimationFrame(() => {
-            if (messagesEndRef.current && scrollContainerRef.current) {
-              messagesEndRef.current.scrollIntoView({ behavior: 'auto' })
-              scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
-            }
+            scrollToBottom('auto')
           })
         } else if (isDocumentChangeOnly && savedScrollPosition !== null) {
           // Restore scroll position when only document changed (same chat)
@@ -2271,6 +2263,73 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       const blockId = `${message.id}-${codeHash}-${codeString.length}`
                       const isCopied = copiedCodeBlocks.has(blockId)
                       
+                      if (['latex', 'tex', 'katex', 'math'].includes(language.toLowerCase())) {
+                        return (
+                          <div style={{
+                            position: 'relative',
+                            marginTop: '18px',
+                            marginBottom: '18px',
+                            padding: '14px',
+                            backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fafafa',
+                            borderRadius: '4px',
+                            border: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#e5e5e5'}`,
+                            overflowX: 'auto',
+                            maxWidth: '100%',
+                          }}
+                          >
+                            <button
+                              onClick={() => handleCopyCode(codeString, blockId)}
+                              style={{
+                                position: 'absolute',
+                                top: '6px',
+                                right: '10px',
+                                zIndex: 2,
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: '2px 6px',
+                                backgroundColor: 'transparent',
+                                border: 'none',
+                                color: theme === 'dark' ? '#999999' : '#666666',
+                                cursor: 'pointer',
+                                fontSize: '11px',
+                                fontFamily: 'inherit',
+                                transition: 'all 0.2s ease',
+                                borderRadius: '3px',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
+                                e.currentTarget.style.color = theme === 'dark' ? '#cccccc' : '#333333'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = 'transparent'
+                                e.currentTarget.style.color = theme === 'dark' ? '#999999' : '#666666'
+                              }}
+                            >
+                              {isCopied ? (
+                                <>
+                                  <CheckIcon style={{ fontSize: '14px' }} />
+                                  <span>Copied</span>
+                                </>
+                              ) : (
+                                <>
+                                  <ContentCopyIcon style={{ fontSize: '14px' }} />
+                                  <span>Copy</span>
+                                </>
+                              )}
+                            </button>
+                            <div
+                              dangerouslySetInnerHTML={{
+                                __html: katex.renderToString(codeString.trim(), {
+                                  displayMode: true,
+                                  throwOnError: false,
+                                }),
+                              }}
+                            />
+                          </div>
+                        )
+                      }
+
                       return (
                         <div style={{
                           position: 'relative',

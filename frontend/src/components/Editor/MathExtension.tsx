@@ -1,13 +1,20 @@
 import { Node, mergeAttributes } from '@tiptap/core'
 import { ReactNodeViewRenderer, NodeViewWrapper, ReactNodeViewProps } from '@tiptap/react'
 import React, { useState, useEffect, useRef } from 'react'
+import { useTheme } from '../../contexts/ThemeContext'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 
 const MathComponent = ({ node, updateAttributes, selected, editor }: ReactNodeViewProps) => {
+  const { theme } = useTheme()
   const [isEditing, setIsEditing] = useState(false)
   const [formulaState, setFormulaState] = useState((node.attrs.formula as string) || '')
   const [error, setError] = useState<string | null>(null)
+  const isDark = theme === 'dark'
+  const bgColor = isDark ? 'rgba(36, 36, 36, 0.9)' : 'rgba(248, 249, 250, 0.95)'
+  const borderColor = isDark ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.18)'
+  const textColor = isDark ? '#E6E6E6' : '#1F1F1F'
+
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const display = (node.attrs.display as boolean) ?? false
@@ -85,13 +92,17 @@ const MathComponent = ({ node, updateAttributes, selected, editor }: ReactNodeVi
       style={{
         display: display ? 'block' : 'inline-block',
         margin: display ? '16px 0' : '0 2px',
-        padding: isEditing ? '4px 8px' : '2px 4px',
-        backgroundColor: isEditing ? '#f5f5f5' : 'transparent',
-        border: selected ? '2px solid #1a73e8' : '1px solid transparent',
-        borderRadius: '6px',
+        padding: isEditing ? '6px 10px' : '2px 4px',
+        backgroundColor: isEditing ? bgColor : 'transparent',
+        border: isEditing || selected ? `1px solid ${borderColor}` : '1px solid transparent',
+        borderRadius: '8px',
         cursor: 'pointer',
         minWidth: display ? '100%' : 'auto',
         textAlign: display ? 'center' : 'left',
+        overflow: display ? 'visible' : 'visible',
+        lineHeight: display ? 'normal' : 'normal',
+        maxHeight: 'none',
+        verticalAlign: display ? 'baseline' : 'middle',
       }}
       onDoubleClick={handleDoubleClick}
     >
@@ -108,9 +119,13 @@ const MathComponent = ({ node, updateAttributes, selected, editor }: ReactNodeVi
             width: '100%',
             border: 'none',
             outline: 'none',
-            background: 'transparent',
-            fontFamily: 'monospace',
+            background: isDark ? '#1E1E1E' : '#FFFFFF',
+            color: textColor,
+            fontFamily: '"SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace',
             fontSize: '14px',
+            padding: '8px 10px',
+            borderRadius: '6px',
+            boxShadow: 'none',
           }}
         />
       ) : (

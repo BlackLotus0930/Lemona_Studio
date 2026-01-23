@@ -262,20 +262,7 @@ export default function WorldLabTerminal({
       const validModels = ['gemini-3-flash-preview', 'gemini-3-pro-preview', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2']
       
       if (savedModel && validModels.includes(savedModel)) {
-        // Verify the saved model is compatible with available API keys
-        const googleKey = localStorage.getItem('googleApiKey') || ''
-        const openaiKey = localStorage.getItem('openaiApiKey') || ''
-        const hasGoogleKey = !!googleKey && googleKey.trim().length > 0
-        const hasOpenaiKey = !!openaiKey && openaiKey.trim().length > 0
-        
-        const isGeminiModel = savedModel.startsWith('gemini-')
-        const isGptModel = savedModel.startsWith('gpt-')
-        
-        // If saved model is compatible with available keys, use it
-        if ((isGeminiModel && hasGoogleKey) || (isGptModel && hasOpenaiKey)) {
-          return savedModel
-        }
-        // If saved model is incompatible, fall through to default selection
+        return savedModel
       }
       
       // Fall back to API key-based selection if no saved preference or incompatible
@@ -305,6 +292,13 @@ export default function WorldLabTerminal({
       console.error('[WorldLabTerminal] Failed to initialize model from localStorage:', error)
       // Default to GPT if there's an error reading localStorage
       return 'gpt-4.1-nano'
+    }
+  })
+  const [isModelPreferenceLocked, setIsModelPreferenceLocked] = useState<boolean>(() => {
+    try {
+      return !!localStorage.getItem('worldLabTerminalSelectedModel')
+    } catch (error) {
+      return false
     }
   })
   
@@ -389,6 +383,9 @@ export default function WorldLabTerminal({
 
   // Select appropriate model based on available API keys
   useEffect(() => {
+    if (isModelPreferenceLocked) {
+      return
+    }
     const hasGoogleKey = !!googleApiKey && googleApiKey.trim().length > 0
     const hasOpenaiKey = !!openaiApiKey && openaiApiKey.trim().length > 0
     const isGeminiModel = selectedModel && (selectedModel.startsWith('gemini-') || selectedModel.includes('gemini'))
@@ -434,7 +431,7 @@ export default function WorldLabTerminal({
         setSelectedModel('gpt-4.1-nano')
       }
     }
-  }, [googleApiKey, openaiApiKey, selectedModel])
+  }, [googleApiKey, openaiApiKey, selectedModel, isModelPreferenceLocked])
 
   // Initialize terminal sessions on mount
   useEffect(() => {
@@ -1119,6 +1116,7 @@ CAPABILITIES
           
           // Set the model
           setSelectedModel(targetModel.name)
+          setIsModelPreferenceLocked(true)
           addOutputLine({
             id: `out_${Date.now()}`,
             type: 'info',

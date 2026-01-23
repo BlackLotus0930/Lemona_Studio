@@ -343,14 +343,15 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   const searchCloseHoverBg = theme === 'dark' ? '#2a2a2a' : '#f1f3f4'
   const searchCloseHoverColor = theme === 'dark' ? '#fff' : '#202124'
   const searchMatchCountColor = theme === 'dark' ? '#999' : '#5f6368'
-  const searchButtonBg = theme === 'dark' ? '#2a2a2a' : '#f1f3f4'
   const searchButtonBorder = theme === 'dark' ? '#333' : '#dadce0'
   const searchButtonHoverBg = theme === 'dark' ? '#333' : '#e8eaed'
   const searchButtonHoverBorder = theme === 'dark' ? '#444' : '#c4c7c5'
   const searchButtonDisabledColor = theme === 'dark' ? '#666' : '#9aa0a6'
   const searchButtonDisabledBg = theme === 'dark' ? '#2a2a2a' : '#f1f3f4'
-  const searchReplaceButtonBg = theme === 'dark' ? '#6366f1' : '#1a73e8'
-  const searchReplaceButtonHoverBg = theme === 'dark' ? '#4f46e5' : '#1557b0'
+  const exportPdfButtonBg = theme === 'dark' ? '#d9779f' : '#e8a5b8'
+  const exportPdfButtonHoverBg = theme === 'dark' ? '#c9688a' : '#e095ab'
+  const exportDocxButtonBg = theme === 'dark' ? '#7bb3d9' : '#8fc4e8'
+  const exportDocxButtonHoverBg = theme === 'dark' ? '#6ba5c9' : '#7fb8de'
   const searchBoxShadow = theme === 'dark' 
     ? '0 8px 24px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3)'
     : '0 8px 24px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.1)'
@@ -840,6 +841,22 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       }
     }
   }
+
+  useEffect(() => {
+    if (!showInlineSearch) return
+    const trimmedQuery = searchQuery.trim()
+    if (!trimmedQuery) {
+      clearInlineSearchHighlights()
+      setMatches([])
+      setCurrentMatchIndex(-1)
+      setActiveSearchQuery('')
+      return
+    }
+    const debounceId = setTimeout(() => {
+      performSearch()
+    }, 200)
+    return () => clearTimeout(debounceId)
+  }, [searchQuery, showInlineSearch, editor, isPDF])
 
   // Navigate to PDF match (scroll to page in PDF viewer)
   const navigateToPDFMatch = (index: number, matchesToUse?: Array<{ from: number; to: number; pageNumber?: number }>) => {
@@ -2544,10 +2561,12 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   style={{
                     flex: 1,
                     padding: '6px 12px',
-                    backgroundColor: searchButtonBg,
-                    border: `1px solid ${searchButtonBorder}`,
+                    backgroundColor: matches.length > 0 && replaceQuery.trim()
+                      ? exportPdfButtonBg
+                      : searchButtonDisabledBg,
+                    border: 'none',
                     borderRadius: '6px',
-                    color: matches.length > 0 && replaceQuery.trim() ? searchTextColor : searchButtonDisabledColor,
+                    color: matches.length > 0 && replaceQuery.trim() ? '#ffffff' : searchButtonDisabledColor,
                     cursor: matches.length > 0 && replaceQuery.trim() ? 'pointer' : 'not-allowed',
                     fontSize: '12px',
                     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
@@ -2556,14 +2575,12 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   }}
                   onMouseEnter={(e) => {
                     if (matches.length > 0 && replaceQuery.trim()) {
-                      e.currentTarget.style.backgroundColor = searchButtonHoverBg
-                      e.currentTarget.style.borderColor = searchButtonHoverBorder
+                      e.currentTarget.style.backgroundColor = exportPdfButtonHoverBg
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (matches.length > 0 && replaceQuery.trim()) {
-                      e.currentTarget.style.backgroundColor = searchButtonBg
-                      e.currentTarget.style.borderColor = searchButtonBorder
+                      e.currentTarget.style.backgroundColor = exportPdfButtonBg
                     }
                   }}
                   title="Replace All"
@@ -2576,7 +2593,9 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   style={{
                     flex: 1,
                     padding: '6px 12px',
-                    backgroundColor: currentMatchIndex >= 0 && replaceQuery.trim() ? searchReplaceButtonBg : searchButtonDisabledBg,
+                    backgroundColor: currentMatchIndex >= 0 && replaceQuery.trim()
+                      ? exportDocxButtonBg
+                      : searchButtonDisabledBg,
                     border: 'none',
                     borderRadius: '6px',
                     color: currentMatchIndex >= 0 && replaceQuery.trim() ? '#ffffff' : searchButtonDisabledColor,
@@ -2588,12 +2607,12 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   }}
                   onMouseEnter={(e) => {
                     if (currentMatchIndex >= 0 && replaceQuery.trim()) {
-                      e.currentTarget.style.backgroundColor = searchReplaceButtonHoverBg
+                      e.currentTarget.style.backgroundColor = exportDocxButtonHoverBg
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (currentMatchIndex >= 0 && replaceQuery.trim()) {
-                      e.currentTarget.style.backgroundColor = searchReplaceButtonBg
+                      e.currentTarget.style.backgroundColor = exportDocxButtonBg
                     }
                   }}
                   title="Replace"
