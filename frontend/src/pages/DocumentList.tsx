@@ -887,7 +887,7 @@ export default function DocumentList() {
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '140px 20px 60px 20px',
+              padding: '135px 20px 60px 20px',
               minHeight: '400px'
             }}>
               <img 
