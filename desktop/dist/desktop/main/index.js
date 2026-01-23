@@ -1,4 +1,6 @@
 import { app, BrowserWindow, session } from 'electron';
+import { autoUpdater } from 'electron-updater';
+import log from 'electron-log';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readdirSync } from 'fs';
@@ -157,10 +159,87 @@ if (existsSync(logoPath)) {
 else {
     console.warn(`⚠️  Icon not found: ${logoPath}`);
 }
+// Configure auto-updater
+function setupAutoUpdater() {
+    // Only enable auto-updater in production
+    if (process.env.NODE_ENV === 'development' || !app.isPackaged) {
+        console.log('⏭️  Auto-updater disabled in development mode');
+        return;
+    }
+    // Set auto-updater log level
+    autoUpdater.logger = log;
+    // Configure log level (optional - electron-log defaults are usually fine)
+    try {
+        // @ts-ignore - electron-log types may not include transports in some versions
+        if (log.transports?.file) {
+            log.transports.file.level = 'info';
+        }
+    }
+    catch (e) {
+        // Ignore if transports API is not available
+        console.log('Note: Could not configure electron-log transports');
+    }
+    // Check for updates on startup (after a delay to not block app startup)
+    setTimeout(() => {
+        autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+            console.error('❌ Failed to check for updates:', error);
+        });
+    }, 5000); // Check after 5 seconds
+    // Check for updates every 4 hours
+    setInterval(() => {
+        autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+            console.error('❌ Failed to check for updates:', error);
+        });
+    }, 4 * 60 * 60 * 1000); // 4 hours
+    // Event handlers
+    autoUpdater.on('checking-for-update', () => {
+        console.log('🔍 Checking for updates...');
+        if (mainWindow) {
+            mainWindow.webContents.send('update-checking');
+        }
+    });
+    autoUpdater.on('update-available', (info) => {
+        console.log('✅ Update available:', info.version);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-available', info);
+        }
+    });
+    autoUpdater.on('update-not-available', (info) => {
+        console.log('✅ App is up to date:', info.version);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-not-available', info);
+        }
+    });
+    autoUpdater.on('error', (error) => {
+        console.error('❌ Auto-updater error:', error);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-error', error.message);
+        }
+    });
+    autoUpdater.on('download-progress', (progressObj) => {
+        const message = `Download speed: ${progressObj.bytesPerSecond} - Downloaded ${progressObj.percent}% (${progressObj.transferred}/${progressObj.total})`;
+        console.log('📥 Download progress:', message);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-download-progress', progressObj);
+        }
+    });
+    autoUpdater.on('update-downloaded', (info) => {
+        console.log('✅ Update downloaded:', info.version);
+        if (mainWindow) {
+            mainWindow.webContents.send('update-downloaded', info);
+        }
+        // Automatically quit and install after 5 seconds
+        setTimeout(() => {
+            autoUpdater.quitAndInstall(false, true);
+        }, 5000);
+    });
+}
 // Migrate existing documents and create window on app ready
 app.whenReady().then(async () => {
     // Setup Content Security Policy first
     setupCSP();
+    // Setup auto-updater
+    setupAutoUpdater();
     // Migrate documents first
     await migrateDocuments();
     // Clean up logically deleted documents first

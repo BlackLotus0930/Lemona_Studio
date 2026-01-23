@@ -183,7 +183,16 @@ function setupAutoUpdater() {
 
   // Set auto-updater log level
   autoUpdater.logger = log;
-  autoUpdater.logger.transports.file.level = 'info';
+  // Configure log level (optional - electron-log defaults are usually fine)
+  try {
+    // @ts-ignore - electron-log types may not include transports in some versions
+    if (log.transports?.file) {
+      log.transports.file.level = 'info';
+    }
+  } catch (e) {
+    // Ignore if transports API is not available
+    console.log('Note: Could not configure electron-log transports');
+  }
 
   // Check for updates on startup (after a delay to not block app startup)
   setTimeout(() => {
