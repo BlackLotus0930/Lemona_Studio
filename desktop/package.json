@@ -1,6 +1,6 @@
 {
   "name": "lemona-desktop",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "Lemona Desktop Application",
   "main": "dist/desktop/main/index.js",
   "type": "module",
@@ -34,6 +34,8 @@
     "@tiptap/starter-kit": "^3.14.0",
     "axios": "^1.13.2",
     "docx": "^9.5.1",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.7.3",
     "happy-dom": "^20.0.2",
     "hnswlib-node": "^3.0.0",
     "mammoth": "^1.11.0",
@@ -63,6 +65,11 @@
     "appId": "com.lemona.desktop",
     "productName": "Lemona",
     "beforeBuild": null,
+    "publish": {
+      "provider": "github",
+      "owner": "BlackLotus0930",
+      "repo": "Lemona"
+    },
     "directories": {
       "output": "release",
       "buildResources": "build"
