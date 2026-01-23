@@ -1,5 +1,5 @@
 import { app, BrowserWindow, session } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import updater from 'electron-updater';
 import log from 'electron-log';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -9,6 +9,7 @@ import { setupIPC } from './ipc.js';
 import { migrateDocuments } from './services/migration.js';
 import { documentService } from './services/documentService.js';
 import { getVectorStore, cleanupVectorIndex } from './services/vectorStore.js';
+const { autoUpdater } = updater;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 // Get project root directory (Lemona/)
@@ -228,10 +229,6 @@ function setupAutoUpdater() {
         if (mainWindow) {
             mainWindow.webContents.send('update-downloaded', info);
         }
-        // Automatically quit and install after 5 seconds
-        setTimeout(() => {
-            autoUpdater.quitAndInstall(false, true);
-        }, 5000);
     });
 }
 // Migrate existing documents and create window on app ready
