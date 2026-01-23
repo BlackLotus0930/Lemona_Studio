@@ -4048,7 +4048,7 @@ function WorldLabCanvasInner({
                     flexDirection: 'column',
                     alignItems: 'center',
                     gap: '16px',
-                    opacity: 0.85,
+                    opacity: 0.75,
                     transition: 'opacity 0.3s ease',
                   }}
                 >
