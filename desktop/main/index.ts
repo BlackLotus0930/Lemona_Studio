@@ -1,5 +1,5 @@
 import { app, BrowserWindow, session } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import updater from 'electron-updater';
 import log from 'electron-log';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -12,6 +12,8 @@ import { getVectorStore, cleanupVectorIndex } from './services/vectorStore.js';
 import { projectService } from './services/projectService.js';
 import { indexingService } from './services/indexingService.js';
 import { getApiKeys } from './services/apiKeyStore.js';
+
+const { autoUpdater } = updater;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -250,10 +252,6 @@ function setupAutoUpdater() {
     if (mainWindow) {
       mainWindow.webContents.send('update-downloaded', info);
     }
-    // Automatically quit and install after 5 seconds
-    setTimeout(() => {
-      autoUpdater.quitAndInstall(false, true);
-    }, 5000);
   });
 }
 

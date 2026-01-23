@@ -262,6 +262,68 @@ export default function Layout(): JSX.Element {
       }
     }
   }, [])
+
+  // Auto-update notifications (Electron)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.electron) {
+      return
+    }
+    const electron = window.electron
+
+    const unsubscribeAvailable = electron.on('update-available', (info: { version?: string }) => {
+      if (info?.version && ignoredUpdateVersionRef.current === info.version) {
+        return
+      }
+      setUpdateNotification({ version: info?.version, downloaded: false })
+    })
+
+    const unsubscribeDownloaded = electron.on('update-downloaded', (info: { version?: string }) => {
+      if (info?.version && ignoredUpdateVersionRef.current === info.version) {
+        return
+      }
+      setUpdateNotification({ version: info?.version, downloaded: true })
+      if (installOnDownloadRef.current) {
+        installOnDownloadRef.current = false
+        electron.invoke('update:install')
+        setUpdateNotification(null)
+      }
+    })
+
+    return () => {
+      if (unsubscribeAvailable) {
+        unsubscribeAvailable()
+      }
+      if (unsubscribeDownloaded) {
+        unsubscribeDownloaded()
+      }
+    }
+  }, [])
+
+  const handleUpdateNow = () => {
+    if (typeof window === 'undefined' || !window.electron || !updateNotification) {
+      return
+    }
+    const electron = window.electron
+    if (updateNotification.downloaded) {
+      electron.invoke('update:install')
+      setUpdateNotification(null)
+      return
+    }
+    installOnDownloadRef.current = true
+    electron.invoke('update:download')
+  }
+
+  const handleAskLater = () => {
+    if (updateNotification?.version) {
+      ignoredUpdateVersionRef.current = updateNotification.version
+      try {
+        localStorage.setItem('lemona:ignored-update-version', updateNotification.version)
+      } catch {
+        // Ignore storage errors
+      }
+    }
+    setUpdateNotification(null)
+  }
   
   const { theme } = useTheme()
   const navigate = useNavigate()
@@ -381,6 +443,16 @@ export default function Layout(): JSX.Element {
   const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | null>(null) // Track export format
   const [showCommitSuccessNotification, setShowCommitSuccessNotification] = useState<{ fileCount: number; isIndexing?: boolean } | null>(null) // Track commit success notification
   const commitNotificationTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Track notification auto-hide timeout
+  const initialIgnoredUpdateVersion = (() => {
+    try {
+      return localStorage.getItem('lemona:ignored-update-version')
+    } catch {
+      return null
+    }
+  })()
+  const [updateNotification, setUpdateNotification] = useState<{ version?: string; downloaded?: boolean } | null>(null)
+  const ignoredUpdateVersionRef = useRef<string | null>(initialIgnoredUpdateVersion)
+  const installOnDownloadRef = useRef<boolean>(false)
   const [restoredCommitParentId, setRestoredCommitParentId] = useState<string | null>(null) // Track restored commit ID for branch creation
   const [indexingCompletionNotifications, setIndexingCompletionNotifications] = useState<Map<string, { fileName: string; completedAt: number }>>(new Map()) // Track indexing completion notifications
   const [isSeparatorHovered, setIsSeparatorHovered] = useState(false) // Track AI panel separator hover state
@@ -6654,6 +6726,87 @@ export default function Layout(): JSX.Element {
               to {
                 opacity: 1;
                 transform: translateX(-50%) translateY(0);
+              }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* Update Notification */}
+      {updateNotification && (
+        <div
+          style={{
+            position: 'fixed',
+            left: '20px',
+            bottom: '20px',
+            backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+            border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+            borderRadius: '6px',
+            padding: '12px 16px',
+            boxShadow: theme === 'dark'
+              ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
+              : '0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1)',
+            zIndex: 10030,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            minWidth: '260px',
+            maxWidth: '320px',
+            animation: 'slideInUp 0.3s ease-out'
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                fontSize: '13px',
+                fontWeight: '500',
+                color: theme === 'dark' ? '#ffffff' : '#202124',
+                marginBottom: '2px',
+              }}
+            >
+              New version{updateNotification.version ? ` ${updateNotification.version}` : ''} available
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={handleUpdateNow}
+              style={{
+                backgroundColor: theme === 'dark' ? '#242424' : '#f5f5f5',
+                color: theme === 'dark' ? '#e0e0e0' : '#202124',
+                border: `1px solid ${theme === 'dark' ? '#3a3a3a' : '#e0e0e0'}`,
+                borderRadius: '5px',
+                padding: '6px 10px',
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              Update
+            </button>
+            <button
+              onClick={handleAskLater}
+              style={{
+                backgroundColor: 'transparent',
+                color: theme === 'dark' ? '#999' : '#666',
+                border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+                borderRadius: '5px',
+                padding: '6px 10px',
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              Ask later
+            </button>
+          </div>
+          <style>{`
+            @keyframes slideInUp {
+              from {
+                transform: translateY(12px);
+                opacity: 0;
+              }
+              to {
+                transform: translateY(0);
+                opacity: 1;
               }
             }
           `}</style>

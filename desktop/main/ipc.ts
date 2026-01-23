@@ -1,5 +1,6 @@
 // IPC Handlers for Desktop App
 import { ipcMain, BrowserWindow, shell } from 'electron'
+import updater from 'electron-updater'
 import { documentService } from './services/documentService.js'
 import { chatHistoryService } from './services/chatHistoryService.js'
 import { geminiService } from './services/geminiService.js'
@@ -15,6 +16,8 @@ import { saveApiKeys, getApiKeys } from './services/apiKeyStore.js'
 import { worldLabService } from './services/worldLabService.js'
 import path from 'path'
 import { app } from 'electron'
+
+const { autoUpdater } = updater
 
 export function setupIPC() {
   // Document operations
@@ -423,6 +426,27 @@ Rephrased text:`
     const window = BrowserWindow.fromWebContents(event.sender)
     if (window) {
       window.close()
+    }
+  })
+
+  // Auto-update controls
+  ipcMain.handle('update:download', async () => {
+    try {
+      await autoUpdater.downloadUpdate()
+      return { success: true }
+    } catch (error: any) {
+      console.error('IPC update:download error:', error)
+      return { success: false, error: error?.message ?? 'download failed' }
+    }
+  })
+
+  ipcMain.handle('update:install', async () => {
+    try {
+      autoUpdater.quitAndInstall(false, true)
+      return { success: true }
+    } catch (error: any) {
+      console.error('IPC update:install error:', error)
+      return { success: false, error: error?.message ?? 'install failed' }
     }
   })
 
