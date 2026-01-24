@@ -12,10 +12,10 @@
     "dev:watch": "tsc --watch & electron dist/desktop/main/index.js",
     "start": "electron dist/desktop/main/index.js",
     "predist": "node -e \"try { const fs = require('fs'); const path = require('path'); const canvasPath = path.join(__dirname, 'node_modules', 'pdfjs-dist', 'node_modules', 'canvas'); if (fs.existsSync(canvasPath)) { fs.rmSync(canvasPath, { recursive: true, force: true }); console.log('Removed pdfjs-dist canvas dependency before dist'); } } catch(e) {}\"",
-    "dist": "npm run build:all && electron-builder",
-    "dist:win": "npm run build:all && electron-builder --win",
-    "dist:mac": "npm run build:all && electron-builder --mac",
-    "dist:linux": "npm run build:all && electron-builder --linux",
+    "dist": "npm run build:all && node scripts/load-env-and-build.cjs",
+    "dist:win": "npm run build:all && node scripts/load-env-and-build.cjs --win",
+    "dist:mac": "npm run build:all && node scripts/load-env-and-build.cjs --mac",
+    "dist:linux": "npm run build:all && node scripts/load-env-and-build.cjs --linux",
     "build:all": "cd ../frontend && npm run build && cd ../desktop && npm run build",
     "prebuild": "node -e \"try { const fs = require('fs'); const path = require('path'); const canvasPath = path.join(__dirname, 'node_modules', 'pdfjs-dist', 'node_modules', 'canvas'); if (fs.existsSync(canvasPath)) { fs.rmSync(canvasPath, { recursive: true, force: true }); console.log('Removed pdfjs-dist canvas dependency before build'); } } catch(e) {}\"",
     "postinstall": "node -e \"try { const fs = require('fs'); const path = require('path'); const canvasPath = path.join(__dirname, 'node_modules', 'pdfjs-dist', 'node_modules', 'canvas'); if (fs.existsSync(canvasPath)) { fs.rmSync(canvasPath, { recursive: true, force: true }); console.log('Removed pdfjs-dist canvas dependency'); } } catch(e) {}\""
@@ -56,6 +56,8 @@
   "devDependencies": {
     "@electron/node-gyp": "^10.2.0-electron.2",
     "@types/node": "^20.10.5",
+    "cross-env": "^10.1.0",
+    "dotenv": "^17.2.3",
     "electron": "^39.2.7",
     "electron-builder": "^26.0.12",
     "tsx": "^4.7.0",
@@ -68,7 +70,7 @@
     "publish": {
       "provider": "github",
       "owner": "BlackLotus0930",
-      "repo": "Lemona"
+      "repo": "Lemona-Releases"
     },
     "directories": {
       "output": "release",

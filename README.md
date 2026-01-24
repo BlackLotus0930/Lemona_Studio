@@ -1,270 +1,138 @@
 # Lemona
 
-**An Integrated Writing Environment**
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-47848F?style=flat-square&logo=electron&logoColor=white)
+![React](https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)
+![Material-UI](https://img.shields.io/badge/Material--UI-007FFF?style=flat-square&logo=mui&logoColor=white)
+![TipTap](https://img.shields.io/badge/TipTap-FF6B6B?style=flat-square)
 
-Lemona combines a sophisticated text editor with context-aware AI assistance and visual knowledge management.
+**An AI-native integrated writing editor.**
+
+Write, research, and refine—all in one intelligent workspace. Lemona combines a powerful rich text editor with context-aware AI assistance, visual knowledge management, and seamless document organization. Built for writers who need more than just a text editor.
+
+[Download](https://github.com/BlackLotus0930/Lemona-Releases/releases/download/v1.0.0/Lemona-1.0.0-x64.exe) • [Website](https://www.lemona.studio)
+
+<br />
 
 ---
+
+<br />
 
 ## Features
 
 ### Rich Text Editor
-- Professional-grade editing with formatting, tables, lists, and more
-- Hierarchical sections with drag-and-drop reordering
-- Interactive outline for quick navigation
-- Multiple font support with variable font weights
-- Auto-save with version history
+Professional-grade editing with formatting, tables, lists, and hierarchical sections. Clean, distraction-free interface designed for focused writing. Drag-and-drop section reordering, interactive outline navigation, and auto-save ensure your work flows smoothly.
 
-### WorldLab Visual Workspace
-- Node-based canvas for organizing ideas
-- Interactive property editing
-- Terminal interface for advanced operations
-- Document linking
+### Multi-File Workspace
+Organize multiple documents within a single project workspace. Switch between files seamlessly, maintain context across documents, and keep your entire project accessible in one place. Perfect for long-form writing, research papers, or multi-document projects.
 
-### Context-Aware AI Assistant
-- AI understands your entire project workspace
-- Multi-threaded chat interface
-- File references with `@library` and `@workspace`
-- Step-by-step reasoning mode
-- Batch query processing
-- Real-time streaming responses
+### Version Control
+Track changes and manage drafts effortlessly. Every edit is automatically saved with version history, so you can review past versions, compare changes, and restore previous drafts. Never lose your work, and experiment with confidence.
 
-### Intelligent Autocomplete
-- Context-aware writing suggestions as you type
-- Fast, accurate completions
-- Tab to accept workflow
+### Context-Aware AI
+Get intelligent suggestions based on your entire project context. The AI understands your workspace, library files, and writing history, providing relevant assistance whether you're brainstorming, refining prose, or researching. Multi-threaded chat interface lets you maintain separate conversation contexts.
 
-### Semantic Search
-- AI-powered search across all documents
-- Multi-step search with relevance assessment
-- Separate indexes per project
-- Efficient incremental updates
-- Full PDF and DOCX support
-
-### Professional Export
-- True WYSIWYG rendering
-- High-fidelity PDF generation
-- Microsoft Word compatibility
-- Formatting preservation (fonts, tables, images, links)
-
-### Desktop-First Architecture
-- Native apps for Windows, macOS, and Linux
-- Local data storage
-- Offline capable
-- Privacy-focused design
+<br />
 
 ---
 
-## Installation
+<br />
 
-### Prerequisites
-- Node.js 18+ and npm 9+
-- Google Gemini API key ([Get one here](https://makersuite.google.com/app/apikey))
+## Three Connected Spaces
 
-### Setup
+Lemona organizes your work into three interconnected spaces that flow together seamlessly:
 
-**1. Install Dependencies**
-```bash
-# Frontend
-cd frontend && npm install
+<div align="center">
 
-# Backend
-cd backend && npm install
-
-# Desktop
-cd desktop && npm install
+```
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│  WorldLab   │ ───> │   Library   │ ───> │  Workspace  │
+│             │      │             │      │             │
+│ Brainstorm  │      │  Reference  │      │    Write    │
+│   & Ideas   │      │  Materials  │      │  & Refine   │
+└─────────────┘      └─────────────┘      └─────────────┘
 ```
 
-**2. Configure Environment**
+</div>
 
-Create `backend/.env`:
-```env
-GEMINI_API_KEY=your_key_here
-PORT=3000
-```
+### WorldLab
+Visual canvas for brainstorming and exploring ideas. Create nodes, connect concepts, and organize thoughts visually. Perfect for planning, mind mapping, and exploring relationships between ideas before you write.
 
-**3. Start Development**
-```bash
-# Terminal 1: Backend
-cd backend && npm run dev
+### Library
+Central repository for reference materials. Upload PDFs and DOCX files, which are automatically indexed for semantic search. Reference these materials in your writing, and the AI can pull context from your library when assisting you.
 
-# Terminal 2: Frontend
-cd frontend && npm run dev
+### Workspace
+Your main writing environment. Create and edit documents with the rich text editor, organize them in your project, and leverage AI assistance that understands both your current document and your entire library. Everything connects—ideas from WorldLab, references from Library, all accessible as you write.
 
-# Terminal 3: Desktop
-cd desktop && npm run dev
-```
-
-Access at `http://localhost:5173`
-
-### Build Desktop App
-
-Lemona uses **Electron Builder** to package the application for distribution. The build process automatically:
-1. Builds the frontend React app
-2. Compiles TypeScript for the Electron main process and preload scripts
-3. Packages everything into platform-specific installers
-
-#### Prerequisites
-
-- **Node.js 18+** and **npm 9+**
-- All dependencies installed (`npm install` in `frontend/` and `desktop/`)
-- **Windows**: No additional tools needed
-- **macOS**: Requires Xcode Command Line Tools (for code signing, optional)
-- **Linux**: No additional tools needed
-
-#### Building for Your Platform
-
-```bash
-cd desktop
-
-# Windows (creates NSIS installer)
-npm run dist:win
-
-# macOS (creates DMG)
-npm run dist:mac
-
-# Linux (creates AppImage)
-npm run dist:linux
-
-# Build for current platform
-npm run dist
-```
-
-#### Output Location
-
-All packaged applications are saved to `desktop/release/`:
-
-- **Windows**: `Lemona-0.1.0-x64.exe` (NSIS installer)
-- **macOS**: `Lemona-0.1.0-x64.dmg` or `Lemona-0.1.0-arm64.dmg`
-- **Linux**: `Lemona-0.1.0-x64.AppImage`
-
-#### Build Configuration
-
-The packaging is configured in `desktop/package.json` under the `"build"` field:
-
-- **Windows**: NSIS installer with customizable installation directory
-- **macOS**: DMG with support for x64 and ARM64 architectures
-- **Linux**: AppImage format for universal compatibility
-- **Icons**: Uses `frontend/public/lemonalogo.ico` (Windows) and `lemonalogo.png` (macOS/Linux)
-
-#### Advanced Options
-
-**Build only (no packaging):**
-```bash
-cd desktop
-npm run build:all  # Builds frontend + desktop TypeScript
-```
-
-**Development mode:**
-```bash
-cd desktop
-npm run dev  # Runs Electron with hot reload
-```
-
-#### Code Signing (Optional)
-
-For production releases, you may want to sign your application:
-
-- **Windows**: Configure in `package.json` → `build.win.certificateFile` and `certificatePassword`
-- **macOS**: Set `CSC_LINK` and `CSC_KEY_PASSWORD` environment variables
-- **Linux**: Not required for AppImage
-
-#### Troubleshooting
-
-- **Build fails**: Ensure all dependencies are installed (`npm install` in both `frontend/` and `desktop/`)
-- **Large package size**: Normal for Electron apps (~100-200MB). The `files` array in `package.json` excludes unnecessary files
-- **Missing icons**: Ensure `frontend/public/lemonalogo.ico` and `lemonalogo.png` exist
+<br />
 
 ---
+
+<br />
 
 ## Quick Start
 
-### First Document
-1. Click **New Document**
-2. Start typing—auto-save is automatic
-3. Use toolbar or keyboard shortcuts for formatting
-4. Create sections via outline panel
+### Getting Started
 
-### AI Assistance
-1. Open **AI Panel** from sidebar
-2. Ask questions—AI has full project context
-3. Reference files: `@library paper.pdf` or `@workspace doc.md`
-4. Use tabs for multiple conversations
+1. **Create a new document** - Click "New Document" to start writing
+2. **Use the command menu** - Type `/` to access formatting options, insert sections, or add elements
+3. **Access AI assistance** - Open the AI panel from the sidebar to get help with your writing
+4. **Organize your project** - Use the file explorer to manage multiple documents
 
-### File Management
-1. Navigate to **Library** folder
-2. Upload PDFs/DOCX via drag-and-drop
-3. Files auto-index for search
-4. Full-screen PDF viewer available
+### Keyboard Shortcuts
 
-### Export
-1. Click **Export** in toolbar
-2. Choose PDF or DOCX
-3. Formatting preserved exactly
+<div align="center">
 
----
+| Shortcut | Action |
+|:--------:|--------|
+| **`/`** | Open command menu for formatting and sections |
+| **Select text** | Right-click or use AI panel to improve or rewrite selected text |
+| **`Ctrl+Shift+E`** | Toggle file explorer sidebar |
+| **`Ctrl+S`** | Save current document and index for semantic search |
+| **`Ctrl+B`** | Bold text |
+| **`Ctrl+I`** | Italic text |
+| **`Ctrl+K`** | Insert link |
 
-## Architecture
+</div>
 
-```
-Lemona/
-├── frontend/          # React + TypeScript UI
-├── desktop/          # Electron application
-├── backend/          # API server
-└── shared/           # Common types
-```
+### Workflow Tips
+
+- **Reference files**: In the AI panel, use `@library filename.pdf` or `@workspace doc.md` to reference specific files
+- **Semantic search**: Use the search feature to find content across all indexed documents, not just keyword matches
+- **Version history**: Access previous versions of your documents through the version control panel
+- **Export**: When ready, export your work to PDF or DOCX with full formatting preservation
+
+<br />
 
 ---
 
-## Usage
+<br />
 
-### Editor
-- **Sections**: Press `/` for command menu
-- **Formatting**: Standard shortcuts (Ctrl/Cmd+B, etc.)
-- **Images**: Drag-and-drop or paste
+## Download
 
-### AI Panel
-- **Context**: Auto-includes current document
-- **File Mentions**: Type `@` to reference files
-- **Reasoning**: Toggle for detailed explanations
+<div align="center">
 
-### WorldLab
-- **Nodes**: Click canvas to create
-- **Connections**: Drag from node handles
-- **Properties**: Double-click to edit
+### Windows
 
----
+**[Download Lemona v1.0.0 for Windows](https://github.com/BlackLotus0930/Lemona-Releases/releases/download/v1.0.0/Lemona-1.0.0-x64.exe)**
 
-## Development
+<sub>Windows may show a security warning. Click "More info" → "Run anyway" to continue.</sub>
 
-### Guidelines
-- TypeScript strict mode
-- Functional React patterns
-- Service-oriented architecture
+<br />
 
-### Reporting Issues
-Include:
-- Description
-- Reproduction steps
-- Expected vs actual behavior
-- Environment details
+*macOS and Linux versions coming soon*
+
+</div>
+
+<br />
 
 ---
 
-## License
+<div align="center">
 
-Proprietary - All Rights Reserved
+Made by the Lemona team
 
----
+[Website](https://www.lemona.studio) • [GitHub](https://github.com/BlackLotus0930/Lemona-Releases) • [Report Issue](https://github.com/BlackLotus0930/Lemona-Releases/issues)
 
-## Roadmap
-
-- Real-time collaboration
-- Mobile apps
-- Plugin system
-- Advanced version control
-- Team workspaces
-
----
-
-**Built for writers who think visually**
+</div>
