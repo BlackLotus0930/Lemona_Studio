@@ -21,7 +21,7 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
     {
       type: 'heading',
       attrs: { level: 1 },
-      content: [{ type: 'text', text: ' Welcome to Lemona!' }],
+      content: [{ type: 'text', text: 'Welcome!' }],
     },
     {
       type: 'paragraph',
