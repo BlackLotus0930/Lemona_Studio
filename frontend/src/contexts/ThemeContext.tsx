@@ -11,9 +11,9 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    // Check localStorage first, default to 'dark'
+    // Check localStorage first, default to 'light'
     const savedTheme = localStorage.getItem('theme') as Theme
-    const initialTheme = savedTheme || 'dark'
+    const initialTheme = savedTheme || 'light'
     
     // Apply theme class immediately on initialization
     if (initialTheme === 'dark') {

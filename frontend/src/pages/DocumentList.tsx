@@ -900,17 +900,20 @@ export default function DocumentList() {
                   filter: theme === 'dark' 
                     ? 'invert(1) grayscale(1) brightness(0.4)' 
                     : 'grayscale(1) brightness(0.6)',
-                  transition: 'filter 0.3s ease'
+                  opacity: theme === 'light' ? 0.25 : 1,
+                  transition: 'filter 0.3s ease, opacity 0.3s ease'
                 }}
               />
               <p style={{ 
                 fontSize: '16px', 
-                color: '#666666',
+                color: theme === 'light' ? '#999999' : '#666666',
+                opacity: theme === 'light' ? 0.8 : 1,
                 fontWeight: 400,
                 fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                 lineHeight: '1.6',
                 textAlign: 'center',
-                margin: 0
+                margin: 0,
+                transition: 'color 0.3s ease, opacity 0.3s ease'
               }}>
                 "Hmm... that pink button must be important..."
               </p>
