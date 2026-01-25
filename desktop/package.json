@@ -1,6 +1,6 @@
 {
   "name": "lemona-desktop",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Lemona Desktop Application",
   "main": "dist/desktop/main/index.js",
   "type": "module",
@@ -70,7 +70,8 @@
     "publish": {
       "provider": "github",
       "owner": "BlackLotus0930",
-      "repo": "Lemona-Releases"
+      "repo": "Lemona-Releases",
+      "releaseType": "release"
     },
     "directories": {
       "output": "release",

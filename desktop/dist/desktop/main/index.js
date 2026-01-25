@@ -18,6 +18,25 @@ const __dirname = path.dirname(__filename);
 // Example: desktop/dist/desktop/main -> desktop/dist/desktop -> desktop/dist -> desktop -> Lemona
 const projectRoot = path.resolve(__dirname, '../../../../'); // This is the Lemona/ directory
 let mainWindow = null;
+const ZOOM_LEVEL_FILE = path.join(app.getPath('userData'), 'zoom-level.json');
+async function loadZoomLevel() {
+    try {
+        const data = await fs.readFile(ZOOM_LEVEL_FILE, 'utf-8');
+        const parsed = JSON.parse(data);
+        return typeof parsed.zoomLevel === 'number' ? parsed.zoomLevel : null;
+    }
+    catch {
+        return null;
+    }
+}
+async function saveZoomLevel(zoomLevel) {
+    try {
+        await fs.writeFile(ZOOM_LEVEL_FILE, JSON.stringify({ zoomLevel }), 'utf-8');
+    }
+    catch (error) {
+        console.error('❌ Failed to save zoom level:', error);
+    }
+}
 // Setup IPC handlers
 setupIPC();
 // Set Content Security Policy
@@ -100,6 +119,18 @@ function createWindow() {
     mainWindow.once('ready-to-show', () => {
         mainWindow?.show();
     });
+    const applySavedZoom = async () => {
+        const savedZoom = await loadZoomLevel();
+        if (savedZoom !== null) {
+            mainWindow?.webContents.setZoomLevel(savedZoom);
+        }
+    };
+    mainWindow.webContents.on('did-finish-load', () => {
+        void applySavedZoom();
+    });
+    mainWindow.on('focus', () => {
+        void applySavedZoom();
+    });
     // Handle window close: notify renderer to cleanup before closing
     mainWindow.on('close', (event) => {
         // Send message to renderer to cleanup (clear undo/redo, restore documents)
@@ -140,21 +171,30 @@ function createWindow() {
             if (input.key === '+' || input.key === '=') {
                 // Zoom in
                 const currentZoom = mainWindow.webContents.getZoomLevel();
-                mainWindow.webContents.setZoomLevel(currentZoom + 0.5);
+                const nextZoom = currentZoom + 0.5;
+                mainWindow.webContents.setZoomLevel(nextZoom);
+                void saveZoomLevel(nextZoom);
                 event.preventDefault();
             }
             else if (input.key === '-' || input.key === '_') {
                 // Zoom out
                 const currentZoom = mainWindow.webContents.getZoomLevel();
-                mainWindow.webContents.setZoomLevel(currentZoom - 0.5);
+                const nextZoom = currentZoom - 0.5;
+                mainWindow.webContents.setZoomLevel(nextZoom);
+                void saveZoomLevel(nextZoom);
                 event.preventDefault();
             }
             else if (input.key === '0') {
                 // Reset zoom
                 mainWindow.webContents.setZoomLevel(0);
+                void saveZoomLevel(0);
                 event.preventDefault();
             }
         }
+    });
+    mainWindow.webContents.on('zoom-changed', () => {
+        const currentZoom = mainWindow.webContents.getZoomLevel();
+        void saveZoomLevel(currentZoom);
     });
 }
 // Set app icon (macOS)

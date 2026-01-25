@@ -615,7 +615,24 @@ Rephrased text:`
       }
       
       // Check if document is a PDF
-      if (!document.title.toLowerCase().endsWith('.pdf')) {
+      const storedFileName = document.metadata?.fileName || document.title
+      let contentIsPdf = false
+      if (!storedFileName.toLowerCase().endsWith('.pdf')) {
+        try {
+          const content = JSON.parse(document.content)
+          const findPdfNode = (node: any): boolean => {
+            if (node?.type === 'pdfViewer') return true
+            if (Array.isArray(node?.content)) {
+              return node.content.some(findPdfNode)
+            }
+            return false
+          }
+          contentIsPdf = findPdfNode(content)
+        } catch {
+          contentIsPdf = false
+        }
+      }
+      if (!storedFileName.toLowerCase().endsWith('.pdf') && !contentIsPdf) {
         const error = new Error('Document is not a PDF')
         console.error('IPC pdf:getFileContent error:', error.message)
         throw error
@@ -623,17 +640,50 @@ Rephrased text:`
       
       // Get file path
       const FILES_DIR = path.join(app.getPath('userData'), 'files')
-      const fileName = document.title
-      const filePath = path.join(FILES_DIR, `${documentId}_${fileName}`)
+      const fileName = storedFileName
+      let filePath = path.join(FILES_DIR, `${documentId}_${fileName}`)
       
       // Check if file exists before trying to read it
       const fs = await import('fs/promises')
       try {
         await fs.access(filePath)
       } catch (accessError) {
-        const error = new Error(`PDF file not found at path: ${filePath}`)
-        console.error('IPC pdf:getFileContent error:', error.message)
-        throw error
+        // Fallback for older documents where title may be missing .pdf
+        const normalizedTitle = fileName.toLowerCase()
+        if (!normalizedTitle.endsWith('.pdf')) {
+          const fallbackName = `${documentId}_${fileName}.pdf`
+          const fallbackPath = path.join(FILES_DIR, fallbackName)
+          try {
+            await fs.access(fallbackPath)
+            filePath = fallbackPath
+          } catch {
+            // Continue to broader search below
+          }
+        }
+        
+        // Broader fallback: find any PDF file that matches documentId prefix
+        if (filePath === path.join(FILES_DIR, `${documentId}_${fileName}`)) {
+          try {
+            const files = await fs.readdir(FILES_DIR)
+            const match = files.find((f: string) => {
+              const lower = f.toLowerCase()
+              return lower.startsWith(`${documentId}_`.toLowerCase()) && lower.endsWith('.pdf')
+            })
+            if (match) {
+              filePath = path.join(FILES_DIR, match)
+            }
+          } catch {
+            // Ignore directory read errors - will throw below
+          }
+        }
+        
+        try {
+          await fs.access(filePath)
+        } catch {
+          const error = new Error(`PDF file not found at path: ${filePath}`)
+          console.error('IPC pdf:getFileContent error:', error.message)
+          throw error
+        }
       }
       
       // Read file asynchronously - this doesn't block the main process
@@ -696,14 +746,52 @@ Rephrased text:`
       }
       
       // Check if document is a PDF
-      if (!document.title.toLowerCase().endsWith('.pdf')) {
+      const storedFileName = document.metadata?.fileName || document.title
+      let contentIsPdf = false
+      if (!storedFileName.toLowerCase().endsWith('.pdf')) {
+        try {
+          const content = JSON.parse(document.content)
+          const findPdfNode = (node: any): boolean => {
+            if (node?.type === 'pdfViewer') return true
+            if (Array.isArray(node?.content)) {
+              return node.content.some(findPdfNode)
+            }
+            return false
+          }
+          contentIsPdf = findPdfNode(content)
+        } catch {
+          contentIsPdf = false
+        }
+      }
+      if (!storedFileName.toLowerCase().endsWith('.pdf') && !contentIsPdf) {
         throw new Error('Document is not a PDF')
       }
       
       // Get file path
       const FILES_DIR = path.join(app.getPath('userData'), 'files')
-      const fileName = document.title
-      const filePath = path.join(FILES_DIR, `${documentId}_${fileName}`)
+      const fileName = storedFileName
+      let filePath = path.join(FILES_DIR, `${documentId}_${fileName}`)
+      
+      const fs = await import('fs/promises')
+      try {
+        await fs.access(filePath)
+      } catch {
+        // Fallback: find any PDF file that matches documentId prefix
+        try {
+          const files = await fs.readdir(FILES_DIR)
+          const match = files.find((f: string) => {
+            const lower = f.toLowerCase()
+            return lower.startsWith(`${documentId}_`.toLowerCase()) && lower.endsWith('.pdf')
+          })
+          if (match) {
+            filePath = path.join(FILES_DIR, match)
+          }
+        } catch {
+          // Ignore directory read errors - will throw below
+        }
+        
+        await fs.access(filePath)
+      }
       
       // Extract text and wait for document update to complete
       const pdfText = await extractPDFTextAsync(filePath, documentId, async (extractedText) => {
@@ -713,7 +801,6 @@ Rephrased text:`
           updatedDoc.pdfText = extractedText
           updatedDoc.updatedAt = new Date().toISOString()
           const docPath = path.join(app.getPath('userData'), 'documents', `${documentId}.json`)
-          const fs = await import('fs/promises')
           await fs.writeFile(docPath, JSON.stringify(updatedDoc, null, 2))
           console.log(`[IPC pdf:extractText] Document ${documentId} updated with PDF text`)
         }

@@ -297,7 +297,30 @@ export const documentService = {
       return null
     }
 
-    document.title = title
+    // Preserve file extension for PDFs to avoid breaking viewers and file lookup
+    const storedFileName = document.metadata?.fileName
+    const storedIsPdf = storedFileName ? storedFileName.toLowerCase().endsWith('.pdf') : false
+    let contentIsPdf = false
+    if (!storedIsPdf) {
+      try {
+        const content = JSON.parse(document.content)
+        const findPdfNode = (node: any): boolean => {
+          if (node?.type === 'pdfViewer') return true
+          if (Array.isArray(node?.content)) {
+            return node.content.some(findPdfNode)
+          }
+          return false
+        }
+        contentIsPdf = findPdfNode(content)
+      } catch {
+        contentIsPdf = false
+      }
+    }
+    if ((storedIsPdf || contentIsPdf) && !title.toLowerCase().endsWith('.pdf')) {
+      document.title = `${title}.pdf`
+    } else {
+      document.title = title
+    }
     document.updatedAt = new Date().toISOString()
 
     const filePath = getDocumentPath(id)
@@ -533,7 +556,8 @@ export const documentService = {
         
         // Also delete the associated file (PDF, image, etc.) if it exists
         if (document.title) {
-          const associatedFilePath = getFilePath(id, document.title)
+          const storedName = document.metadata?.fileName || document.title
+          const associatedFilePath = getFilePath(id, storedName)
           try {
             await fs.access(associatedFilePath)
             await fs.unlink(associatedFilePath)
@@ -787,6 +811,7 @@ export const documentService = {
       ...(projectId ? { projectId } : {}), // Set projectId for both library and project files if provided
       metadata: {
         contentHash, // Store content hash for change detection
+        fileName: finalFileName, // Persist original stored filename for reliable file lookup
       },
     }
     
@@ -948,7 +973,8 @@ export const documentService = {
               
               // Also delete the associated file (PDF, image, etc.) if it exists
               if (doc.title) {
-                const associatedFilePath = getFilePath(doc.id, doc.title)
+                const storedName = doc.metadata?.fileName || doc.title
+                const associatedFilePath = getFilePath(doc.id, storedName)
                 try {
                   await fs.access(associatedFilePath)
                   await fs.unlink(associatedFilePath)

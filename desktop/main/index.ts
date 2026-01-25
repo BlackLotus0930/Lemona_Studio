@@ -26,34 +26,28 @@ const projectRoot = path.resolve(__dirname, '../../../../'); // This is the Lemo
 
 let mainWindow: BrowserWindow | null = null;
 
-// Setup IPC handlers
-setupIPC();
-
-// Zoom level persistence
-const ZOOM_SETTINGS_FILE = path.join(app.getPath('userData'), 'zoom-settings.json');
-
-async function saveZoomLevel(zoomLevel: number): Promise<void> {
-  try {
-    await fs.writeFile(ZOOM_SETTINGS_FILE, JSON.stringify({ zoomLevel }), 'utf-8');
-  } catch (error) {
-    console.error('Failed to save zoom level:', error);
-  }
-}
+const ZOOM_LEVEL_FILE = path.join(app.getPath('userData'), 'zoom-level.json');
 
 async function loadZoomLevel(): Promise<number | null> {
   try {
-    if (existsSync(ZOOM_SETTINGS_FILE)) {
-      const content = await fs.readFile(ZOOM_SETTINGS_FILE, 'utf-8');
-      const settings = JSON.parse(content);
-      if (typeof settings.zoomLevel === 'number') {
-        return settings.zoomLevel;
-      }
-    }
-  } catch (error) {
-    console.error('Failed to load zoom level:', error);
+    const data = await fs.readFile(ZOOM_LEVEL_FILE, 'utf-8');
+    const parsed = JSON.parse(data);
+    return typeof parsed.zoomLevel === 'number' ? parsed.zoomLevel : null;
+  } catch {
+    return null;
   }
-  return null;
 }
+
+async function saveZoomLevel(zoomLevel: number): Promise<void> {
+  try {
+    await fs.writeFile(ZOOM_LEVEL_FILE, JSON.stringify({ zoomLevel }), 'utf-8');
+  } catch (error) {
+    console.error('❌ Failed to save zoom level:', error);
+  }
+}
+
+// Setup IPC handlers
+setupIPC();
 
 // Set Content Security Policy
 function setupCSP() {
@@ -137,14 +131,24 @@ function createWindow() {
   });
 
   // Show window only when content is ready to prevent white flash
-  mainWindow.once('ready-to-show', async () => {
-    // Restore saved zoom level
-    const savedZoom = await loadZoomLevel();
-    if (savedZoom !== null && mainWindow) {
-      mainWindow.webContents.setZoomLevel(savedZoom);
-    }
+  mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
   })
+
+  const applySavedZoom = async () => {
+    const savedZoom = await loadZoomLevel();
+    if (savedZoom !== null) {
+      mainWindow?.webContents.setZoomLevel(savedZoom);
+    }
+  };
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    void applySavedZoom();
+  });
+
+  mainWindow.on('focus', () => {
+    void applySavedZoom();
+  });
 
   // Handle window close: notify renderer to cleanup before closing
   mainWindow.on('close', (event) => {
@@ -187,41 +191,29 @@ function createWindow() {
       if (input.key === '+' || input.key === '=') {
         // Zoom in
         const currentZoom = mainWindow!.webContents.getZoomLevel();
-        const newZoom = currentZoom + 0.5;
-        mainWindow!.webContents.setZoomLevel(newZoom);
-        saveZoomLevel(newZoom);
+        const nextZoom = currentZoom + 0.5;
+        mainWindow!.webContents.setZoomLevel(nextZoom);
+        void saveZoomLevel(nextZoom);
         event.preventDefault();
       } else if (input.key === '-' || input.key === '_') {
         // Zoom out
         const currentZoom = mainWindow!.webContents.getZoomLevel();
-        const newZoom = currentZoom - 0.5;
-        mainWindow!.webContents.setZoomLevel(newZoom);
-        saveZoomLevel(newZoom);
+        const nextZoom = currentZoom - 0.5;
+        mainWindow!.webContents.setZoomLevel(nextZoom);
+        void saveZoomLevel(nextZoom);
         event.preventDefault();
       } else if (input.key === '0') {
         // Reset zoom
         mainWindow!.webContents.setZoomLevel(0);
-        saveZoomLevel(0);
+        void saveZoomLevel(0);
         event.preventDefault();
       }
     }
   });
 
-  // Restore zoom level when window regains focus (handles app switching)
-  mainWindow.on('focus', async () => {
-    const savedZoom = await loadZoomLevel();
-    if (savedZoom !== null && mainWindow) {
-      // Use setTimeout to ensure zoom restoration happens after any Electron reset
-      setTimeout(() => {
-        if (mainWindow) {
-          const currentZoom = mainWindow.webContents.getZoomLevel();
-          // Restore if zoom was reset (likely due to app switching) or differs significantly
-          if (Math.abs(currentZoom) < 0.1 || Math.abs(currentZoom - savedZoom) > 0.1) {
-            mainWindow.webContents.setZoomLevel(savedZoom);
-          }
-        }
-      }, 100);
-    }
+  mainWindow.webContents.on('zoom-changed', () => {
+    const currentZoom = mainWindow!.webContents.getZoomLevel();
+    void saveZoomLevel(currentZoom);
   });
 }
 

@@ -28,6 +28,7 @@ export interface Document {
   // Metadata for indexing and change detection
   metadata?: {
     contentHash?: string; // SHA-256 hash of file content (for change detection)
+    fileName?: string; // Original stored filename (for file-backed documents)
   };
 }
 

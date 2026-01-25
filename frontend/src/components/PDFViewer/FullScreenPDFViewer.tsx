@@ -941,10 +941,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
               color: theme === 'dark' ? '#858585' : '#5f6368',
             }}
           >
-            <p style={{ fontSize: '16px', marginBottom: '8px' }}>Unable to display PDF.</p>
-            <p style={{ fontSize: '12px' }}>
-              The PDF file is available in the file explorer.
-            </p>
+            <p style={{ fontSize: '16px', marginBottom: '8px' }}>Unable to display PDF</p>
           </div>
         )}
 

@@ -6742,7 +6742,7 @@ export default function Layout(): JSX.Element {
             backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
             border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
             borderRadius: '6px',
-            padding: '12px 16px',
+            padding: '10px 14px',
             boxShadow: theme === 'dark'
               ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
               : '0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1)',
@@ -6759,8 +6759,8 @@ export default function Layout(): JSX.Element {
           <div style={{ flex: 1 }}>
             <div
               style={{
-                fontSize: '13px',
-                fontWeight: '500',
+                fontSize: '12px',
+                fontWeight: '400',
                 color: theme === 'dark' ? '#ffffff' : '#202124',
                 marginBottom: '2px',
               }}
@@ -6772,9 +6772,9 @@ export default function Layout(): JSX.Element {
             <button
               onClick={handleUpdateNow}
               style={{
-                backgroundColor: theme === 'dark' ? '#242424' : '#f5f5f5',
-                color: theme === 'dark' ? '#e0e0e0' : '#202124',
-                border: `1px solid ${theme === 'dark' ? '#3a3a3a' : '#e0e0e0'}`,
+                backgroundColor: theme === 'dark' ? '#2a2a2a' : '#f0f0f0',
+                color: theme === 'dark' ? '#ffffff' : '#1a1a1a',
+                border: `1px solid ${theme === 'dark' ? '#444' : '#d0d0d0'}`,
                 borderRadius: '5px',
                 padding: '6px 10px',
                 fontSize: '12px',
