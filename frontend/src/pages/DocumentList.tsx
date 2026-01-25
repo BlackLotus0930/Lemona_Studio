@@ -778,8 +778,8 @@ export default function DocumentList() {
               width: '64px',
               height: '64px',
               borderRadius: '50%',
-              background: 'linear-gradient(135deg, rgba(244, 114, 182, 0.3) 0%, rgba(236, 72, 153, 0.3) 50%, rgba(251, 113, 133, 0.3) 100%)',
-              animation: 'pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              background: 'linear-gradient(135deg, rgba(244, 114, 182, 0.2) 0%, rgba(236, 72, 153, 0.2) 50%, rgba(251, 113, 133, 0.2) 100%)',
+              animation: 'pulse-ring 3.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
               pointerEvents: 'none',
             }}
           />
@@ -787,11 +787,11 @@ export default function DocumentList() {
             @keyframes pulse-ring {
               0% {
                 transform: translate(-50%, -50%) scale(1);
-                opacity: 0.8;
+                opacity: 0.6;
               }
               50% {
                 transform: translate(-50%, -50%) scale(1.3);
-                opacity: 0.4;
+                opacity: 0.3;
               }
               100% {
                 transform: translate(-50%, -50%) scale(1.6);
