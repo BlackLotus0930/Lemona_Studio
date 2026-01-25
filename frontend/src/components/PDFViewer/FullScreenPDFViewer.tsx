@@ -73,7 +73,18 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     const [pdfDocument, setPdfDocument] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
     const [currentPage, setCurrentPage] = useState(1)
     const [totalPages, setTotalPages] = useState(0)
-    const [scale, setScale] = useState(1.25)
+    const [scale, setScale] = useState(() => {
+      try {
+        const saved = localStorage.getItem('pdfScale')
+        const parsed = saved ? parseFloat(saved) : NaN
+        if (!Number.isNaN(parsed) && parsed >= 0.5 && parsed <= 3) {
+          return parsed
+        }
+      } catch {
+        // Ignore storage errors
+      }
+      return 1.25
+    })
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(false)
     const [isPageInputOpen, setIsPageInputOpen] = useState(false)
@@ -553,6 +564,15 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
         renderPage(currentPage)
       }
     }, [currentPage, scale, pdfDocument, isScrollMode])
+
+    // Persist zoom level to avoid flicker on refresh
+    useEffect(() => {
+      try {
+        localStorage.setItem('pdfScale', scale.toString())
+      } catch {
+        // Ignore storage errors
+      }
+    }, [scale])
 
     // Render all pages when scroll mode is enabled or scale changes in scroll mode
     useEffect(() => {
