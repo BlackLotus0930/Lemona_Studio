@@ -27,6 +27,9 @@ const projectRoot = path.resolve(__dirname, '../../../../'); // This is the Lemo
 let mainWindow: BrowserWindow | null = null;
 
 const ZOOM_LEVEL_FILE = path.join(app.getPath('userData'), 'zoom-level.json');
+const ZOOM_SAVE_DEBOUNCE_MS = 250;
+let zoomSaveTimer: NodeJS.Timeout | null = null;
+let pendingZoomLevel: number | null = null;
 
 async function loadZoomLevel(): Promise<number | null> {
   try {
@@ -44,6 +47,19 @@ async function saveZoomLevel(zoomLevel: number): Promise<void> {
   } catch (error) {
     console.error('❌ Failed to save zoom level:', error);
   }
+}
+
+function scheduleZoomSave(zoomLevel: number) {
+  pendingZoomLevel = zoomLevel;
+  if (zoomSaveTimer) {
+    clearTimeout(zoomSaveTimer);
+  }
+  zoomSaveTimer = setTimeout(() => {
+    if (pendingZoomLevel !== null) {
+      void saveZoomLevel(pendingZoomLevel);
+    }
+    zoomSaveTimer = null;
+  }, ZOOM_SAVE_DEBOUNCE_MS);
 }
 
 // Setup IPC handlers
@@ -196,19 +212,19 @@ async function createWindow() {
         const currentZoom = mainWindow!.webContents.getZoomLevel();
         const nextZoom = currentZoom + 0.5;
         mainWindow!.webContents.setZoomLevel(nextZoom);
-        void saveZoomLevel(nextZoom);
+        scheduleZoomSave(nextZoom);
         event.preventDefault();
       } else if (input.key === '-' || input.key === '_') {
         // Zoom out
         const currentZoom = mainWindow!.webContents.getZoomLevel();
         const nextZoom = currentZoom - 0.5;
         mainWindow!.webContents.setZoomLevel(nextZoom);
-        void saveZoomLevel(nextZoom);
+        scheduleZoomSave(nextZoom);
         event.preventDefault();
       } else if (input.key === '0') {
         // Reset zoom
         mainWindow!.webContents.setZoomLevel(0);
-        void saveZoomLevel(0);
+        scheduleZoomSave(0);
         event.preventDefault();
       }
     }
@@ -216,7 +232,7 @@ async function createWindow() {
 
   mainWindow.webContents.on('zoom-changed', () => {
     const currentZoom = mainWindow!.webContents.getZoomLevel();
-    void saveZoomLevel(currentZoom);
+    scheduleZoomSave(currentZoom);
   });
 }
 

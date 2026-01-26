@@ -73,7 +73,7 @@ function setupCSP() {
     });
     console.log(`✅ Content Security Policy configured (dev mode: ${isDev})`);
 }
-function createWindow() {
+async function createWindow() {
     // Get logo path - try both source and compiled locations
     // Prefer .ico for Windows (better quality), fallback to .png
     const logoPathSourceIco = path.join(projectRoot, 'frontend', 'public', 'lemonalogo.ico');
@@ -125,18 +125,10 @@ function createWindow() {
     mainWindow.once('ready-to-show', () => {
         mainWindow?.show();
     });
-    const applySavedZoom = async () => {
-        const savedZoom = await loadZoomLevel();
-        if (savedZoom !== null) {
-            mainWindow?.webContents.setZoomLevel(savedZoom);
-        }
-    };
-    mainWindow.webContents.on('did-finish-load', () => {
-        void applySavedZoom();
-    });
-    mainWindow.on('focus', () => {
-        void applySavedZoom();
-    });
+    const savedZoom = await loadZoomLevel();
+    if (savedZoom !== null) {
+        mainWindow?.webContents.setZoomLevel(savedZoom);
+    }
     // Handle window close: notify renderer to cleanup before closing
     mainWindow.on('close', (event) => {
         // Send message to renderer to cleanup (clear undo/redo, restore documents)
@@ -313,10 +305,10 @@ app.whenReady().then(async () => {
     // Start background cleanup service for deleted documents
     documentService.startDeletedDocumentsCleanupService();
     // Then create window
-    createWindow();
+    await createWindow();
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
+            void createWindow();
         }
     });
 });
