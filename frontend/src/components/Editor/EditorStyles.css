@@ -21,7 +21,7 @@
 :not(.dark-theme) .ProseMirror [style*="color: #FFFFFF"],
 :not(.dark-theme) .ProseMirror [style*="color: rgb(255, 255, 255)"],
 :not(.dark-theme) .ProseMirror [style*="color: rgb(255,255,255)"] {
-  color: #202124 !important;
+  color: #3a3a3a !important;
 }
 
 /* Make bold text less bold (font-weight 600, same as headings) */
@@ -63,7 +63,7 @@
 
 /* Quote styling */
 .ProseMirror div[data-type="quote"] {
-  border-left: 3px solid #202124;
+  border-left: 3px solid #3a3a3a;
   padding-left: 16px;
   margin: 12px 0;
   padding-top: 4px;
@@ -72,5 +72,5 @@
 
 /* Dark theme quote */
 .dark-theme .ProseMirror div[data-type="quote"] {
-  border-left-color: #D6D6DD;
+  border-left-color: #c0c0c8;
 }

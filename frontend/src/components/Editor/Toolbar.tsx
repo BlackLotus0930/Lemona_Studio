@@ -657,11 +657,11 @@ export default function Toolbar({
   }
 
   const toolbarBgColor = theme === 'dark' ? '#141414' : '#ffffff'
-  const toolbarTextColor = theme === 'dark' ? '#D6D6DD' : '#5f6368'
+  const toolbarTextColor = theme === 'dark' ? '#c0c0c8' : '#3a3a3a'
   const toolbarHoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'
   const dropdownBg = theme === 'dark' ? '#1a1a1a' : '#ffffff'
   const dropdownBorder = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)'
-  const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
+  const dropdownTextColor = theme === 'dark' ? '#c0c0c8' : '#3a3a3a'
   const dropdownHoverBg = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)'
   const dropdownActiveBg = theme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.06)'
   const dropdownActiveColor = theme === 'dark' ? '#9e9e9e' : '#757575'
@@ -688,7 +688,7 @@ export default function Toolbar({
   const activeButtonStyle: React.CSSProperties = {
     ...buttonStyle,
     backgroundColor: theme === 'dark' ? '#2d2d2d' : '#f0f0f0',
-    color: theme === 'dark' ? '#D6D6DD' : '#616161',
+    color: theme === 'dark' ? '#c0c0c8' : '#3a3a3a',
   }
 
   const dividerStyle: React.CSSProperties = {
@@ -1839,7 +1839,7 @@ export default function Toolbar({
               // For default colors, show as active when no color is set (null) or matches default colors
               // For other colors, show as active when they match the current color
               const isActive = isDefaultColor 
-                ? (currentColor === null || currentColor === '#000000' || currentColor === '#ffffff' || currentColor === '#202124')
+                ? (currentColor === null || currentColor === '#000000' || currentColor === '#ffffff' || currentColor === '#3a3a3a')
                 : (currentColor === color.toLowerCase())
               return (
                 <div
@@ -2310,7 +2310,7 @@ export default function Toolbar({
               minWidth: '200px'
             }}>
             <div style={{ padding: '4px 0', borderBottom: `1px solid ${dropdownBorder}`, marginBottom: '4px' }}>
-              <div style={{ fontSize: '12px', color: theme === 'dark' ? '#858585' : '#5f6368', padding: '4px 8px' }}>Align</div>
+              <div style={{ fontSize: '12px', color: theme === 'dark' ? '#858585' : '#3a3a3a', padding: '4px 8px' }}>Align</div>
               <div style={{ display: 'flex', gap: '4px', padding: '4px' }}>
                 <button
                 onMouseDown={(e) => {
@@ -2367,7 +2367,7 @@ export default function Toolbar({
               </div>
             </div>
             <div style={{ padding: '4px 0' }}>
-              <div style={{ fontSize: '12px', color: theme === 'dark' ? '#858585' : '#5f6368', padding: '4px 8px' }}>Indent</div>
+              <div style={{ fontSize: '12px', color: theme === 'dark' ? '#858585' : '#3a3a3a', padding: '4px 8px' }}>Indent</div>
               <div style={{ display: 'flex', gap: '4px', padding: '4px' }}>
                 <button
                   onMouseDown={(e) => {
@@ -2669,7 +2669,7 @@ export default function Toolbar({
               }
             }}
           >
-            <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 500, color: theme === 'dark' ? '#ffffff' : '#202124' }}>
+            <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 500, color: theme === 'dark' ? '#c0c0c8' : '#3a3a3a' }}>
               Enter URL
             </div>
             <input
@@ -2685,7 +2685,7 @@ export default function Toolbar({
                 border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
                 borderRadius: '6px',
                 backgroundColor: theme === 'dark' ? '#2a2a2a' : '#ffffff',
-                color: theme === 'dark' ? '#ffffff' : '#202124',
+                color: theme === 'dark' ? '#c0c0c8' : '#3a3a3a',
                 outline: 'none',
                 marginBottom: '16px',
               }}
@@ -2706,7 +2706,7 @@ export default function Toolbar({
                   border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
                   borderRadius: '6px',
                   backgroundColor: 'transparent',
-                  color: theme === 'dark' ? '#cccccc' : '#202124',
+                  color: theme === 'dark' ? '#c0c0c8' : '#3a3a3a',
                   cursor: 'pointer',
                 }}
               >
