@@ -83,31 +83,93 @@
   font-display: swap;
 }
 
-/* Poppins (Non-variable) */
+/* Source Sans Pro (Variable) */
 @font-face {
-  font-family: 'Poppins';
-  src: url('./assets/fonts/Poppins-Regular.ttf') format('truetype');
+  font-family: 'Source Sans Pro';
+  src: url('./assets/fonts/SourceSans3-VariableFont_wght.ttf') format('truetype-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Source Sans Pro';
+  src: url('./assets/fonts/SourceSans3-Italic-VariableFont_wght.ttf') format('truetype-variations');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Liberation Serif (Non-variable) */
+@font-face {
+  font-family: 'Liberation Serif';
+  src: url('./assets/fonts/LiberationSerif-Regular.ttf') format('truetype');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: 'Poppins';
-  src: url('./assets/fonts/Poppins-Bold.ttf') format('truetype');
+  font-family: 'Liberation Serif';
+  src: url('./assets/fonts/LiberationSerif-Bold.ttf') format('truetype');
   font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: 'Poppins';
-  src: url('./assets/fonts/Poppins-Italic.ttf') format('truetype');
+  font-family: 'Liberation Serif';
+  src: url('./assets/fonts/LiberationSerif-Italic.ttf') format('truetype');
   font-weight: 400;
   font-style: italic;
   font-display: swap;
 }
 @font-face {
-  font-family: 'Poppins';
-  src: url('./assets/fonts/Poppins-BoldItalic.ttf') format('truetype');
+  font-family: 'Liberation Serif';
+  src: url('./assets/fonts/LiberationSerif-BoldItalic.ttf') format('truetype');
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* EB Garamond (Variable) */
+@font-face {
+  font-family: 'EB Garamond';
+  src: url('./assets/fonts/EBGaramond-VariableFont_wght.ttf') format('truetype-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'EB Garamond';
+  src: url('./assets/fonts/EBGaramond-Italic-VariableFont_wght.ttf') format('truetype-variations');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Courier Prime (Non-variable) */
+@font-face {
+  font-family: 'Courier Prime';
+  src: url('./assets/fonts/CourierPrime-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Courier Prime';
+  src: url('./assets/fonts/CourierPrime-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Courier Prime';
+  src: url('./assets/fonts/CourierPrime-Italic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Courier Prime';
+  src: url('./assets/fonts/CourierPrime-BoldItalic.ttf') format('truetype');
   font-weight: 700;
   font-style: italic;
   font-display: swap;
@@ -132,7 +194,7 @@ body {
 }
 
 body:not(.dark-theme) {
-  background-color: #ffffff;
+  background-color: #FAFAFA;
   color: #202124;
   font-weight: 400; /* Lighter text stroke in light mode */
 }
@@ -152,7 +214,7 @@ body.dark-theme {
 
 /* Light theme override */
 body:not(.dark-theme) #root {
-  background-color: #ffffff;
+  background-color: #FAFAFA;
 }
 
 /* Headings in light mode */
@@ -167,11 +229,11 @@ body:not(.dark-theme) h6 {
 
 /* Editor content in light mode */
 body:not(.dark-theme) .ProseMirror {
-  font-weight: 380;
+  font-weight: 400;
 }
 
 body:not(.dark-theme) .ProseMirror p {
-  font-weight: 380;
+  font-weight: 400;
 }
 
 body:not(.dark-theme) .ProseMirror h1,
@@ -269,10 +331,10 @@ code {
 /* ProseMirror Editor Styling */
 .ProseMirror {
   outline: none;
-  color: #3a3a3a;
-  caret-color: #3a3a3a;
+  color: #202124;
+  caret-color: #202124;
   white-space: pre-wrap;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-family: 'Source Sans Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
   /* Remove all transitions to prevent text appearing animation */
   transition: none !important;
 }
@@ -284,13 +346,8 @@ code {
 }
 
 .dark-theme .ProseMirror {
-  color: #c0c0c8;
-  caret-color: #c0c0c8;
-  font-weight: 380;
-}
-
-.dark-theme .ProseMirror p {
-  font-weight: 380;
+  color: #D6D6DD;
+  caret-color: #D6D6DD;
 }
 
 /* Selection styling - using browser default */
@@ -332,7 +389,7 @@ code {
 .ProseMirror p {
   margin-top: 0;
   margin-bottom: 0.75em;
-  line-height: 1.7;
+  line-height: 1.75;
   font-size: 16px;
 }
 
@@ -355,15 +412,15 @@ code {
 
 /* Heading font sizes */
 .ProseMirror h1 {
-  font-size: 22px;
+  font-size: 26px;
 }
 
 .ProseMirror h2 {
-  font-size: 20px;
+  font-size: 22px;
 }
 
 .ProseMirror h3 {
-  font-size: 18px;
+  font-size: 19px;
 }
 
 .ProseMirror h4 {

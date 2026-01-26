@@ -130,9 +130,12 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         // Check if cursor is at the start of the block
         // $from.parentOffset === 0 means we're at the start of the parent node
         const isAtBlockStart = $from.parentOffset === 0 || from === blockStart
+
+        const blockEnd = blockStart + blockNode.content.size
         
-        // Get text from block start to cursor
+        // Get text from block start to cursor and after cursor
         const textFromBlockStart = editor.state.doc.textBetween(blockStart, from)
+        const textAfterCursor = editor.state.doc.textBetween(from, blockEnd)
         
         // Check if "/" exists and is at the start (or only whitespace before it)
         const slashIndex = textFromBlockStart.indexOf('/')
@@ -143,12 +146,17 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         const charBeforeCursor = from > blockStart ? editor.state.doc.textBetween(Math.max(blockStart, from - 1), from) : ''
         const isSlashAtCursor = charBeforeCursor === '/'
         
+        // Only show menu on an empty line (no text after cursor)
+        const hasTextAfterCursor = textAfterCursor.trim().length > 0
+
         // Show menu if:
         // 1. Cursor is at block start and "/" is right before cursor, OR
         // 2. "/" exists at the start of the block (or after whitespace only) and cursor is after it
+        // And there is no text after the cursor (line is effectively empty beyond slash/filter)
         const shouldShowMenu = (
-          (isAtBlockStart && isSlashAtCursor) ||
-          (hasSlash && onlyWhitespaceBeforeSlash && from > blockStart + slashIndex)
+          !hasTextAfterCursor &&
+          ((isAtBlockStart && isSlashAtCursor) ||
+          (hasSlash && onlyWhitespaceBeforeSlash && from > blockStart + slashIndex))
         )
         
         if (shouldShowMenu) {

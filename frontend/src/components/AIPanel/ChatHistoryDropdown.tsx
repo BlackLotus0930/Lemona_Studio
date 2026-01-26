@@ -103,7 +103,7 @@ export default function ChatHistoryDropdown({
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#9aa0a6'
   const hoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'
-  const selectedBg = theme === 'dark' ? '#252525' : '#e8eaed'
+  const selectedBg = theme === 'dark' ? '#252525' : '#F0F0F0'
   const iconColor = theme === 'dark' ? '#858585' : '#5f6368'
 
   // Format time ago
@@ -282,7 +282,7 @@ export default function ChatHistoryDropdown({
         top: `${position.top}px`,
         left: `${position.left}px`,
         transform: 'translateX(-50%)',
-        width: '400px',
+        width: '360px',
         maxHeight: '60vh', // Approximately 3/5 of screen height
         backgroundColor: bgColor,
         border: `1px solid ${borderColor}`,
@@ -525,24 +525,6 @@ function ChatItem({
         transition: 'background-color 0.15s'
       }}
     >
-      {/* Icon */}
-      <div style={{
-        width: '16px',
-        height: '16px',
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}>
-        <div style={{
-          width: '12px',
-          height: '12px',
-          border: `1.5px solid ${isActive ? textColor : iconColor}`,
-          borderRadius: '6px',
-          backgroundColor: isActive ? textColor : 'transparent'
-        }} />
-      </div>
-
       {/* Chat Name */}
       {isEditing ? (
         <input
@@ -581,7 +563,7 @@ function ChatItem({
       {/* Time Ago */}
       {!isEditing && (
         <span style={{
-          fontSize: '12px',
+          fontSize: '13px',
           color: secondaryTextColor,
           marginRight: isHovered ? '40px' : '0',
           transition: 'margin-right 0.15s',

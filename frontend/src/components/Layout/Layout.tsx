@@ -156,7 +156,6 @@ function DocumentEditorWrapper({
   editorRef: React.MutableRefObject<DocumentEditorSearchHandle | null>
   onUpdate?: (editor: Editor, docId: string) => void
 }) {
-  
   // Parse content and create stable config
   const editorConfig = useMemo(() => {
     let parsedContent: any = ''
@@ -418,6 +417,20 @@ export default function Layout(): JSX.Element {
   const isUserResizingRef = useRef<boolean>(false) // Track if user is actively resizing AI panel
   const isFileExplorerResizingRef = useRef<boolean>(false) // Track if user is actively resizing File Explorer
   const fileExplorerResizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const toggleFileExplorerPanel = useCallback(() => {
+    if (!fileExplorerPanelRef.current) return
+    const currentSize = fileExplorerPanelRef.current.getSize()
+    if (currentSize > 0) {
+      // Closing: save current size for next time
+      saveFileExplorerLastOpenSize(currentSize)
+      fileExplorerPanelRef.current.resize(0)
+    } else {
+      // Opening: restore last open size
+      const lastOpenSize = loadFileExplorerLastOpenSize()
+      fileExplorerPanelRef.current.resize(lastOpenSize)
+    }
+  }, [])
   const [fileExplorerSize, setFileExplorerSize] = useState<number>(() => loadFileExplorerSize()) // Track File Explorer size as state
   const [selectedFolder, setSelectedFolder] = useState<'library' | 'project' | 'worldlab' | null>(null) // Track selected folder
   const [isSearchMode, setIsSearchMode] = useState(() => {
@@ -637,7 +650,7 @@ export default function Layout(): JSX.Element {
     }
   }, [manuallyRenamedDocs])
   
-  const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
+  const bgColor = theme === 'dark' ? '#141414' : '#FAFAFA'
   const borderColor = theme === 'dark' ? '#232323' : '#e8eaed'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#5f6368'
 
@@ -1200,18 +1213,7 @@ export default function Layout(): JSX.Element {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
         e.preventDefault()
         e.stopPropagation()
-        if (fileExplorerPanelRef.current) {
-          const currentSize = fileExplorerPanelRef.current.getSize()
-          if (currentSize > 0) {
-            // Closing: save current size for next time
-            saveFileExplorerLastOpenSize(currentSize)
-            fileExplorerPanelRef.current.resize(0)
-          } else {
-            // Opening: restore last open size
-            const lastOpenSize = loadFileExplorerLastOpenSize()
-            fileExplorerPanelRef.current.resize(lastOpenSize)
-          }
-        }
+        toggleFileExplorerPanel()
         return
       }
       
@@ -1583,7 +1585,18 @@ export default function Layout(): JSX.Element {
     // Use capture phase to catch events before they reach the editor
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [searchQuery, document, activeTabId, openTabs])
+  }, [searchQuery, document, activeTabId, openTabs, toggleFileExplorerPanel])
+
+  useEffect(() => {
+    const electronApi = (window as any).electron
+    if (!electronApi?.on) return
+    const unsubscribe = electronApi.on('toggle-file-explorer', () => {
+      toggleFileExplorerPanel()
+    })
+    return () => {
+      if (unsubscribe) unsubscribe()
+    }
+  }, [toggleFileExplorerPanel])
 
   const loadDocuments = async (projectId?: string) => {
     // Note: documents are already cleared in useEffect when projectId changes
@@ -2850,11 +2863,7 @@ export default function Layout(): JSX.Element {
     addKeyboardShortcuts() {
       return {
         'Mod-Shift-e': () => {
-          if (fileExplorerPanelRef.current) {
-            const currentSize = fileExplorerPanelRef.current.getSize()
-            const newSize = currentSize > 0 ? 0 : 14
-            fileExplorerPanelRef.current.resize(newSize)
-          }
+          toggleFileExplorerPanel()
           return true // Prevent default behavior
         },
       }
@@ -3229,7 +3238,7 @@ export default function Layout(): JSX.Element {
           if (!html) return html
 
           // Available fonts in the editor
-          const availableFonts = ['Noto Sans SC', 'Inter', 'Open Sans', 'Roboto', 'Montserrat', 'Poppins']
+          const availableFonts = ['Source Sans Pro', 'Inter', 'Noto Sans SC', 'EB Garamond', 'Liberation Serif', 'Open Sans', 'Roboto', 'Montserrat', 'Courier Prime']
           
           // Default text colors for each theme
           const defaultTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
@@ -5944,7 +5953,7 @@ export default function Layout(): JSX.Element {
       {/* Toolbar - Independent, full width - Always visible */}
       <div style={{ 
         width: '100%',
-        backgroundColor: bgColor,
+        backgroundColor: theme === 'dark' ? '#141414' : '#ffffff',
         padding: '8px 16px',
         zIndex: 10003,
         position: 'relative',

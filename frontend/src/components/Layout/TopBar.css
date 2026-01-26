@@ -11,6 +11,7 @@
 }
 
 .topbar-light {
+  background-color: #ffffff;
   border-bottom-color: #dadce0;
 }
 
@@ -26,6 +27,10 @@
   align-items: center; /* Center items vertically */
   padding: 0 8px;
   gap: 16px;
+}
+
+.topbar-native-controls .topbar-content {
+  padding-right: 144px; /* Reserve space for native window controls */
 }
 
 .topbar-logo {

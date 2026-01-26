@@ -1980,13 +1980,16 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                   fontSize: '13px',
-                  lineHeight: '1.6',
+                  lineHeight: '1.7',
                   fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                   userSelect: 'text',
                   WebkitUserSelect: 'text',
                   MozUserSelect: 'text',
                   msUserSelect: 'text',
-                  cursor: 'text'
+                  cursor: 'text',
+                  WebkitFontSmoothing: 'antialiased',
+                  MozOsxFontSmoothing: 'grayscale',
+                  textRendering: 'optimizeLegibility'
                 }}
               >
                 {highlightMentions(message.content)}
@@ -2053,7 +2056,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 style={{
                   width: '100%',
                   color: textColor,
-                  fontSize: '14px',
+                  fontSize: '13px',
                   lineHeight: '1.7',
                   fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                   userSelect: 'text',
@@ -2190,7 +2193,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       borderRadius: '6px',
                       border: `1px solid ${theme === 'dark' ? '#5a2f2f' : '#f28b82'}`,
                       color: theme === 'dark' ? '#ff6b6b' : '#c5221f',
-                      fontSize: '14px',
+                      fontSize: '13px',
                       lineHeight: '1.7',
                       fontWeight: 400,
                       boxShadow: theme === 'dark' 
@@ -2205,7 +2208,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                           marginBottom: '10px', 
                           marginTop: 0, 
                           lineHeight: '1.7', 
-                          color: 'inherit' 
+                          color: 'inherit',
+                          fontSize: '13px'
                         }} {...props} />,
                         a: ({node, ...props}: any) => <a 
                           style={{ 
@@ -2298,7 +2302,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       marginTop: 0, 
                       lineHeight: '1.7', 
                       color: textColor,
-                      fontSize: '14px'
+                      fontSize: '13px'
                     }} {...props} />,
                     // Code blocks - handle inline code with subtle styling
                     code: ({node, inline, className, children, ...props}: any) => {
@@ -2536,7 +2540,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       listStyleType: 'disc',
                       color: textColor,
                       lineHeight: '1.7',
-                      fontSize: '14px'
+                      fontSize: '13px'
                     }} {...props} />,
                     ol: ({node, ...props}: any) => {
                       // Use custom counter style for Chinese parentheses format (1) 2) 3)...)
@@ -2546,7 +2550,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         marginTop: '8px',
                         color: textColor,
                         lineHeight: '1.7',
-                        fontSize: '14px'
+                        fontSize: '13px'
                       }} {...props} />
                     },
                     li: ({node, ...props}: any) => <li style={{ 
@@ -2588,7 +2592,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.02)',
                       color: textColor,
                       fontStyle: 'normal',
-                      borderRadius: '0 3px 3px 0'
+                      borderRadius: '0 3px 3px 0',
+                      fontSize: '13px'
                     }} {...props} />,
                     // Horizontal rule - subtle divider
                     hr: ({node, ...props}) => <hr style={{ 
@@ -3040,7 +3045,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   right: 0,
                   bottom: 0,
                   padding: '4px 6px',
-                  fontSize: '13px',
+                  fontSize: '12px',
                   fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                   lineHeight: '1.6',
                   whiteSpace: 'pre-wrap',
@@ -3122,7 +3127,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             const tempSpan = document.createElement('span')
             tempSpan.style.visibility = 'hidden'
             tempSpan.style.position = 'absolute'
-            tempSpan.style.fontSize = '13px'
+            tempSpan.style.fontSize = '12px'
             tempSpan.style.fontFamily = '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif'
             tempSpan.style.whiteSpace = 'pre'
             tempSpan.style.lineHeight = '1.6'
@@ -3421,7 +3426,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         border: 'none',
                         borderRadius: '6px',
                         cursor: isLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
+                        fontSize: '12px',
                         fontWeight: useWebSearch ? '400' : '300',
                         fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                         textAlign: 'left',

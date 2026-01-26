@@ -124,7 +124,7 @@ export default function Toolbar({
   // Use ref value for rendering to prevent flash when editor temporarily becomes null
   // Only use stable editor if current editor is null/destroyed, otherwise use current editor
   const stableEditor = (editor && !editor.isDestroyed) ? editor : editorRef.current
-  
+
   // Helper function to safely lift only the current list item by exactly one level
   const safeLiftCurrentListItem = (editor: Editor) => {
     if (!editor || editor.isDestroyed) return false
@@ -657,11 +657,11 @@ export default function Toolbar({
   }
 
   const toolbarBgColor = theme === 'dark' ? '#141414' : '#ffffff'
-  const toolbarTextColor = theme === 'dark' ? '#c0c0c8' : '#3a3a3a'
+  const toolbarTextColor = theme === 'dark' ? '#D6D6DD' : '#5f6368'
   const toolbarHoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5'
   const dropdownBg = theme === 'dark' ? '#1a1a1a' : '#ffffff'
   const dropdownBorder = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)'
-  const dropdownTextColor = theme === 'dark' ? '#c0c0c8' : '#3a3a3a'
+  const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const dropdownHoverBg = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)'
   const dropdownActiveBg = theme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.06)'
   const dropdownActiveColor = theme === 'dark' ? '#9e9e9e' : '#757575'
@@ -688,7 +688,7 @@ export default function Toolbar({
   const activeButtonStyle: React.CSSProperties = {
     ...buttonStyle,
     backgroundColor: theme === 'dark' ? '#2d2d2d' : '#f0f0f0',
-    color: theme === 'dark' ? '#c0c0c8' : '#3a3a3a',
+    color: theme === 'dark' ? '#D6D6DD' : '#616161',
   }
 
   const dividerStyle: React.CSSProperties = {
@@ -1106,12 +1106,12 @@ export default function Toolbar({
     { label: 'Title', value: 'title', fontSize: '24px', fontWeight: 600 },
     { label: 'Subtitle', value: 'subtitle', fontSize: '18px', fontWeight: 500 },
     { label: 'Normal text', value: 'normal', fontSize: '16px', fontWeight: 400 },
-    { label: 'Heading 1', value: 'h1', fontSize: '20px', fontWeight: 600 },
-    { label: 'Heading 2', value: 'h2', fontSize: '18px', fontWeight: 600 },
-    { label: 'Heading 3', value: 'h3', fontSize: '16px', fontWeight: 600 },
+    { label: 'Heading 1', value: 'h1', fontSize: '26px', fontWeight: 600 },
+    { label: 'Heading 2', value: 'h2', fontSize: '22px', fontWeight: 600 },
+    { label: 'Heading 3', value: 'h3', fontSize: '19px', fontWeight: 600 },
   ]
 
-  const fonts = ['Inter', 'Noto Sans SC', 'Open Sans', 'Roboto', 'Montserrat', 'Poppins']
+  const fonts = ['Source Sans Pro', 'Inter', 'Noto Sans SC', 'EB Garamond', 'Liberation Serif', 'Open Sans', 'Roboto', 'Montserrat', 'Courier Prime']
 
   // Get current style label
   const getCurrentStyle = () => {
@@ -1126,9 +1126,9 @@ export default function Toolbar({
 
   // Get current font family
   const getCurrentFontFamily = () => {
-    if (!stableEditor || stableEditor.isDestroyed) return 'Inter'
+    if (!stableEditor || stableEditor.isDestroyed) return 'Source Sans Pro'
     const attrs = stableEditor.getAttributes('textStyle')
-    return attrs.fontFamily || 'Inter'
+    return attrs.fontFamily || 'Source Sans Pro'
   }
 
   // Normalize color for comparison (handles different formats)
@@ -1454,17 +1454,6 @@ export default function Toolbar({
                     }
                   }}
                 >
-                  {isActive && (
-                    <span style={{ 
-                      color: dropdownActiveColor,
-                      fontSize: '16px',
-                      fontWeight: 'bold',
-                      width: '16px',
-                      display: 'inline-block',
-                      flexShrink: 0
-                    }}>✓</span>
-                  )}
-                  {!isActive && <span style={{ width: '16px', display: 'inline-block', flexShrink: 0 }}></span>}
                   <span style={{
                     fontSize: style.fontSize,
                     fontWeight: style.fontWeight,
@@ -1516,8 +1505,10 @@ export default function Toolbar({
               zIndex: 10010,
               minWidth: '170px',
               maxWidth: '170px',
-              maxHeight: '300px',
-              overflowY: 'auto',
+              maxHeight: '220px',
+              overflowY: 'scroll',
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'var(--scrollbar-color-thumb) transparent',
               padding: '4px',
               backdropFilter: 'blur(20px)',
               transition: 'opacity 0.2s ease, transform 0.2s ease'
@@ -1561,16 +1552,6 @@ export default function Toolbar({
                     }
                   }}
                 >
-                  {isActive && (
-                    <span style={{ 
-                      color: dropdownActiveColor,
-                      fontSize: '16px',
-                      fontWeight: 'bold',
-                      width: '16px',
-                      display: 'inline-block'
-                    }}>✓</span>
-                  )}
-                  {!isActive && <span style={{ width: '16px', display: 'inline-block' }}></span>}
                   <span>{font}</span>
                 </div>
               )
@@ -1839,7 +1820,7 @@ export default function Toolbar({
               // For default colors, show as active when no color is set (null) or matches default colors
               // For other colors, show as active when they match the current color
               const isActive = isDefaultColor 
-                ? (currentColor === null || currentColor === '#000000' || currentColor === '#ffffff' || currentColor === '#3a3a3a')
+                ? (currentColor === null || currentColor === '#000000' || currentColor === '#ffffff' || currentColor === '#202124')
                 : (currentColor === color.toLowerCase())
               return (
                 <div
@@ -2310,7 +2291,7 @@ export default function Toolbar({
               minWidth: '200px'
             }}>
             <div style={{ padding: '4px 0', borderBottom: `1px solid ${dropdownBorder}`, marginBottom: '4px' }}>
-              <div style={{ fontSize: '12px', color: theme === 'dark' ? '#858585' : '#3a3a3a', padding: '4px 8px' }}>Align</div>
+              <div style={{ fontSize: '12px', color: theme === 'dark' ? '#858585' : '#5f6368', padding: '4px 8px' }}>Align</div>
               <div style={{ display: 'flex', gap: '4px', padding: '4px' }}>
                 <button
                 onMouseDown={(e) => {
@@ -2367,7 +2348,7 @@ export default function Toolbar({
               </div>
             </div>
             <div style={{ padding: '4px 0' }}>
-              <div style={{ fontSize: '12px', color: theme === 'dark' ? '#858585' : '#3a3a3a', padding: '4px 8px' }}>Indent</div>
+              <div style={{ fontSize: '12px', color: theme === 'dark' ? '#858585' : '#5f6368', padding: '4px 8px' }}>Indent</div>
               <div style={{ display: 'flex', gap: '4px', padding: '4px' }}>
                 <button
                   onMouseDown={(e) => {
@@ -2438,7 +2419,7 @@ export default function Toolbar({
               backdropFilter: 'blur(20px)',
               transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
-            {[1.0, 1.15, 1.5, 2.0, 2.5, 3.0].map((spacing) => (
+            {[1.0, 1.15, 1.5, 1.75, 2.0, 2.5, 3.0].map((spacing) => (
               <div
                 key={spacing}
                 onMouseDown={(e) => {
@@ -2669,7 +2650,7 @@ export default function Toolbar({
               }
             }}
           >
-            <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 500, color: theme === 'dark' ? '#c0c0c8' : '#3a3a3a' }}>
+            <div style={{ marginBottom: '16px', fontSize: '16px', fontWeight: 500, color: theme === 'dark' ? '#ffffff' : '#202124' }}>
               Enter URL
             </div>
             <input
@@ -2685,7 +2666,7 @@ export default function Toolbar({
                 border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
                 borderRadius: '6px',
                 backgroundColor: theme === 'dark' ? '#2a2a2a' : '#ffffff',
-                color: theme === 'dark' ? '#c0c0c8' : '#3a3a3a',
+                color: theme === 'dark' ? '#ffffff' : '#202124',
                 outline: 'none',
                 marginBottom: '16px',
               }}
@@ -2706,7 +2687,7 @@ export default function Toolbar({
                   border: `1px solid ${theme === 'dark' ? '#333' : '#dadce0'}`,
                   borderRadius: '6px',
                   backgroundColor: 'transparent',
-                  color: theme === 'dark' ? '#c0c0c8' : '#3a3a3a',
+                  color: theme === 'dark' ? '#cccccc' : '#202124',
                   cursor: 'pointer',
                 }}
               >

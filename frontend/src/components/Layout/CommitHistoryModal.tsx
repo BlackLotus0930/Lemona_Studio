@@ -327,7 +327,7 @@ export default function CommitHistoryModal({
               fontSize: '14px',
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
             }}>
-              No commits yet. Press Ctrl+S to create your first commit.
+              Press Ctrl+S to create your first version.
             </div>
           ) : (
             commits.map((commit, index) => {

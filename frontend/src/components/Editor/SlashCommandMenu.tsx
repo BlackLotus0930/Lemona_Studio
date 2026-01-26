@@ -24,6 +24,7 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
   const [selectedIndex, setSelectedIndex] = useState(0)
   const menuRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<(HTMLDivElement | null)[]>([])
+  const PREFERRED_FONT_KEY = 'lemonaPreferredFontFamily'
 
   // Helper function to adjust position to point to inline content (not listItem)
   const adjustPositionForInlineContent = (pos: number): number | null => {
@@ -69,9 +70,24 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
     }
   }
 
-  // Helper function to apply font size to current block after style change
-  const applyFontSizeToBlock = (editor: Editor, fontSize: string) => {
+  const getPreferredFontFamily = (editor: Editor): string | null => {
+    const attrs = editor.getAttributes('textStyle')
+    if (attrs?.fontFamily) {
+      return attrs.fontFamily
+    }
     try {
+      return localStorage.getItem(PREFERRED_FONT_KEY)
+    } catch (error) {
+      return null
+    }
+  }
+
+  const preferredFontFamily = getPreferredFontFamily(editor)
+
+  // Helper function to apply text style to current block after style change
+  const applyTextStyleToBlock = (editor: Editor, attrs: { fontSize?: string; fontFamily?: string }) => {
+    try {
+      if (!attrs.fontSize && !attrs.fontFamily) return
       const { from } = editor.state.selection
       const $from = editor.state.doc.resolve(from)
       
@@ -94,11 +110,14 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
       // Get the textStyle mark type from editor schema
       const textStyleMark = editor.schema.marks.textStyle
       if (textStyleMark && blockStart !== blockEnd) {
+        const markAttrs: { fontSize?: string; fontFamily?: string } = {}
+        if (attrs.fontSize) markAttrs.fontSize = attrs.fontSize
+        if (attrs.fontFamily) markAttrs.fontFamily = attrs.fontFamily
         // Select all text in the current block and apply font size
         editor.chain()
           .focus()
           .setTextSelection({ from: blockStart, to: blockEnd })
-          .setMark('textStyle', { fontSize })
+          .setMark('textStyle', markAttrs)
           .run()
       }
     } catch (error) {
@@ -135,11 +154,11 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
         // Execute the command action
         action(editor)
         
-        // Apply font size if provided
-        if (fontSize) {
+        // Apply text style if needed
+        if (fontSize || preferredFontFamily) {
           // Use setTimeout to ensure the style change is applied first
           setTimeout(() => {
-            applyFontSizeToBlock(editor, fontSize)
+            applyTextStyleToBlock(editor, { fontSize, fontFamily: preferredFontFamily || undefined })
           }, 0)
         }
       } catch (error) {
@@ -152,18 +171,18 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
             .deleteRange({ from: commandStartPos, to: from })
             .run()
           action(editor)
-          if (fontSize) {
+          if (fontSize || preferredFontFamily) {
             setTimeout(() => {
-              applyFontSizeToBlock(editor, fontSize)
+              applyTextStyleToBlock(editor, { fontSize, fontFamily: preferredFontFamily || undefined })
             }, 0)
           }
         } catch (fallbackError) {
           console.warn('Fallback delete also failed:', fallbackError)
           // Last resort: just execute the action without deleting
           action(editor)
-          if (fontSize) {
+          if (fontSize || preferredFontFamily) {
             setTimeout(() => {
-              applyFontSizeToBlock(editor, fontSize)
+              applyTextStyleToBlock(editor, { fontSize, fontFamily: preferredFontFamily || undefined })
             }, 0)
           }
         }
@@ -171,9 +190,9 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
     } else {
       // Fallback: just execute the action
       action(editor)
-      if (fontSize) {
+      if (fontSize || preferredFontFamily) {
         setTimeout(() => {
-          applyFontSizeToBlock(editor, fontSize)
+          applyTextStyleToBlock(editor, { fontSize, fontFamily: preferredFontFamily || undefined })
         }, 0)
       }
     }
@@ -186,9 +205,9 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
     'title': '24',
     'subtitle': '18',
     'normal': '16',
-    'h1': '20',
-    'h2': '18',
-    'h3': '16',
+    'h1': '26',
+    'h2': '22',
+    'h3': '19',
   }
 
   const commands: CommandItem[] = [
@@ -296,7 +315,7 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
     {
       id: 'callout',
       label: 'Callout',
-      icon: '📝',
+      icon: 'C',
       keywords: ['callout', 'note', 'tip', 'info'],
       action: (editor: Editor) => {
         executeCommand(() => {
@@ -400,18 +419,6 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
         e.preventDefault()
       }}
     >
-      <div
-        style={{
-          fontSize: '10px',
-          fontWeight: '500',
-          color: theme === 'dark' ? '#999' : '#666',
-          padding: '6px 10px 2px 10px',
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px',
-        }}
-      >
-        Basic blocks
-      </div>
       {filteredCommands.map((cmd, index) => (
         <div
           key={cmd.id}
@@ -461,22 +468,6 @@ export default function SlashCommandMenu({ editor, position, onClose, filterText
           </div>
         </div>
       ))}
-      <div
-        style={{
-          fontSize: '9px',
-          fontWeight: '400',
-          color: theme === 'dark' ? '#666' : '#999',
-          padding: '6px 10px 2px 10px',
-          marginTop: '6px',
-          borderTop: `1px solid ${borderColor}`,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <span>Type '/' on the page</span>
-        <span style={{ fontSize: '9px' }}>esc</span>
-      </div>
     </div>
   )
 }

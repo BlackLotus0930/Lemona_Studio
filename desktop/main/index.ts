@@ -114,6 +114,8 @@ function createWindow() {
     console.warn(`⚠️  Icon not found. Tried: ${logoPathSourceIco}, ${logoPathDistIco}, ${logoPathSourcePng}, and ${logoPathDistPng}`)
   }
   
+  const shouldUseNativeControlsOverlay = process.platform === 'win32'
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -122,7 +124,12 @@ function createWindow() {
     titleBarStyle: 'hidden', // Hide default title bar (macOS)
     backgroundColor: '#141414', // Set dark background to prevent white flash
     show: false, // Don't show window until content is ready (prevents white flash)
-    // Note: titleBarOverlay only works on macOS, removed for Windows compatibility
+    // Use native window controls overlay on Windows (Snap Layouts support)
+    titleBarOverlay: shouldUseNativeControlsOverlay ? {
+      color: '#141414',
+      symbolColor: '#bcbcbc',
+      height: 36
+    } : undefined,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -178,6 +185,12 @@ function createWindow() {
 
   // Enable zoom commands (Ctrl/Cmd + Plus, Minus, 0)
   mainWindow.webContents.on('before-input-event', (event, input) => {
+    if ((input.control || input.meta) && input.shift && (input.key === 'E' || input.key === 'e')) {
+      // Toggle File Explorer regardless of focus
+      mainWindow?.webContents.send('toggle-file-explorer')
+      event.preventDefault()
+      return
+    }
     if (input.key === 'F11') {
       // Focus Mode: hide menu bar and toggle fullscreen
       const shouldEnable = !mainWindow!.isFullScreen()

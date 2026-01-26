@@ -420,6 +420,17 @@ Rephrased text:`;
             window.close();
         }
     });
+    ipcMain.handle('window:setTitleBarOverlay', async (event, theme) => {
+        const window = BrowserWindow.fromWebContents(event.sender);
+        if (window?.setTitleBarOverlay) {
+            const isLight = theme === 'light';
+            window.setTitleBarOverlay({
+                color: isLight ? '#ffffff' : '#141414',
+                symbolColor: isLight ? '#000000' : '#bcbcbc',
+                height: 36
+            });
+        }
+    });
     // Auto-update controls
     ipcMain.handle('update:download', async () => {
         try {

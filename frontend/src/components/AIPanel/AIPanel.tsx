@@ -887,8 +887,8 @@ function AIPanel({ document, onClose }: AIPanelProps) {
         </div>
         
         {/* Action Buttons - Always visible on the right */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1px', flexShrink: 0, marginRight: '0px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0px', flexShrink: 0, marginRight: '0px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0px' }}>
           <button
             onClick={handleNewChat}
             style={{
@@ -958,8 +958,8 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               transition: 'background-color 0.15s',
               transform: 'translateY(0.5px)',
               marginLeft: '0px',
-              minWidth: '28px',
-              minHeight: '28px'
+              minWidth: '26px',
+              minHeight: '26px'
             }}
             onMouseEnter={(e) => e.currentTarget.style.backgroundColor = buttonHoverBg}
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}

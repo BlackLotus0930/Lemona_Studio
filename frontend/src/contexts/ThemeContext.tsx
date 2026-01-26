@@ -8,6 +8,7 @@ interface ThemeContextType {
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
+const isElectron = typeof window !== 'undefined' && window.electron !== undefined
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
@@ -38,6 +39,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } else {
       document.documentElement.classList.remove('dark-theme')
       document.body.classList.remove('dark-theme')
+    }
+
+    if (isElectron && window.electron?.platform === 'win32') {
+      window.electron.invoke('window:setTitleBarOverlay', theme)
     }
   }, [theme])
 

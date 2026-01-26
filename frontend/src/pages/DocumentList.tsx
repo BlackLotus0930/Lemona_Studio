@@ -21,11 +21,105 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
     {
       type: 'heading',
       attrs: { level: 1 },
-      content: [{ type: 'text', text: 'Welcome!' }],
+      content: [{ type: 'text', text: 'Welcome to Lemona' }],
     },
     {
       type: 'paragraph',
-      content: [{ type: 'text', text: 'Lemona is an integrated writing editor.' }],
+      content: [{ type: 'text', text: 'Three spaces' }],
+    },
+    {
+      type: 'orderedList',
+      content: [
+        {
+          type: 'listItem',
+          content: [
+            { 
+              type: 'paragraph', 
+              content: [
+                { type: 'text', text: '🌍 WorldLab' }
+              ] 
+            },
+            {
+              type: 'bulletList',
+              content: [
+                {
+                  type: 'listItem',
+                  content: [
+                    { 
+                      type: 'paragraph', 
+                      content: [
+                        { type: 'text', text: 'A playground for exploring and developing your ideas.' }
+                      ] 
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { 
+              type: 'paragraph', 
+              content: [
+                { type: 'text', text: '📚 Library' }
+              ] 
+            },
+            {
+              type: 'bulletList',
+              content: [
+                {
+                  type: 'listItem',
+                  content: [
+                    { 
+                      type: 'paragraph', 
+                      content: [
+                        { type: 'text', text: 'Store and organize your reference files (PDF, DOCX, and more).' }
+                      ] 
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { 
+              type: 'paragraph', 
+              content: [
+                { type: 'text', text: '📝 Workspace' }
+              ] 
+            },
+            {
+              type: 'bulletList',
+              content: [
+                {
+                  type: 'listItem',
+                  content: [
+                    { 
+                      type: 'paragraph', 
+                      content: [
+                        { type: 'text', text: 'Write and edit your documents. You can also upload DOCX files here to continue working on them.' }
+                      ] 
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      type: 'horizontalRule',
+    },
+    {
+      type: 'heading',
+      attrs: { level: 3 },
+      content: [{ type: 'text', text: 'Quick ways to get started' }],
     },
     {
       type: 'bulletList',
@@ -33,98 +127,32 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
         {
           type: 'listItem',
           content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Rich text editor' }] },
+            { type: 'paragraph', content: [{ type: 'text', text: 'Type / to open commands and formatting options' }] },
           ],
         },
         {
           type: 'listItem',
           content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Multi-file workspace' }] },
+            { type: 'paragraph', content: [{ type: 'text', text: 'Select text to improve or rewrite it' }] },
           ],
         },
         {
           type: 'listItem',
           content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Version control for your drafts' }] },
+            { type: 'paragraph', content: [{ type: 'text', text: 'Press Ctrl + Shift + E to toggle the file explorer' }] },
           ],
         },
         {
           type: 'listItem',
           content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Context-Aware AI' }] },
-          ],
-        },
-        {
-          type: 'listItem',
-          content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Three connected spaces' }] },
+            { type: 'paragraph', content: [{ type: 'text', text: 'Press Ctrl + S to save and index all Workspace files' }] },
           ],
         },
       ],
     },
     {
       type: 'paragraph',
-      content: [{ type: 'text', text: 'Your three connected spaces:' }],
-    },
-    {
-      type: 'bulletList',
-      content: [
-        {
-          type: 'listItem',
-          content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'WorldLab - a playground for all your ideas.' }] },
-          ],
-        },
-        {
-          type: 'listItem',
-          content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Library - keep your documentation (PDF, DOCX).' }] },
-          ],
-        },
-        {
-          type: 'listItem',
-          content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Workspace - write your documents.' }] },
-          ],
-        },
-      ],
-    },
-    {
-      type: 'paragraph',
-      content: [{ type: 'text', text: 'Quick ways to get started:' }],
-    },
-    {
-      type: 'bulletList',
-      content: [
-        {
-          type: 'listItem',
-          content: [
-            { type: 'paragraph', content: [{ type: 'text', text: "Type '/' for commands and formatting." }] },
-          ],
-        },
-        {
-          type: 'listItem',
-          content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Select text to improve or rewrite it.' }] },
-          ],
-        },
-        {
-          type: 'listItem',
-          content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Ctrl Shift E to toggle the file explorer.' }] },
-          ],
-        },
-        {
-          type: 'listItem',
-          content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Ctrl S to save and index all workspace files.' }] },
-          ],
-        },
-      ],
-    },
-    {
-      type: 'paragraph',
-      content: [{ type: 'text', text: 'You’re all set up! Hope you enjoy working on your project!' }],
+      content: [{ type: 'text', text: 'You are all set up! Hope you enjoy!' }],
     },
   ],
 }

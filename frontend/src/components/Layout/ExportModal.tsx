@@ -610,11 +610,11 @@ export default function ExportModal({
             }}
             onMouseEnter={(e) => {
               if (hasSelection) {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#c9688a' : '#e095ab'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#e85a8f' : '#f08ba8'
                 e.currentTarget.style.transform = 'translateY(-1px)'
                 e.currentTarget.style.boxShadow = theme === 'dark' 
-                  ? '0 2px 6px rgba(217, 119, 159, 0.3)' 
-                  : '0 2px 6px rgba(232, 165, 184, 0.3)'
+                  ? '0 2px 6px rgba(232, 90, 143, 0.4)' 
+                  : '0 2px 6px rgba(240, 139, 168, 0.4)'
               }
             }}
             onMouseLeave={(e) => {
@@ -659,11 +659,11 @@ export default function ExportModal({
             }}
             onMouseEnter={(e) => {
               if (hasSelection) {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#6ba5c9' : '#7fb8de'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#5fa8d9' : '#6bb8e8'
                 e.currentTarget.style.transform = 'translateY(-1px)'
                 e.currentTarget.style.boxShadow = theme === 'dark' 
-                  ? '0 2px 6px rgba(123, 179, 217, 0.3)' 
-                  : '0 2px 6px rgba(143, 196, 232, 0.3)'
+                  ? '0 2px 6px rgba(95, 168, 217, 0.4)' 
+                  : '0 2px 6px rgba(107, 184, 232, 0.4)'
               }
             }}
             onMouseLeave={(e) => {

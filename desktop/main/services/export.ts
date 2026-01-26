@@ -42,11 +42,19 @@ const FONT_FILES: Record<string, { regular: string; italic?: string; bold?: stri
   'Open Sans': { regular: 'OpenSans-VariableFont_wdth,wght.ttf', italic: 'OpenSans-Italic-VariableFont_wdth,wght.ttf' },
   'Roboto': { regular: 'Roboto-VariableFont_wdth,wght.ttf', italic: 'Roboto-Italic-VariableFont_wdth,wght.ttf' },
   'Montserrat': { regular: 'Montserrat-VariableFont_wght.ttf', italic: 'Montserrat-Italic-VariableFont_wght.ttf' },
-  'Poppins': { 
-    regular: 'Poppins-Regular.ttf', 
-    italic: 'Poppins-Italic.ttf',
-    bold: 'Poppins-Bold.ttf',
-    boldItalic: 'Poppins-BoldItalic.ttf'
+  'Source Sans Pro': { regular: 'SourceSans3-VariableFont_wght.ttf', italic: 'SourceSans3-Italic-VariableFont_wght.ttf' },
+  'Liberation Serif': { 
+    regular: 'LiberationSerif-Regular.ttf', 
+    italic: 'LiberationSerif-Italic.ttf',
+    bold: 'LiberationSerif-Bold.ttf',
+    boldItalic: 'LiberationSerif-BoldItalic.ttf'
+  },
+  'EB Garamond': { regular: 'EBGaramond-VariableFont_wght.ttf', italic: 'EBGaramond-Italic-VariableFont_wght.ttf' },
+  'Courier Prime': { 
+    regular: 'CourierPrime-Regular.ttf', 
+    italic: 'CourierPrime-Italic.ttf',
+    bold: 'CourierPrime-Bold.ttf',
+    boldItalic: 'CourierPrime-BoldItalic.ttf'
   },
 }
 
@@ -251,7 +259,7 @@ function tipTapToHTML(content: any): string {
         if (fontFamily) styles.push(`font-family: '${fontFamily}', sans-serif`)
         if (fontSize) styles.push(`font-size: ${fontSize}`)
         if (color) styles.push(`color: ${color}`)
-        if (isBold) styles.push('font-weight: bold')
+        if (isBold) styles.push('font-weight: 600')
         if (isItalic) styles.push('font-style: italic')
         if (isUnderline) styles.push('text-decoration: underline')
         if (isHighlighted) styles.push(`background-color: ${highlightColor}; padding: 0 2px; border-radius: 2px`)
@@ -270,16 +278,17 @@ function tipTapToHTML(content: any): string {
     if (node.type === 'paragraph') {
       const align = node.attrs?.textAlign || 'left'
       const content = node.content ? node.content.map(renderNode).join('') : ''
-      return `<p style="text-align: ${align}; margin-top: 0; margin-bottom: 0.75em; line-height: 1.7; font-size: 14px;">${content || '<br/>'}</p>`
+      return `<p style="text-align: ${align}; margin-top: 0; margin-bottom: 0.75em; line-height: 1.75; font-size: 16px;">${content || '<br/>'}</p>`
     }
 
     if (node.type === 'heading') {
       const level = node.attrs?.level || 1
       const align = node.attrs?.textAlign || 'left'
       const content = node.content ? node.content.map(renderNode).join('') : ''
-      // Font sizes: h1=20px, h2=18px, h3=16px
-      const fontSize = level === 1 ? '20px' : level === 2 ? '18px' : level === 3 ? '16px' : '14px'
-      return `<h${level} style="text-align: ${align}; margin-top: 1em; margin-bottom: 0.5em; line-height: 1.3; font-weight: 600; font-size: ${fontSize};">${content}</h${level}>`
+      // Font sizes: h1=26px, h2=22px, h3=19px (matching editor)
+      const fontSize = level === 1 ? '26px' : level === 2 ? '22px' : level === 3 ? '19px' : '14px'
+      const marginBottom = (level === 2 || level === 3) ? '0.65em' : '0.5em'
+      return `<h${level} style="text-align: ${align}; margin-top: 1em; margin-bottom: ${marginBottom}; line-height: 1.3; font-weight: 600; font-size: ${fontSize};">${content}</h${level}>`
     }
 
     if (node.type === 'title') {
@@ -291,22 +300,26 @@ function tipTapToHTML(content: any): string {
     if (node.type === 'subtitle') {
       const align = node.attrs?.textAlign || 'left'
       const content = node.content ? node.content.map(renderNode).join('') : ''
-      return `<h2 style="text-align: ${align}; font-size: 18px; font-weight: 500; margin-bottom: 1em;">${content}</h2>`
+      return `<h2 style="text-align: ${align}; font-size: 20px; font-weight: 500; margin-bottom: 1em;">${content}</h2>`
     }
 
     if (node.type === 'bulletList') {
       const items = node.content ? node.content.map(renderNode).join('') : ''
-      return `<ul style="padding-left: 1.75em; margin: 0.5em 0; list-style-type: disc;">${items}</ul>`
+      return `<ul style="padding-left: 1.75em; margin: 0.4em 0; list-style-type: disc;">${items}</ul>`
     }
 
     if (node.type === 'orderedList') {
       const items = node.content ? node.content.map(renderNode).join('') : ''
-      return `<ol style="padding-left: 1.75em; margin: 0.5em 0; list-style-type: decimal;">${items}</ol>`
+      return `<ol style="padding-left: 1.75em; margin: 0.4em 0; list-style-type: decimal;">${items}</ol>`
     }
 
     if (node.type === 'listItem') {
       const content = node.content ? node.content.map(renderNode).join('') : ''
       return `<li style="margin: 0.25em 0; padding-left: 0.25em;">${content}</li>`
+    }
+
+    if (node.type === 'horizontalRule') {
+      return `<hr style="border: none; border-top: 1px solid #E6E5E3; margin-top: 0.75em; margin-bottom: 0.75em; height: 0;" />`
     }
 
     if (node.type === 'image') {
@@ -370,7 +383,7 @@ function tipTapToHTML(content: any): string {
       }
       
       const svg = renderChartSVG(chartType, chartData)
-      const titleHTML = chartName ? `<div style="font-size: 18px; font-weight: bold; margin-bottom: 8px; text-align: center;">${escapeHTML(chartName)}</div>` : ''
+      const titleHTML = chartName ? `<div style="font-size: 18px; font-weight: 600; margin-bottom: 8px; text-align: center;">${escapeHTML(chartName)}</div>` : ''
       
       return `<div style="margin: 1em 0; display: flex; flex-direction: column; align-items: center;">${titleHTML}${svg}</div>`
     }
@@ -672,9 +685,9 @@ function generateHTMLDocument(bodyHTML: string): string {
     }
     
     body {
-      font-family: 'Noto Sans SC', 'Inter', sans-serif;
-      font-size: 14px;
-      line-height: 1.7;
+      font-family: 'Source Sans Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      font-size: 16px;
+      line-height: 1.75;
       color: #202124;
       padding: 0 50px 50px 50px;
       background: white;
@@ -700,11 +713,23 @@ function generateHTMLDocument(bodyHTML: string): string {
     p {
       margin-top: 0;
       margin-bottom: 0.75em;
-      line-height: 1.7;
+      line-height: 1.75;
     }
     
     p:last-child {
       margin-bottom: 0;
+    }
+    
+    hr {
+      border: none;
+      border-top: 1px solid #E6E5E3;
+      margin-top: 0.75em;
+      margin-bottom: 0.75em;
+      height: 0;
+    }
+    
+    strong, b, [style*="font-weight: bold"], [style*="font-weight:bold"], [style*="font-weight: 700"], [style*="font-weight:700"] {
+      font-weight: 600 !important;
     }
     
     ul, ol {
@@ -1251,6 +1276,15 @@ export const exportService = {
             spacing: { after: 200 },
           })
         )
+      } else if (node.type === 'horizontalRule') {
+        // Horizontal rule - add a paragraph with spacing to represent separator
+        // DOCX doesn't have native horizontal rule, so we use spacing
+        docxElements.push(
+          new Paragraph({
+            children: [new TextRun('')],
+            spacing: { after: 300, before: 300 },
+          })
+        )
       } else if (node.type === 'tableBlock') {
         // Table node - parse HTML and convert to DOCX table
         const html = node.attrs?.html || ''
@@ -1587,6 +1621,14 @@ export const exportService = {
           new Paragraph({
             children: [new TextRun({ text: chartText, italics: true })],
             spacing: { after: 200 },
+          })
+        )
+      } else if (node.type === 'horizontalRule') {
+        // Horizontal rule - add a paragraph with spacing to represent separator
+        allElements.push(
+          new Paragraph({
+            children: [new TextRun('')],
+            spacing: { after: 300, before: 300 },
           })
         )
       } else if (node.type === 'tableBlock') {
