@@ -3238,7 +3238,7 @@ export default function Layout(): JSX.Element {
           if (!html) return html
 
           // Available fonts in the editor
-          const availableFonts = ['Source Sans Pro', 'Inter', 'Noto Sans SC', 'EB Garamond', 'Liberation Serif', 'Open Sans', 'Roboto', 'Montserrat', 'Courier Prime']
+          const availableFonts = ['Source Sans 3', 'Inter', 'Noto Sans SC', 'EB Garamond', 'Liberation Serif', 'Open Sans', 'Roboto', 'Montserrat', 'Courier Prime']
           
           // Default text colors for each theme
           const defaultTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'

@@ -1111,7 +1111,17 @@ export default function Toolbar({
     { label: 'Heading 3', value: 'h3', fontSize: '19px', fontWeight: 600 },
   ]
 
-  const fonts = ['Source Sans Pro', 'Inter', 'Noto Sans SC', 'EB Garamond', 'Liberation Serif', 'Open Sans', 'Roboto', 'Montserrat', 'Courier Prime']
+  const fontOptions = [
+    { label: 'Source Sans', value: 'Source Sans 3' },
+    { label: 'Inter', value: 'Inter' },
+    { label: 'Noto Sans SC', value: 'Noto Sans SC' },
+    { label: 'EB Garamond', value: 'EB Garamond' },
+    { label: 'Liberation Serif', value: 'Liberation Serif' },
+    { label: 'Open Sans', value: 'Open Sans' },
+    { label: 'Roboto', value: 'Roboto' },
+    { label: 'Montserrat', value: 'Montserrat' },
+    { label: 'Courier Prime', value: 'Courier Prime' },
+  ]
 
   // Get current style label
   const getCurrentStyle = () => {
@@ -1126,9 +1136,15 @@ export default function Toolbar({
 
   // Get current font family
   const getCurrentFontFamily = () => {
-    if (!stableEditor || stableEditor.isDestroyed) return 'Source Sans Pro'
+    if (!stableEditor || stableEditor.isDestroyed) return 'Source Sans 3'
     const attrs = stableEditor.getAttributes('textStyle')
-    return attrs.fontFamily || 'Source Sans Pro'
+    return attrs.fontFamily || 'Source Sans 3'
+  }
+
+  const getCurrentFontLabel = () => {
+    const currentValue = getCurrentFontFamily()
+    const match = fontOptions.find((font) => font.value === currentValue)
+    return match ? match.label : currentValue
   }
 
   // Normalize color for comparison (handles different formats)
@@ -1480,12 +1496,12 @@ export default function Toolbar({
             setShowFontMenu(newState)
           }}
           style={fontDropdownStyle}
-          title={getCurrentFontFamily()}
+          title={getCurrentFontLabel()}
           onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
           onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
           <span style={{ overflow: 'hidden', textOverflow: 'clip', whiteSpace: 'nowrap', flex: 1, textAlign: 'left' }}>
-            {getCurrentFontFamily()}
+            {getCurrentFontLabel()}
           </span>
           <ArrowDropDownIcon style={{ fontSize: '20px', marginLeft: '2px', flexShrink: 0 }} />
         </button>
@@ -1513,15 +1529,15 @@ export default function Toolbar({
               backdropFilter: 'blur(20px)',
               transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
-            {fonts.map((font) => {
-              const isActive = getCurrentFontFamily() === font
+            {fontOptions.map((font) => {
+              const isActive = getCurrentFontFamily() === font.value
               return (
                 <div
-                  key={font}
+                  key={font.value}
                   onMouseDown={(e) => {
                     e.preventDefault()
                     if (canUseEditor()) {
-                      stableEditor!.chain().focus().setMark('textStyle', { fontFamily: font }).run()
+                      stableEditor!.chain().focus().setMark('textStyle', { fontFamily: font.value }).run()
                       setShowFontMenu(false)
                     }
                   }}
@@ -1530,7 +1546,7 @@ export default function Toolbar({
                     cursor: 'pointer',
                     fontSize: '13px',
                     color: dropdownTextColor,
-                    fontFamily: font,
+                    fontFamily: font.value,
                     backgroundColor: isActive ? dropdownActiveBg : 'transparent',
                     display: 'flex',
                     alignItems: 'center',
@@ -1552,7 +1568,7 @@ export default function Toolbar({
                     }
                   }}
                 >
-                  <span>{font}</span>
+                  <span>{font.label}</span>
                 </div>
               )
             })}

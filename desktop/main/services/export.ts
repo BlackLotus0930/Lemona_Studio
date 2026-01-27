@@ -42,7 +42,7 @@ const FONT_FILES: Record<string, { regular: string; italic?: string; bold?: stri
   'Open Sans': { regular: 'OpenSans-VariableFont_wdth,wght.ttf', italic: 'OpenSans-Italic-VariableFont_wdth,wght.ttf' },
   'Roboto': { regular: 'Roboto-VariableFont_wdth,wght.ttf', italic: 'Roboto-Italic-VariableFont_wdth,wght.ttf' },
   'Montserrat': { regular: 'Montserrat-VariableFont_wght.ttf', italic: 'Montserrat-Italic-VariableFont_wght.ttf' },
-  'Source Sans Pro': { regular: 'SourceSans3-VariableFont_wght.ttf', italic: 'SourceSans3-Italic-VariableFont_wght.ttf' },
+  'Source Sans 3': { regular: 'SourceSans3-VariableFont_wght.ttf', italic: 'SourceSans3-Italic-VariableFont_wght.ttf' },
   'Liberation Serif': { 
     regular: 'LiberationSerif-Regular.ttf', 
     italic: 'LiberationSerif-Italic.ttf',
@@ -685,7 +685,7 @@ function generateHTMLDocument(bodyHTML: string): string {
     }
     
     body {
-      font-family: 'Source Sans Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
       font-size: 16px;
       line-height: 1.75;
       color: #202124;

@@ -16,7 +16,9 @@ import { saveApiKeys, getApiKeys } from './services/apiKeyStore.js';
 import { worldLabService } from './services/worldLabService.js';
 import path from 'path';
 import { app } from 'electron';
+import fs from 'fs/promises';
 const { autoUpdater } = updater;
+const ZOOM_LEVEL_FILE = path.join(app.getPath('userData'), 'zoom-level.json');
 export function setupIPC() {
     // Document operations
     ipcMain.handle('document:getAll', async () => {
@@ -429,6 +431,16 @@ Rephrased text:`;
                 symbolColor: isLight ? '#000000' : '#bcbcbc',
                 height: 36
             });
+        }
+    });
+    ipcMain.handle('zoom:get', async () => {
+        try {
+            const data = await fs.readFile(ZOOM_LEVEL_FILE, 'utf-8');
+            const parsed = JSON.parse(data);
+            return typeof parsed.zoomLevel === 'number' ? parsed.zoomLevel : null;
+        }
+        catch {
+            return null;
         }
     });
     // Auto-update controls

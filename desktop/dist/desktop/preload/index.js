@@ -1,4 +1,17 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webFrame } from 'electron';
+const applyInitialZoom = async () => {
+    try {
+        const savedZoom = await ipcRenderer.invoke('zoom:get');
+        if (typeof savedZoom === 'number') {
+            webFrame.setZoomLevel(savedZoom);
+        }
+    }
+    catch {
+        // Ignore zoom initialization errors
+    }
+};
+// Run at document-start to avoid zoom flicker on refresh
+void applyInitialZoom();
 // 暴露安全的 API 给渲染进程
 contextBridge.exposeInMainWorld('electron', {
     invoke: (channel, ...args) => {

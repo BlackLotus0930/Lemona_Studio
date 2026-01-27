@@ -1,6 +1,19 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const electron_1 = require("electron");
+const applyInitialZoom = async () => {
+    try {
+        const savedZoom = await electron_1.ipcRenderer.invoke('zoom:get');
+        if (typeof savedZoom === 'number') {
+            electron_1.webFrame.setZoomLevel(savedZoom);
+        }
+    }
+    catch {
+        // Ignore zoom initialization errors
+    }
+};
+// Run at document-start to avoid zoom flicker on refresh
+void applyInitialZoom();
 // 暴露安全的 API 给渲染进程
 electron_1.contextBridge.exposeInMainWorld('electron', {
     invoke: (channel, ...args) => {

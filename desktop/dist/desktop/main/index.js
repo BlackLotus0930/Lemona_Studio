@@ -19,6 +19,9 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '../../../../'); // This is the Lemona/ directory
 let mainWindow = null;
 const ZOOM_LEVEL_FILE = path.join(app.getPath('userData'), 'zoom-level.json');
+const ZOOM_SAVE_DEBOUNCE_MS = 250;
+let zoomSaveTimer = null;
+let pendingZoomLevel = null;
 async function loadZoomLevel() {
     try {
         const data = await fs.readFile(ZOOM_LEVEL_FILE, 'utf-8');
@@ -36,6 +39,18 @@ async function saveZoomLevel(zoomLevel) {
     catch (error) {
         console.error('❌ Failed to save zoom level:', error);
     }
+}
+function scheduleZoomSave(zoomLevel) {
+    pendingZoomLevel = zoomLevel;
+    if (zoomSaveTimer) {
+        clearTimeout(zoomSaveTimer);
+    }
+    zoomSaveTimer = setTimeout(() => {
+        if (pendingZoomLevel !== null) {
+            void saveZoomLevel(pendingZoomLevel);
+        }
+        zoomSaveTimer = null;
+    }, ZOOM_SAVE_DEBOUNCE_MS);
 }
 // Setup IPC handlers
 setupIPC();
@@ -177,7 +192,7 @@ async function createWindow() {
                 const currentZoom = mainWindow.webContents.getZoomLevel();
                 const nextZoom = currentZoom + 0.5;
                 mainWindow.webContents.setZoomLevel(nextZoom);
-                void saveZoomLevel(nextZoom);
+                scheduleZoomSave(nextZoom);
                 event.preventDefault();
             }
             else if (input.key === '-' || input.key === '_') {
@@ -185,20 +200,20 @@ async function createWindow() {
                 const currentZoom = mainWindow.webContents.getZoomLevel();
                 const nextZoom = currentZoom - 0.5;
                 mainWindow.webContents.setZoomLevel(nextZoom);
-                void saveZoomLevel(nextZoom);
+                scheduleZoomSave(nextZoom);
                 event.preventDefault();
             }
             else if (input.key === '0') {
                 // Reset zoom
                 mainWindow.webContents.setZoomLevel(0);
-                void saveZoomLevel(0);
+                scheduleZoomSave(0);
                 event.preventDefault();
             }
         }
     });
     mainWindow.webContents.on('zoom-changed', () => {
         const currentZoom = mainWindow.webContents.getZoomLevel();
-        void saveZoomLevel(currentZoom);
+        scheduleZoomSave(currentZoom);
     });
 }
 // Set app icon (macOS)
