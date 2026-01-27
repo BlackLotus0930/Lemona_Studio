@@ -3311,7 +3311,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   disabled={isLoading}
                   style={{
                     padding: '2px',
-                    backgroundColor: showPlusMenu ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0') : 'transparent',
+                    backgroundColor: showPlusMenu ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') : 'transparent',
                     color: showPlusMenu ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
                     border: 'none',
                     borderRadius: '6px',
@@ -3326,15 +3326,13 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   }}
                   onMouseEnter={(e) => {
                     if (!isLoading) {
-                      e.currentTarget.style.backgroundColor = showPlusMenu 
-                        ? (theme === 'dark' ? '#454545' : '#d0d0d0')
-                        : (theme === 'dark' ? '#1d1d1d' : '#f5f5f5')
+                      e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#e8e8e8'
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (!isLoading) {
                       e.currentTarget.style.backgroundColor = showPlusMenu 
-                        ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0')
+                        ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8')
                         : 'transparent'
                     }
                   }}
@@ -3357,8 +3355,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       padding: '6px',
                       minWidth: '180px',
                       boxShadow: theme === 'dark'
-                        ? '0 -4px 16px rgba(0, 0, 0, 0.5), 0 -2px 4px rgba(0, 0, 0, 0.3)'
-                        : '0 -4px 16px rgba(0, 0, 0, 0.2), 0 -2px 4px rgba(0, 0, 0, 0.1)',
+                        ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)'
+                        : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
                       zIndex: 10001,
                       border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
                       display: 'flex',
@@ -3378,12 +3376,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       style={{
                         padding: '10px 14px',
                         backgroundColor: 'transparent',
-                        color: theme === 'dark' ? '#d6d6d6' : '#202124',
+                        color: textColor,
                         border: 'none',
                         borderRadius: '6px',
                         cursor: isLoading ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: '300',
+                        fontSize: '12px',
+                        fontWeight: '400',
                         fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                         textAlign: 'left',
                         transition: 'all 0.15s',
@@ -3404,7 +3402,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         }
                       }}
                     >
-                      <AttachFileIcon style={{ fontSize: '18px' }} />
+                      <AttachFileIcon style={{ fontSize: '16px', color: textColor }} />
                       <span>Upload files</span>
                     </button>
                     
@@ -3420,14 +3418,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         backgroundColor: useWebSearch 
                           ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
                           : 'transparent',
-                        color: useWebSearch
-                          ? (theme === 'dark' ? '#ffffff' : '#202124')
-                          : (theme === 'dark' ? '#d6d6d6' : '#202124'),
+                        color: textColor,
                         border: 'none',
                         borderRadius: '6px',
                         cursor: isLoading ? 'not-allowed' : 'pointer',
                         fontSize: '12px',
-                        fontWeight: useWebSearch ? '400' : '300',
+                        fontWeight: '400',
                         fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                         textAlign: 'left',
                         transition: 'all 0.15s',
@@ -3440,7 +3436,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       }}
                       onMouseEnter={(e) => {
                         if (!isLoading) {
-                          e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
+                          e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#e8e8e8'
                         }
                       }}
                       onMouseLeave={(e) => {
@@ -3456,16 +3452,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                           className="material-symbols-outlined"
                           style={{
                             fontVariationSettings: "'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24",
-                            fontSize: '18px'
+                            fontSize: '16px',
+                            color: textColor
                           }}
                         >
                           language
                         </span>
                         <span>Web search</span>
                       </div>
-                      {useWebSearch && (
-                        <CheckIcon style={{ fontSize: '18px' }} />
-                      )}
                     </button>
                     
                     {/* Use style */}
@@ -3492,12 +3486,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         style={{
                           padding: '10px 14px',
                           backgroundColor: showStyleMenu ? (theme === 'dark' ? '#2a2a2a' : '#f5f5f5') : 'transparent',
-                          color: theme === 'dark' ? '#d6d6d6' : '#202124',
+                          color: textColor,
                           border: 'none',
                           borderRadius: '6px',
                           cursor: isLoading ? 'not-allowed' : 'pointer',
-                          fontSize: '13px',
-                          fontWeight: '300',
+                          fontSize: '12px',
+                          fontWeight: '400',
                           fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                           textAlign: 'left',
                           transition: 'all 0.15s',
@@ -3510,10 +3504,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <FormatQuoteIcon style={{ fontSize: '18px' }} />
+                          <FormatQuoteIcon style={{ fontSize: '16px', color: textColor }} />
                           <span>Use style</span>
                         </div>
-                        <KeyboardArrowDownIcon style={{ fontSize: '16px', transform: 'rotate(-90deg)' }} />
+                        <KeyboardArrowDownIcon style={{ fontSize: '16px', transform: 'rotate(-90deg)', color: textColor }} />
                       </button>
                       
                       {/* Style Submenu */}
@@ -3546,8 +3540,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               padding: '6px',
                               minWidth: '160px',
                               boxShadow: theme === 'dark'
-                                ? '0 4px 16px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3)'
-                                : '0 4px 16px rgba(0, 0, 0, 0.2), 0 2px 4px rgba(0, 0, 0, 0.1)',
+                                ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)'
+                                : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
                               zIndex: 10002,
                               border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
                               display: 'flex',
@@ -3569,16 +3563,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                                 style={{
                                   padding: '10px 14px',
                                   backgroundColor: selectedStyle === style 
-                                    ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                                    ? (theme === 'dark' ? '#2a2a2a' : '#f5f5f5') 
                                     : 'transparent',
-                                  color: selectedStyle === style
-                                    ? (theme === 'dark' ? '#ffffff' : '#202124')
-                                    : (theme === 'dark' ? '#d6d6d6' : '#202124'),
+                                  color: textColor,
                                   border: 'none',
                                   borderRadius: '6px',
                                   cursor: isLoading ? 'not-allowed' : 'pointer',
-                                  fontSize: '13px',
-                                  fontWeight: selectedStyle === style ? '400' : '300',
+                                  fontSize: '12px',
+                                  fontWeight: '400',
                                   fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                                   textAlign: 'left',
                                   transition: 'all 0.15s',
@@ -3595,17 +3587,19 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                                   }
                                 }}
                                 onMouseLeave={(e) => {
-                                  if (!isLoading && selectedStyle !== style) {
-                                    e.currentTarget.style.backgroundColor = 'transparent'
+                                  if (!isLoading) {
+                                    e.currentTarget.style.backgroundColor = selectedStyle === style
+                                      ? (theme === 'dark' ? '#2a2a2a' : '#f5f5f5')
+                                      : 'transparent'
                                   }
                                 }}
                               >
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                  <FormatQuoteIcon style={{ fontSize: '18px' }} />
+                                  <FormatQuoteIcon style={{ fontSize: '16px', color: textColor }} />
                                   <span>{style}</span>
                                 </div>
                                 {selectedStyle === style && (
-                                  <CheckIcon style={{ fontSize: '18px' }} />
+                                  <CheckIcon style={{ fontSize: '18px', color: textColor }} />
                                 )}
                               </button>
                             ))}
@@ -3623,7 +3617,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 disabled={isLoading}
                 style={{
                   padding: '2px',
-                  backgroundColor: useWebSearch ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0') : 'transparent',
+                  backgroundColor: useWebSearch ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') : 'transparent',
                   color: useWebSearch ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
                   border: 'none',
                   borderRadius: '6px',
@@ -3638,16 +3632,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 }}
                 onMouseEnter={(e) => {
                   if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = useWebSearch 
-                      ? (theme === 'dark' ? '#454545' : '#d0d0d0')
-                      : (theme === 'dark' ? '#1d1d1d' : '#f5f5f5')
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#e8e8e8'
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!isLoading) {
                     e.currentTarget.style.backgroundColor = useWebSearch 
-                      ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0')
-                      : 'transparent'
+                        ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8')
+                        : 'transparent'
                   }
                 }}
                 title={useWebSearch ? "Web search enabled - AI can search the internet" : "Enable web search"}
@@ -3686,7 +3678,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   disabled={isLoading}
                   style={{
                     padding: '2px',
-                    backgroundColor: showModelDropdown ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0') : 'transparent',
+                    backgroundColor: showModelDropdown ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') : 'transparent',
                     color: showModelDropdown ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
                     border: 'none',
                     borderRadius: '6px',
@@ -3703,15 +3695,13 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   }}
                   onMouseEnter={(e) => {
                     if (!isLoading) {
-                      e.currentTarget.style.backgroundColor = showModelDropdown 
-                        ? (theme === 'dark' ? '#454545' : '#d0d0d0')
-                        : (theme === 'dark' ? '#1d1d1d' : '#f5f5f5')
+                      e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#e8e8e8'
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (!isLoading) {
                       e.currentTarget.style.backgroundColor = showModelDropdown 
-                        ? (theme === 'dark' ? '#3a3a3a' : '#e0e0e0')
+                        ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8')
                         : 'transparent'
                     }
                   }}
@@ -3755,8 +3745,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         padding: '6px',
                         minWidth: '180px',
                         boxShadow: theme === 'dark'
-                          ? '0 -4px 16px rgba(0, 0, 0, 0.5), 0 -2px 4px rgba(0, 0, 0, 0.3)'
-                          : '0 -4px 16px rgba(0, 0, 0, 0.2), 0 -2px 4px rgba(0, 0, 0, 0.1)',
+                          ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)'
+                          : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
                         zIndex: 10001,
                         border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
                         display: 'flex',
@@ -3778,16 +3768,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                             style={{
                               padding: '10px 14px',
                               backgroundColor: selectedModel === 'gemini-3-flash-preview' 
-                                ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                                ? (theme === 'dark' ? '#232323' : '#f0f0f0') 
                                 : 'transparent',
-                              color: selectedModel === 'gemini-3-flash-preview'
-                                ? (theme === 'dark' ? '#ffffff' : '#202124')
-                                : (theme === 'dark' ? '#d6d6d6' : '#202124'),
+                              color: textColor,
                               border: 'none',
                               borderRadius: '6px',
                               cursor: isLoading ? 'not-allowed' : 'pointer',
-                              fontSize: '13px',
-                              fontWeight: '300',
+                              fontSize: '12px',
+                              fontWeight: '400',
                               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                               textAlign: 'left',
                               transition: 'all 0.15s',
@@ -3800,8 +3788,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               }
                             }}
                             onMouseLeave={(e) => {
-                              if (!isLoading && selectedModel !== 'gemini-3-flash-preview') {
-                                e.currentTarget.style.backgroundColor = 'transparent'
+                              if (!isLoading) {
+                                e.currentTarget.style.backgroundColor = selectedModel === 'gemini-3-flash-preview'
+                                  ? (theme === 'dark' ? '#232323' : '#f0f0f0')
+                                  : 'transparent'
                               }
                             }}
                           >
@@ -3825,8 +3815,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               border: 'none',
                               borderRadius: '6px',
                               cursor: isLoading ? 'not-allowed' : 'pointer',
-                              fontSize: '13px',
-                              fontWeight: '300',
+                              fontSize: '12px',
+                              fontWeight: '400',
                               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                               textAlign: 'left',
                               transition: 'all 0.15s',
@@ -3876,8 +3866,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               border: 'none',
                               borderRadius: '6px',
                               cursor: isLoading ? 'not-allowed' : 'pointer',
-                              fontSize: '13px',
-                              fontWeight: '300',
+                              fontSize: '12px',
+                              fontWeight: '400',
                               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                               textAlign: 'left',
                               transition: 'all 0.15s',
@@ -3915,8 +3905,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               border: 'none',
                               borderRadius: '6px',
                               cursor: isLoading ? 'not-allowed' : 'pointer',
-                              fontSize: '13px',
-                              fontWeight: '300',
+                              fontSize: '12px',
+                              fontWeight: '400',
                               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                               textAlign: 'left',
                               transition: 'all 0.15s',
@@ -3954,8 +3944,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                               border: 'none',
                               borderRadius: '6px',
                               cursor: isLoading ? 'not-allowed' : 'pointer',
-                              fontSize: '13px',
-                              fontWeight: '300',
+                              fontSize: '12px',
+                              fontWeight: '400',
                               fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                               textAlign: 'left',
                               transition: 'all 0.15s',
@@ -3995,12 +3985,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         style={{
                           padding: '10px 14px',
                           backgroundColor: 'transparent',
-                          color: theme === 'dark' ? '#d6d6d6' : '#202124',
+                          color: textColor,
                           border: 'none',
                           borderRadius: '6px',
                           cursor: isLoading ? 'not-allowed' : 'pointer',
-                          fontSize: '13px',
-                          fontWeight: '300',
+                          fontSize: '12px',
+                          fontWeight: '400',
                           fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                           textAlign: 'left',
                           transition: 'all 0.15s',

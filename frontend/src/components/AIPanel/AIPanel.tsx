@@ -129,7 +129,6 @@ function AIPanel({ document, onClose }: AIPanelProps) {
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const activeChatBg = theme === 'dark' ? '#212121' : '#f0f0f0'
   const hoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5' // Brighter for chat tabs
-  const buttonHoverBg = theme === 'dark' ? '#252525' : '#f8f8f8' // Even brighter for buttons
   const iconColor = theme === 'dark' ? '#858585' : '#5f6368'
 
   const documentContent = document?.content || undefined
@@ -892,7 +891,7 @@ function AIPanel({ document, onClose }: AIPanelProps) {
           <button
             onClick={handleNewChat}
             style={{
-              padding: '4px 6px',
+              padding: '4px 5px',
               border: 'none',
               borderRadius: '6px',
               backgroundColor: 'transparent',
@@ -902,12 +901,19 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'background-color 0.15s',
+              transition: 'opacity 0.2s, background-color 0.2s',
+              opacity: 0.7,
               minWidth: '28px',
               minHeight: '28px'
             }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = buttonHoverBg}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.opacity = '1'
+              e.currentTarget.style.backgroundColor = hoverBg
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.opacity = '0.7'
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }}
             title="New chat"
           >
             <AddIcon style={{ fontSize: '19px' }} />
@@ -920,22 +926,33 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               setShowMenu(false) // Close other menu if open
             }}
             style={{
-              padding: '4px 8px 4px 6px',
+              padding: '4px 8px 4px 7px',
               border: 'none',
               borderRadius: '6px',
-              backgroundColor: showHistoryDropdown ? buttonHoverBg : 'transparent',
+              backgroundColor: showHistoryDropdown ? hoverBg : 'transparent',
               color: iconColor,
               cursor: 'pointer',
               fontSize: '20px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'background-color 0.15s',
+              transition: 'opacity 0.2s, background-color 0.2s',
+              opacity: showHistoryDropdown ? 1 : 0.7,
               minWidth: '28px',
               minHeight: '28px'
             }}
-            onMouseEnter={(e) => !showHistoryDropdown && (e.currentTarget.style.backgroundColor = buttonHoverBg)}
-            onMouseLeave={(e) => !showHistoryDropdown && (e.currentTarget.style.backgroundColor = 'transparent')}
+            onMouseEnter={(e) => {
+              if (!showHistoryDropdown) {
+                e.currentTarget.style.opacity = '1'
+                e.currentTarget.style.backgroundColor = hoverBg
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!showHistoryDropdown) {
+                e.currentTarget.style.opacity = '0.7'
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
+            }}
             title="History"
           >
             <HistoryIcon style={{ fontSize: '16px' }} />
@@ -955,14 +972,21 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'background-color 0.15s',
+              transition: 'opacity 0.2s, background-color 0.2s',
+              opacity: 0.7,
               transform: 'translateY(0.5px)',
               marginLeft: '0px',
               minWidth: '26px',
               minHeight: '26px'
             }}
-            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = buttonHoverBg}
-            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.opacity = '1'
+              e.currentTarget.style.backgroundColor = hoverBg
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.opacity = '0.7'
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }}
             title="Close AI Panel"
           >
             <CloseIcon style={{ fontSize: '18px', fontWeight: 200 }} />
@@ -1020,7 +1044,9 @@ function AIPanel({ document, onClose }: AIPanelProps) {
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    fontSize: '13px',
+                    fontSize: '12px',
+                    fontWeight: '400',
+                    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                     color: textColor,
                     textAlign: 'left'
                   }}
@@ -1043,7 +1069,9 @@ function AIPanel({ document, onClose }: AIPanelProps) {
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    fontSize: '13px',
+                    fontSize: '12px',
+                    fontWeight: '400',
+                    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                     color: textColor,
                     textAlign: 'left'
                   }}
@@ -1066,7 +1094,9 @@ function AIPanel({ document, onClose }: AIPanelProps) {
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    fontSize: '13px',
+                    fontSize: '12px',
+                    fontWeight: '400',
+                    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                     color: textColor,
                     textAlign: 'left'
                   }}

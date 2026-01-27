@@ -138,7 +138,8 @@ export default function KeyboardShortcutsModal({
     }
   ]
 
-  const dropdownBorder = '#212121'
+  const dropdownBg = theme === 'dark' ? '#1a1a1a' : '#ffffff'
+  const dropdownBorder = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)'
   const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
 
   if (!isOpen) return null
@@ -184,10 +185,12 @@ export default function KeyboardShortcutsModal({
           position: 'fixed',
           top: rect ? `${rect.bottom + 4}px` : '100%',
           left: '24px',
-          backgroundColor: theme === 'dark' ? '#181818' : '#ffffff',
+          backgroundColor: dropdownBg,
           border: `1px solid ${dropdownBorder}`,
-          borderRadius: '6px',
-          boxShadow: theme === 'dark' ? '0 12px 40px rgba(0,0,0,0.8)' : '0 12px 40px rgba(0,0,0,0.25)',
+          borderRadius: '8px',
+          boxShadow: theme === 'dark' 
+            ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+            : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
           zIndex: 10010,
           width: '500px',
           maxHeight: '600px',
@@ -196,25 +199,6 @@ export default function KeyboardShortcutsModal({
           overflow: 'hidden'
         }}
       >
-      {/* Header */}
-      <div style={{
-        padding: '16px 20px',
-        borderBottom: `1px solid ${dropdownBorder}`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
-        <h3 style={{
-          margin: 0,
-          fontSize: '15px',
-          fontWeight: 600,
-          color: dropdownTextColor,
-          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-        }}>
-          Keyboard Shortcuts
-        </h3>
-      </div>
-
       {/* Content */}
       <div style={{
         padding: '20px',

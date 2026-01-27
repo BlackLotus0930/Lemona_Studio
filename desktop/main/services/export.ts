@@ -305,17 +305,17 @@ function tipTapToHTML(content: any): string {
 
     if (node.type === 'bulletList') {
       const items = node.content ? node.content.map(renderNode).join('') : ''
-      return `<ul style="padding-left: 1.75em; margin: 0.4em 0; list-style-type: disc;">${items}</ul>`
+      return `<ul style="padding-left: 1.75em; margin-top: 0.35em; margin-bottom: 0.4em; list-style-type: disc;">${items}</ul>`
     }
 
     if (node.type === 'orderedList') {
       const items = node.content ? node.content.map(renderNode).join('') : ''
-      return `<ol style="padding-left: 1.75em; margin: 0.4em 0; list-style-type: decimal;">${items}</ol>`
+      return `<ol style="padding-left: 1.75em; margin-top: 0.35em; margin-bottom: 0.4em; list-style-type: decimal;">${items}</ol>`
     }
 
     if (node.type === 'listItem') {
       const content = node.content ? node.content.map(renderNode).join('') : ''
-      return `<li style="margin: 0.25em 0; padding-left: 0.25em;">${content}</li>`
+      return `<li style="margin-top: 0.25em; margin-bottom: 0; padding-left: 0.25em;">${content}</li>`
     }
 
     if (node.type === 'horizontalRule') {
@@ -734,11 +734,13 @@ function generateHTMLDocument(bodyHTML: string): string {
     
     ul, ol {
       padding-left: 1.75em;
-      margin: 0.5em 0;
+      margin-top: 0.35em;
+      margin-bottom: 0.5em;
     }
     
     li {
-      margin: 0.25em 0;
+      margin-top: 0.25em;
+      margin-bottom: 0;
       padding-left: 0.25em;
     }
     
