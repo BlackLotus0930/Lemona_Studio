@@ -3311,8 +3311,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   disabled={isLoading}
                   style={{
                     padding: '2px',
-                    backgroundColor: showPlusMenu ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') : 'transparent',
-                    color: showPlusMenu ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
+                    backgroundColor: 'transparent',
+                    color: secondaryTextColor,
                     border: 'none',
                     borderRadius: '6px',
                     cursor: isLoading ? 'not-allowed' : 'pointer',
@@ -3326,14 +3326,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   }}
                   onMouseEnter={(e) => {
                     if (!isLoading) {
-                      e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#e8e8e8'
+                      e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#5a5a5a'
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (!isLoading) {
-                      e.currentTarget.style.backgroundColor = showPlusMenu 
-                        ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8')
-                        : 'transparent'
+                      e.currentTarget.style.color = secondaryTextColor
                     }
                   }}
                   title="More options"
@@ -3416,7 +3414,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       style={{
                         padding: '10px 14px',
                         backgroundColor: useWebSearch 
-                          ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                          ? (theme === 'dark' ? '#2d2d2d' : '#F0F0ED') 
                           : 'transparent',
                         color: textColor,
                         border: 'none',
@@ -3436,13 +3434,15 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                       }}
                       onMouseEnter={(e) => {
                         if (!isLoading) {
-                          e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#e8e8e8'
+                          e.currentTarget.style.backgroundColor = useWebSearch
+                            ? (theme === 'dark' ? '#2d2d2d' : '#F0F0ED')
+                            : (theme === 'dark' ? '#2a2a2a' : '#f5f5f5')
                         }
                       }}
                       onMouseLeave={(e) => {
                         if (!isLoading) {
                           e.currentTarget.style.backgroundColor = useWebSearch 
-                            ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                            ? (theme === 'dark' ? '#2d2d2d' : '#F0F0ED') 
                             : 'transparent'
                         }
                       }}
@@ -3617,8 +3617,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 disabled={isLoading}
                 style={{
                   padding: '2px',
-                  backgroundColor: useWebSearch ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') : 'transparent',
-                  color: useWebSearch ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
+                  backgroundColor: useWebSearch ? (theme === 'dark' ? '#2d2d2d' : '#f0f0f0') : 'transparent',
+                  color: useWebSearch ? (theme === 'dark' ? '#d6d6d6' : '#5a5a5a') : secondaryTextColor,
                   border: 'none',
                   borderRadius: '6px',
                   cursor: isLoading ? 'not-allowed' : 'pointer',
@@ -3638,7 +3638,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 onMouseLeave={(e) => {
                   if (!isLoading) {
                     e.currentTarget.style.backgroundColor = useWebSearch 
-                        ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8')
+                        ? (theme === 'dark' ? '#2d2d2d' : '#f0f0f0')
                         : 'transparent'
                   }
                 }}
@@ -3678,8 +3678,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   disabled={isLoading}
                   style={{
                     padding: '2px',
-                    backgroundColor: showModelDropdown ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') : 'transparent',
-                    color: showModelDropdown ? (theme === 'dark' ? '#d6d6d6' : '#424242') : secondaryTextColor,
+                    backgroundColor: 'transparent',
+                    color: secondaryTextColor,
                     border: 'none',
                     borderRadius: '6px',
                     cursor: isLoading ? 'not-allowed' : 'pointer',
@@ -3695,14 +3695,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   }}
                   onMouseEnter={(e) => {
                     if (!isLoading) {
-                      e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#e8e8e8'
+                      e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#5a5a5a'
                     }
                   }}
                   onMouseLeave={(e) => {
                     if (!isLoading) {
-                      e.currentTarget.style.backgroundColor = showModelDropdown 
-                        ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8')
-                        : 'transparent'
+                      e.currentTarget.style.color = secondaryTextColor
                     }
                   }}
                   title={
@@ -3768,7 +3766,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                             style={{
                               padding: '10px 14px',
                               backgroundColor: selectedModel === 'gemini-3-flash-preview' 
-                                ? (theme === 'dark' ? '#232323' : '#f0f0f0') 
+                                ? (theme === 'dark' ? '#232323' : '#F0F0ED') 
                                 : 'transparent',
                               color: textColor,
                               border: 'none',
@@ -3790,7 +3788,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                             onMouseLeave={(e) => {
                               if (!isLoading) {
                                 e.currentTarget.style.backgroundColor = selectedModel === 'gemini-3-flash-preview'
-                                  ? (theme === 'dark' ? '#232323' : '#f0f0f0')
+                                  ? (theme === 'dark' ? '#232323' : '#F0F0ED')
                                   : 'transparent'
                               }
                             }}
@@ -3858,7 +3856,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                             style={{
                               padding: '10px 14px',
                               backgroundColor: selectedModel === 'gpt-4.1-nano' 
-                                ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                                ? (theme === 'dark' ? '#2d2d2d' : '#F0F0ED') 
                                 : 'transparent',
                               color: selectedModel === 'gpt-4.1-nano'
                                 ? (theme === 'dark' ? '#ffffff' : '#202124')
@@ -3897,7 +3895,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                             style={{
                               padding: '10px 14px',
                               backgroundColor: selectedModel === 'gpt-5-mini' 
-                                ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                                ? (theme === 'dark' ? '#2d2d2d' : '#F0F0ED') 
                                 : 'transparent',
                               color: selectedModel === 'gpt-5-mini'
                                 ? (theme === 'dark' ? '#ffffff' : '#202124')
@@ -3936,7 +3934,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                             style={{
                               padding: '10px 14px',
                               backgroundColor: selectedModel === 'gpt-5.2' 
-                                ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
+                                ? (theme === 'dark' ? '#2d2d2d' : '#F0F0ED') 
                                 : 'transparent',
                               color: selectedModel === 'gpt-5.2'
                                 ? (theme === 'dark' ? '#ffffff' : '#202124')
@@ -4022,15 +4020,15 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 style={{
                   padding: '4px 8px',
                   backgroundColor: isLoading 
-                    ? (theme === 'dark' ? '#505050' : '#e8e8e8')
+                    ? (theme === 'dark' ? '#3d3d3d' : '#e8e8e8')
                     : ((!input.trim() && attachments.length === 0) 
                       ? (theme === 'dark' ? '#282828' : '#e0e0e0')
-                      : (theme === 'dark' ? '#505050' : '#e8e8e8')),
+                      : (theme === 'dark' ? '#3d3d3d' : '#e8e8e8')),
                   color: isLoading 
-                    ? (theme === 'dark' ? '#ffffff' : '#202124')
+                    ? (theme === 'dark' ? '#b0b0b0' : '#202124')
                     : ((!input.trim() && attachments.length === 0) 
                       ? secondaryTextColor 
-                      : (theme === 'dark' ? '#ffffff' : '#202124')),
+                      : (theme === 'dark' ? '#b0b0b0' : '#202124')),
                   border: 'none',
                   borderRadius: '6px',
                   cursor: (!isLoading && (!input.trim() && attachments.length === 0)) ? 'not-allowed' : 'pointer',
@@ -4043,18 +4041,18 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 }}
                 onMouseEnter={(e) => {
                   if (isLoading) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#5a5a5a' : '#f0f0f0'
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#484848' : '#f0f0f0'
                   } else if (!isLoading && (input.trim() || attachments.length > 0)) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#5a5a5a' : '#f0f0f0'
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#484848' : '#f0f0f0'
                   } else if (!isLoading) {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#282828' : '#e0e0e0'
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (isLoading) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#505050' : '#e8e8e8'
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#3d3d3d' : '#e8e8e8'
                   } else if (!isLoading && (input.trim() || attachments.length > 0)) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#505050' : '#e8e8e8'
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#3d3d3d' : '#e8e8e8'
                   } else if (!isLoading) {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#282828' : '#e0e0e0'
                   }
@@ -4065,7 +4063,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   <StopIcon style={{ 
                     fontSize: '19px', 
                     transform: 'translateY(0px)', 
-                    color: theme === 'dark' ? '#ffffff' : '#202124'
+                    color: theme === 'dark' ? '#b0b0b0' : '#202124'
                   }} />
                 ) : (
                   <ArrowUpwardIcon style={{ 
@@ -4073,7 +4071,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     transform: 'translateY(0px)', 
                     color: (!input.trim() && attachments.length === 0) 
                       ? secondaryTextColor 
-                      : (theme === 'dark' ? '#ffffff' : '#202124')
+                      : (theme === 'dark' ? '#b0b0b0' : '#5a5a5a')
                   }} />
                 )}
               </button>

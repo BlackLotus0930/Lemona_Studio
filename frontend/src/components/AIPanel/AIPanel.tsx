@@ -129,7 +129,7 @@ function AIPanel({ document, onClose }: AIPanelProps) {
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const activeChatBg = theme === 'dark' ? '#212121' : '#f0f0f0'
   const hoverBg = theme === 'dark' ? '#1f1f1f' : '#f5f5f5' // Brighter for chat tabs
-  const iconColor = theme === 'dark' ? '#858585' : '#5f6368'
+  const iconColor = theme === 'dark' ? '#858585' : '#9aa0a6'
 
   const documentContent = document?.content || undefined
 
@@ -901,22 +901,19 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'opacity 0.2s, background-color 0.2s',
-              opacity: 0.7,
+              transition: 'color 0.15s',
               minWidth: '28px',
               minHeight: '28px'
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.opacity = '1'
-              e.currentTarget.style.backgroundColor = hoverBg
+              e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#5a5a5a'
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.opacity = '0.7'
-              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.color = iconColor
             }}
             title="New chat"
           >
-            <AddIcon style={{ fontSize: '19px' }} />
+            <AddIcon style={{ fontSize: '19px', fontWeight: 300 }} />
           </button>
           
           <button
@@ -929,33 +926,26 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               padding: '4px 8px 4px 7px',
               border: 'none',
               borderRadius: '6px',
-              backgroundColor: showHistoryDropdown ? hoverBg : 'transparent',
+              backgroundColor: 'transparent',
               color: iconColor,
               cursor: 'pointer',
               fontSize: '20px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'opacity 0.2s, background-color 0.2s',
-              opacity: showHistoryDropdown ? 1 : 0.7,
+              transition: 'color 0.15s',
               minWidth: '28px',
               minHeight: '28px'
             }}
             onMouseEnter={(e) => {
-              if (!showHistoryDropdown) {
-                e.currentTarget.style.opacity = '1'
-                e.currentTarget.style.backgroundColor = hoverBg
-              }
+              e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#5a5a5a'
             }}
             onMouseLeave={(e) => {
-              if (!showHistoryDropdown) {
-                e.currentTarget.style.opacity = '0.7'
-                e.currentTarget.style.backgroundColor = 'transparent'
-              }
+              e.currentTarget.style.color = iconColor
             }}
             title="History"
           >
-            <HistoryIcon style={{ fontSize: '16px' }} />
+            <HistoryIcon style={{ fontSize: '16px', fontWeight: 300 }} />
           </button>
           
           </div>
@@ -972,24 +962,21 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'opacity 0.2s, background-color 0.2s',
-              opacity: 0.7,
+              transition: 'color 0.15s',
               transform: 'translateY(0.5px)',
               marginLeft: '0px',
               minWidth: '26px',
               minHeight: '26px'
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.opacity = '1'
-              e.currentTarget.style.backgroundColor = hoverBg
+              e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#5a5a5a'
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.opacity = '0.7'
-              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.color = iconColor
             }}
             title="Close AI Panel"
           >
-            <CloseIcon style={{ fontSize: '18px', fontWeight: 200 }} />
+            <CloseIcon style={{ fontSize: '18px', fontWeight: 300 }} />
           </button>
           
           <div ref={menuRef} style={{ position: 'relative', display: 'none' }}>
