@@ -36,7 +36,7 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
             { 
               type: 'paragraph', 
               content: [
-                { type: 'text', text: '🌍 WorldLab' }
+                { type: 'text', text: '🌍 World Lab' }
               ] 
             },
             {
@@ -915,16 +915,16 @@ export default function DocumentList() {
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '135px 20px 60px 20px',
+              padding: '150px 20px 60px 20px',
               minHeight: '400px'
             }}>
               <img 
                 src={thinkingMemeImage} 
                 alt="Thinking meme"
                 style={{
-                  width: '200px',
+                  width: '150px',
                   height: 'auto',
-                  marginBottom: '24px',
+                  marginBottom: '20px',
                   filter: theme === 'dark' 
                     ? 'invert(1) grayscale(1) brightness(0.4)' 
                     : 'grayscale(1) brightness(0.6)',

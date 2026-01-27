@@ -54,7 +54,7 @@
   align-items: center;
   gap: 0;
   margin-left: -3px;
-  -webkit-app-region: no-drag; /* Prevent dragging on menu */
+  -webkit-app-region: drag; /* Allow dragging on empty area */
 }
 
 .menu-item {
