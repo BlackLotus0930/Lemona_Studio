@@ -3,6 +3,7 @@ export interface Project {
   title: string;
   description?: string;
   intent?: string; // README/Intent content for AI to understand overall project goals
+  coverImageData?: string | null; // Optional data URL for project cover image
   createdAt: string;
   updatedAt: string;
   // Document IDs in this project (ordered)

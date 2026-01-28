@@ -1,5 +1,5 @@
 // IPC Handlers for Desktop App
-import { ipcMain, BrowserWindow, shell } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
 import updater from 'electron-updater';
 import { documentService } from './services/documentService.js';
 import { chatHistoryService } from './services/chatHistoryService.js';
@@ -527,6 +527,35 @@ Rephrased text:`;
         }
         catch (error) {
             console.error('IPC project:delete error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('project:setCover', async (_, projectId) => {
+        try {
+            const result = await dialog.showOpenDialog({
+                title: 'Select cover image',
+                properties: ['openFile'],
+                filters: [
+                    { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] },
+                ],
+            });
+            if (result.canceled || result.filePaths.length === 0) {
+                return { success: false, canceled: true };
+            }
+            const filePath = result.filePaths[0];
+            const ext = path.extname(filePath).toLowerCase();
+            const mimeType = ext === '.png' ? 'image/png' :
+                ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+                    ext === '.webp' ? 'image/webp' :
+                        'application/octet-stream';
+            const fileBuffer = await fs.readFile(filePath);
+            const base64 = fileBuffer.toString('base64');
+            const dataUrl = `data:${mimeType};base64,${base64}`;
+            const updated = await projectService.update(projectId, { coverImageData: dataUrl });
+            return { success: true, project: updated };
+        }
+        catch (error) {
+            console.error('IPC project:setCover error:', error);
             throw error;
         }
     });

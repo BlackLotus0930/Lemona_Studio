@@ -95,6 +95,8 @@ export const projectService = {
             project.description = updates.description;
         if (updates.intent !== undefined)
             project.intent = updates.intent;
+        if (updates.coverImageData !== undefined)
+            project.coverImageData = updates.coverImageData;
         project.updatedAt = new Date().toISOString();
         const filePath = getProjectPath(id);
         await fs.writeFile(filePath, JSON.stringify(project, null, 2));

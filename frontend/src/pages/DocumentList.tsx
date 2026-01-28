@@ -7,11 +7,14 @@ import { useTheme } from '../contexts/ThemeContext'
 // @ts-ignore
 import SearchIcon from '@mui/icons-material/Search'
 // @ts-ignore
-import AddIcon from '@mui/icons-material/Add'
+import MoreHorizIcon from '@mui/icons-material/MoreHoriz'
 // @ts-ignore
-import MoreVertIcon from '@mui/icons-material/MoreVert'
+import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined'
+// @ts-ignore
+import ImageNotSupportedOutlinedIcon from '@mui/icons-material/ImageNotSupportedOutlined'
+// @ts-ignore
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import logoImage from '../assets/lemonalogo.png'
-import thinkingMemeImage from '../assets/thinkingmeme.png'
 
 const FIRST_PROJECT_DOC_TITLE = 'Lemona'
 const FIRST_PROJECT_WORLDLAB_TITLE = 'New world 1.lab'
@@ -163,17 +166,18 @@ export default function DocumentList() {
   const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [hoveredProjectId, setHoveredProjectId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteConfirmProjectId, setDeleteConfirmProjectId] = useState<string | null>(null)
   const navigate = useNavigate()
   const location = useLocation()
   
-  const bgColor = theme === 'dark' ? '#070707' : '#ffffff'
-  const brighterBg = theme === 'dark' ? '#181818' : '#f1f3f4'
-  const borderColor = theme === 'dark' ? '#2d2d2d' : '#dadce0'
-  const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
-  const secondaryTextColor = theme === 'dark' ? '#858585' : '#5f6368'
+  const bgColor = theme === 'dark' ? '#141414' : '#ffffff'
+  const brighterBg = theme === 'dark' ? '#1c1c1c' : '#f1f3f4'
+  const borderColor = theme === 'dark' ? '#2a2a2a' : '#dadce0'
+  const textColor = theme === 'dark' ? '#e6e6e6' : '#202124'
+  const secondaryTextColor = theme === 'dark' ? '#9aa0a6' : '#5f6368'
   
   // Dropdown menu colors (matching FileExplorer)
   const dropdownBg = theme === 'dark' ? '#1a1a1a' : '#ffffff'
@@ -503,6 +507,39 @@ export default function DocumentList() {
     }
   }
 
+  const handleChangeCover = async (projectId: string) => {
+    try {
+      const result = await projectApi.setCover(projectId)
+      if (result?.canceled) return
+      if (result?.project?.coverImageData !== undefined) {
+        setProjects(prev => prev.map((project: any) =>
+          project.id === projectId
+            ? { ...project, coverImageData: result.project.coverImageData }
+            : project
+        ))
+      } else {
+        await loadProjects()
+      }
+    } catch (error) {
+      console.error('Failed to change cover:', error)
+      alert('Failed to change cover. Please try again.')
+    }
+  }
+
+  const handleRemoveCover = async (projectId: string) => {
+    try {
+      await projectApi.update(projectId, { coverImageData: '' })
+      setProjects(prev => prev.map((project: any) =>
+        project.id === projectId
+          ? { ...project, coverImageData: '' }
+          : project
+      ))
+    } catch (error) {
+      console.error('Failed to remove cover:', error)
+      alert('Failed to remove cover. Please try again.')
+    }
+  }
+
   const handleDeleteProject = (projectId: string) => {
     setDeleteConfirmProjectId(projectId)
     setOpenMenuId(null)
@@ -555,7 +592,7 @@ export default function DocumentList() {
         height: '40px',
         padding: '0 16px',
         borderBottom: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'}`,
-        backgroundColor: bgColor,
+        backgroundColor: theme === 'dark' ? '#121212' : bgColor,
         userSelect: 'none',
         flexShrink: 0,
         // @ts-ignore - WebkitAppRegion is a valid Electron CSS property
@@ -574,7 +611,7 @@ export default function DocumentList() {
               background: 'transparent',
               cursor: 'pointer',
               padding: '2px 4px',
-              borderRadius: '6px'
+              borderRadius: '4px'
             }}
           >
             <img 
@@ -607,7 +644,7 @@ export default function DocumentList() {
               display: 'flex',
               alignItems: 'center',
               backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
-              borderRadius: '6px',
+              borderRadius: '4px',
               padding: '4px 10px',
               gap: '6px',
               height: '24px',
@@ -634,7 +671,7 @@ export default function DocumentList() {
                   background: 'transparent',
                   outline: 'none',
                   flex: 1,
-                  fontSize: '12px',
+                  fontSize: '11px',
                   color: textColor,
                   fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                 }}
@@ -758,7 +795,7 @@ export default function DocumentList() {
         <div style={{
           maxWidth: '1200px',
           margin: '0 auto',
-          padding: '28px 24px',
+          padding: '44px 24px 28px 24px',
         }}>
         {/* Header */}
         <div style={{
@@ -768,124 +805,54 @@ export default function DocumentList() {
           justifyContent: 'space-between',
         }}>
           <div>
-            <style>{`
-              @keyframes gradient-flow {
-                0% {
-                  background-position: 0% 50%;
-                }
-                50% {
-                  background-position: 100% 50%;
-                }
-                100% {
-                  background-position: 0% 50%;
-                }
-              }
-            `}</style>
             <h1 style={{ 
-              fontSize: '26px', 
-              fontWeight: 600, 
+              fontSize: '20px', 
+              fontWeight: 500, 
               color: textColor,
               margin: 0,
-              marginBottom: '4px',
+              marginBottom: '6px',
               fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
             } as React.CSSProperties}>
-              Projects
+              Workspace
             </h1>
+            <div style={{
+              fontSize: '12px',
+              color: secondaryTextColor,
+              fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+            }}>
+              Manage and access your writing projects
+            </div>
           </div>
-        </div>
-
-        {/* Floating + button at bottom-right */}
-        <div style={{ position: 'fixed', bottom: '32px', right: '32px', zIndex: 1000 }}>
-          {/* Pulsing ring effect */}
-          <div
+          <button
+            onClick={handleCreateProject}
             style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: '64px',
-              height: '64px',
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, rgba(244, 114, 182, 0.2) 0%, rgba(236, 72, 153, 0.2) 50%, rgba(251, 113, 133, 0.2) 100%)',
-              animation: 'pulse-ring 3.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-              pointerEvents: 'none',
+              height: '34px',
+              padding: '0 14px',
+              marginTop: '6px',
+              borderRadius: '4px',
+              border: 'none',
+              backgroundColor: 'transparent',
+              color: theme === 'dark' ? '#d8d8d8' : '#1f2937',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+              boxShadow: `inset 0 -1px 0 ${theme === 'dark' ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.18)'}`,
+              transition: 'background-color 0.15s, box-shadow 0.15s',
             }}
-          />
-          <style>{`
-            @keyframes pulse-ring {
-              0% {
-                transform: translate(-50%, -50%) scale(1);
-                opacity: 0.6;
-              }
-              50% {
-                transform: translate(-50%, -50%) scale(1.3);
-                opacity: 0.3;
-              }
-              100% {
-                transform: translate(-50%, -50%) scale(1.6);
-                opacity: 0;
-              }
-            }
-          `}</style>
-        <button
-          onClick={handleCreateProject}
-          style={{
-              position: 'relative',
-              width: '64px',
-              height: '64px',
-            borderRadius: '50%',
-            border: 'none',
-              background: theme === 'dark' 
-                ? 'linear-gradient(135deg, #f585b8 0%, #f05ba3 50%, #fc7f95 100%)'
-                : 'linear-gradient(135deg, #f585b8 0%, #f05ba3 50%, #fc7f95 100%)',
-            color: 'white',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-              boxShadow: theme === 'dark'
-                ? '0 8px 32px rgba(244, 114, 182, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1) inset'
-                : '0 8px 32px rgba(244, 114, 182, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.2) inset',
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-              overflow: 'hidden',
-            } as React.CSSProperties}
-          onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.15) rotate(90deg)'
-              e.currentTarget.style.boxShadow = theme === 'dark'
-                ? '0 12px 48px rgba(244, 114, 182, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.15) inset'
-                : '0 12px 48px rgba(244, 114, 182, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.25) inset'
-          }}
-          onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1) rotate(0deg)'
-              e.currentTarget.style.boxShadow = theme === 'dark'
-                ? '0 8px 32px rgba(244, 114, 182, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1) inset'
-                : '0 8px 32px rgba(244, 114, 182, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.2) inset'
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)'
+              e.currentTarget.style.boxShadow = `inset 0 -2px 0 ${theme === 'dark' ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.35)'}`
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.boxShadow = `inset 0 -1px 0 ${theme === 'dark' ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.18)'}`
             }}
           >
-            {/* Animated gradient overlay */}
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0) 100%)',
-                borderRadius: '50%',
-                pointerEvents: 'none',
-              }}
-            />
-            {/* Icon with glow effect */}
-            <AddIcon 
-              style={{ 
-                fontSize: '32px',
-                filter: 'drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2))',
-                transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                position: 'relative',
-                zIndex: 1,
-              }} 
-            />
-        </button>
+            Create project
+          </button>
         </div>
 
 
@@ -918,40 +885,25 @@ export default function DocumentList() {
               padding: '150px 20px 60px 20px',
               minHeight: '400px'
             }}>
-              <img 
-                src={thinkingMemeImage} 
-                alt="Thinking meme"
-                style={{
-                  width: '150px',
-                  height: 'auto',
-                  marginBottom: '20px',
-                  filter: theme === 'dark' 
-                    ? 'invert(1) grayscale(1) brightness(0.4)' 
-                    : 'grayscale(1) brightness(0.6)',
-                  opacity: theme === 'light' ? 0.25 : 1,
-                  transition: 'filter 0.3s ease, opacity 0.3s ease'
-                }}
-              />
               <p style={{ 
-                fontSize: '16px', 
-                color: theme === 'light' ? '#999999' : '#666666',
-                opacity: theme === 'light' ? 0.8 : 1,
-                fontWeight: 400,
+                fontSize: '14px', 
+                color: secondaryTextColor,
+                fontWeight: 500,
                 fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                 lineHeight: '1.6',
                 textAlign: 'center',
                 margin: 0,
-                transition: 'color 0.3s ease, opacity 0.3s ease'
+                transition: 'color 0.2s ease'
               }}>
-                "Hmm... that pink button must be important..."
+                No projects yet. Create one to get started.
               </p>
             </div>
           )
         ) : (
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-            gap: '20px'
+            gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+            gap: '18px'
           }}>
             {filteredProjects.map((project: any) => {
               const lastOpened = new Date(project.updatedAt)
@@ -975,57 +927,59 @@ export default function DocumentList() {
               
               return (
               <div
-                  key={project.id}
-                  style={{
-                  border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'}`,
-                  borderRadius: '6px',
-                    overflow: 'visible',
-                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                    backgroundColor: theme === 'dark' ? '#0a0a0a' : '#ffffff',
-                    boxShadow: theme === 'dark' 
-                      ? '0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05) inset' 
-                      : '0 2px 8px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04) inset',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    position: 'relative',
-                    cursor: 'pointer',
-                    zIndex: openMenuId === project.id ? 10000 : 1,
+                key={project.id}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '3px',
+                  position: 'relative',
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.boxShadow = theme === 'dark' 
-                    ? '0 8px 32px rgba(244, 114, 182, 0.12), 0 8px 24px rgba(0,0,0,0.6), 0 0 0 1px rgba(244, 114, 182, 0.2) inset' 
-                    : '0 8px 32px rgba(244, 114, 182, 0.1), 0 8px 24px rgba(0,0,0,0.12), 0 0 0 1px rgba(244, 114, 182, 0.15) inset'
-                  e.currentTarget.style.transform = 'translateY(-4px)'
-                  e.currentTarget.style.borderColor = theme === 'dark' 
-                    ? 'rgba(244, 114, 182, 0.3)' 
-                    : 'rgba(244, 114, 182, 0.25)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.boxShadow = theme === 'dark' 
-                    ? '0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05) inset' 
-                    : '0 2px 8px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04) inset'
-                  e.currentTarget.style.transform = 'translateY(0)'
-                  e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.08)'
-                }}
+                onMouseEnter={() => setHoveredProjectId(project.id)}
+                onMouseLeave={() => setHoveredProjectId(prev => prev === project.id ? null : prev)}
               >
-                  {/* Preview Section - Google Docs-like aesthetic */}
-                <div 
-                  onClick={() => handleOpenProject(project.id)}
+                <div
                   style={{
-                    height: '200px',
-                    background: theme === 'dark' 
-                      ? '#1a1a1a'
-                      : '#ffffff',
-                    padding: '10px 20px 20px 20px',
+                    border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.08)'}`,
+                    borderRadius: '6px',
                     overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    cursor: 'pointer',
+                    transition: 'border-color 0.15s, box-shadow 0.15s',
+                    backgroundColor: theme === 'dark' ? '#151515' : '#ffffff',
+                    boxShadow: theme === 'dark' 
+                      ? '0 2px 8px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.04)' 
+                      : '0 2px 8px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04) inset',
                     position: 'relative',
-                    borderTopLeftRadius: '12px',
-                    borderTopRightRadius: '12px',
-                    borderBottom: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)'}`,
-                  }}>
+                    zIndex: openMenuId === project.id ? 10000 : 1,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.boxShadow = theme === 'dark' 
+                      ? '0 6px 16px rgba(0,0,0,0.5)' 
+                      : '0 6px 16px rgba(0,0,0,0.14)'
+                    e.currentTarget.style.borderColor = theme === 'dark' 
+                      ? 'rgba(255, 255, 255, 0.12)' 
+                      : 'rgba(0, 0, 0, 0.12)'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.boxShadow = theme === 'dark' 
+                      ? '0 2px 8px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.04)' 
+                      : '0 2px 8px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04) inset'
+                    e.currentTarget.style.borderColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.08)'
+                  }}
+                >
+                  {/* Preview Section - Google Docs-like aesthetic */}
+                  <div 
+                    onClick={() => handleOpenProject(project.id)}
+                    style={{
+                      height: '180px',
+                      background: theme === 'dark' 
+                        ? '#121212'
+                        : '#ffffff',
+                      padding: project.coverImageData ? '0' : '10px 20px 20px 20px',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      cursor: 'pointer',
+                      position: 'relative',
+                    }}>
                     {/* Google Docs-like paper effect */}
                     <div style={{
                       position: 'absolute',
@@ -1033,21 +987,31 @@ export default function DocumentList() {
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      background: theme === 'dark'
-                        ? 'repeating-linear-gradient(transparent, transparent 31px, rgba(255, 255, 255, 0.03) 31px, rgba(255, 255, 255, 0.03) 32px)'
-                        : 'repeating-linear-gradient(transparent, transparent 31px, rgba(0, 0, 0, 0.02) 31px, rgba(0, 0, 0, 0.02) 32px)',
+                      background: 'none',
                       pointerEvents: 'none',
                     }} />
                     
-                    {/* Document header */}
-                    {firstDoc && (
+                    {/* Cover image */}
+                    {project.coverImageData ? (
+                      <img
+                        src={project.coverImageData}
+                        alt=""
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                        }}
+                      />
+                    ) : firstDoc && (
                       <div style={{
                         marginBottom: '8px',
                         position: 'relative',
                         zIndex: 1,
                       }}>
                         <span style={{
-                          fontSize: '12px',
+                          fontSize: '11px',
                           fontWeight: 500,
                           color: theme === 'dark' ? '#9aa0a6' : '#5f6368',
                           fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
@@ -1056,7 +1020,7 @@ export default function DocumentList() {
                     )}
                     
                     {/* Text preview */}
-                    {preview ? (
+                    {!project.coverImageData && preview ? (
                       <div style={{
                         fontSize: '13px',
                         color: theme === 'dark' ? '#e8eaed' : '#202124',
@@ -1075,58 +1039,221 @@ export default function DocumentList() {
                       }}>
                         {preview}
                       </div>
-                    ) : (
+                    ) : !project.coverImageData && (
                       <div style={{
                         display: 'flex',
-                        flexDirection: 'column',
                         alignItems: 'center',
                         justifyContent: 'center',
                         width: '100%',
                         height: '100%',
-                        opacity: 0.4,
                         position: 'relative',
                         zIndex: 1,
                       }}>
                         <div style={{
-                          fontSize: '48px',
-                          marginBottom: '8px',
-                        }}>📄</div>
-                        <div style={{
-                          fontSize: '13px',
+                          fontSize: '12px',
                           color: secondaryTextColor,
                           fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                        }}>No content yet</div>
+                          letterSpacing: '0.02em',
+                          textTransform: 'uppercase',
+                        }}>No preview</div>
                       </div>
                     )}
                     
                     {/* Fade gradient at bottom */}
-                    <div style={{
-                      position: 'absolute',
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      height: '50px',
-                      background: theme === 'dark'
-                        ? 'linear-gradient(to top, rgba(26, 26, 26, 1), transparent)'
-                        : 'linear-gradient(to top, rgba(255, 255, 255, 1), transparent)',
-                      pointerEvents: 'none',
-                    }} />
+                    {!project.coverImageData && (
+                      <div style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: '50px',
+                        background: theme === 'dark'
+                          ? 'linear-gradient(to top, rgba(18, 18, 18, 1), transparent)'
+                          : 'linear-gradient(to top, rgba(255, 255, 255, 1), transparent)',
+                        pointerEvents: 'none',
+                      }} />
+                    )}
+                </div>
+                </div>
+                {/* Three-dot menu button */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '8px',
+                    right: '8px',
+                    zIndex: openMenuId === project.id ? 10010 : 1,
+                    opacity: hoveredProjectId === project.id || openMenuId === project.id ? 1 : 0,
+                    pointerEvents: hoveredProjectId === project.id || openMenuId === project.id ? 'auto' : 'none',
+                    transition: 'opacity 0.15s ease',
+                  }}
+                >
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setOpenMenuId(openMenuId === project.id ? null : project.id)
+                    }}
+                    style={{
+                      padding: '4px',
+                      border: 'none',
+                      backgroundColor: 'transparent',
+                      cursor: 'pointer',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: secondaryTextColor,
+                      transition: 'all 0.2s ease',
+                      width: '28px',
+                      height: '28px',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.opacity = '0.85'
+                      e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.opacity = '1'
+                      e.currentTarget.style.backgroundColor = 'transparent'
+                    }}
+                  >
+                    <MoreHorizIcon style={{ fontSize: '18px' }} />
+                  </button>
+                  
+                  {/* Dropdown menu */}
+                  {openMenuId === project.id && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 'calc(100% + 8px)',
+                        backgroundColor: dropdownBg,
+                        border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
+                        borderRadius: '4px',
+                        boxShadow: theme === 'dark' 
+                          ? '0 8px 32px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05) inset' 
+                          : '0 8px 32px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05) inset',
+                        zIndex: 10010,
+                        minWidth: '150px',
+                        overflow: 'hidden',
+                        padding: '4px',
+                        backdropFilter: theme === 'dark' ? 'blur(20px)' : 'blur(10px)',
+                        WebkitBackdropFilter: theme === 'dark' ? 'blur(20px)' : 'blur(10px)',
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleChangeCover(project.id)
+                          setOpenMenuId(null)
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '6px 12px',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          fontSize: '12px',
+                          fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                          color: dropdownTextColor,
+                          textAlign: 'left',
+                          transition: 'all 0.2s ease',
+                          borderRadius: '4px',
+                          fontWeight: 400,
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = theme === 'dark' 
+                            ? 'rgba(255, 255, 255, 0.08)' 
+                            : 'rgba(0, 0, 0, 0.06)'
+                          e.currentTarget.style.color = dropdownTextColor
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'transparent'
+                          e.currentTarget.style.color = dropdownTextColor
+                        }}
+                      >
+                        <ImageOutlinedIcon style={{ fontSize: '14px', marginRight: '8px', opacity: 0.7 }} />
+                        Change cover
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleRemoveCover(project.id)
+                          setOpenMenuId(null)
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '6px 12px',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          fontSize: '12px',
+                          fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                          color: dropdownTextColor,
+                          textAlign: 'left',
+                          transition: 'all 0.2s ease',
+                          borderRadius: '4px',
+                          fontWeight: 400,
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = theme === 'dark' 
+                            ? 'rgba(255, 255, 255, 0.08)' 
+                            : 'rgba(0, 0, 0, 0.06)'
+                          e.currentTarget.style.color = dropdownTextColor
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'transparent'
+                          e.currentTarget.style.color = dropdownTextColor
+                        }}
+                      >
+                        <ImageNotSupportedOutlinedIcon style={{ fontSize: '14px', marginRight: '8px', opacity: 0.7 }} />
+                        Remove cover
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDeleteProject(project.id)
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '6px 12px',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          fontSize: '12px',
+                          fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                          color: dropdownTextColor,
+                          textAlign: 'left',
+                          transition: 'all 0.2s ease',
+                          borderRadius: '4px',
+                          fontWeight: 400,
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = theme === 'dark' 
+                            ? 'rgba(255, 255, 255, 0.08)' 
+                            : 'rgba(0, 0, 0, 0.06)'
+                          e.currentTarget.style.color = dropdownTextColor
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'transparent'
+                          e.currentTarget.style.color = dropdownTextColor
+                        }}
+                      >
+                        <DeleteOutlineIcon style={{ fontSize: '14px', marginRight: '8px', opacity: 0.7 }} />
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                   {/* Title and Date Section */}
-                <div style={{
-                    padding: '12px 16px',
-                    flex: 1,
-                  display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px',
-                    position: 'relative',
-                    background: theme === 'dark' ? '#0a0a0a' : '#ffffff',
-                    borderBottomLeftRadius: '12px',
-                    borderBottomRightRadius: '12px',
-                  }}>
-                    {/* Title row with three-dot menu */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
+                  {/* Title row with three-dot menu */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative', margin: '6px 0 2px 0' }}>
                       {renamingId === project.id ? (
                         <input
                           type="text"
@@ -1156,7 +1283,7 @@ export default function DocumentList() {
                             fontWeight: 600,
                             color: textColor,
                             border: `1px solid ${borderColor}`,
-                            borderRadius: '6px',
+                            borderRadius: '4px',
                             padding: '4px 8px',
                             backgroundColor: brighterBg,
                             outline: 'none',
@@ -1168,21 +1295,25 @@ export default function DocumentList() {
                         />
                       ) : (
                         <div 
-                          onClick={() => handleOpenProject(project.id)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setRenamingId(project.id)
+                            setRenameValue(project.title)
+                          }}
                           style={{
-                            fontSize: '17px',
-                            fontWeight: 600,
+                            fontSize: '13px',
+                            fontWeight: 500,
                             color: textColor,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
-                            cursor: 'pointer',
+                            cursor: 'text',
                             flex: 1,
                             fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
                             transition: 'color 0.2s ease',
                           }}
                           onMouseEnter={(e) => {
-                            e.currentTarget.style.color = theme === 'dark' ? '#f472b6' : '#ec4899'
+                            e.currentTarget.style.color = theme === 'dark' ? '#f0f0f0' : '#1f2937'
                           }}
                           onMouseLeave={(e) => {
                             e.currentTarget.style.color = textColor
@@ -1192,172 +1323,36 @@ export default function DocumentList() {
                         </div>
                       )}
                       
-                      {/* Three-dot menu button */}
-                      <div style={{ position: 'relative', flexShrink: 0, zIndex: openMenuId === project.id ? 10010 : 1 }}>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setOpenMenuId(openMenuId === project.id ? null : project.id)
-                          }}
-                          style={{
-                            padding: '4px',
-                            border: 'none',
-                            backgroundColor: 'transparent',
-                            cursor: 'pointer',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: secondaryTextColor,
-                            transition: 'all 0.2s ease',
-                            width: '28px',
-                            height: '28px',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : '#f1f3f4'
-                            e.currentTarget.style.color = theme === 'dark' ? '#ffffff' : '#202124'
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent'
-                            e.currentTarget.style.color = secondaryTextColor
-                          }}
-                        >
-                          <MoreVertIcon style={{ fontSize: '18px' }} />
-                        </button>
-                        
-                         {/* Dropdown menu */}
-                         {openMenuId === project.id && (
-                           <div
-                             style={{
-                               position: 'absolute',
-                               top: 'calc(100% + 8px)',
-                               left: '50%',
-                               transform: 'translateX(-50%)',
-                               backgroundColor: dropdownBg,
-                               border: `1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'}`,
-                               borderRadius: '6px',
-                               boxShadow: theme === 'dark' 
-                                 ? '0 8px 32px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05) inset' 
-                                 : '0 8px 32px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05) inset',
-                               zIndex: 10010,
-                               minWidth: '160px',
-                               overflow: 'hidden',
-                               padding: '4px',
-                               backdropFilter: theme === 'dark' ? 'blur(20px)' : 'blur(10px)',
-                               WebkitBackdropFilter: theme === 'dark' ? 'blur(20px)' : 'blur(10px)',
-                             }}
-                             onClick={(e) => e.stopPropagation()}
-                           >
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setRenamingId(project.id)
-                              setRenameValue(project.title)
-                              setOpenMenuId(null)
-                            }}
-                            style={{
-                              width: '100%',
-                              padding: '10px 16px',
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              fontSize: '14px',
-                              fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                              color: dropdownTextColor,
-                              textAlign: 'left',
-                              transition: 'all 0.2s ease',
-                              borderRadius: '6px',
-                              fontWeight: 500,
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.backgroundColor = theme === 'dark' 
-                                ? 'rgba(255, 255, 255, 0.05)' 
-                                : 'rgba(0, 0, 0, 0.03)'
-                              e.currentTarget.style.color = dropdownTextColor
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.backgroundColor = 'transparent'
-                              e.currentTarget.style.color = dropdownTextColor
-                            }}
-                          >
-                            Rename
-                          </button>
-                          <div style={{
-                            height: '1px',
-                            backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
-                            margin: '4px 8px',
-                          }} />
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDeleteProject(project.id)
-                            }}
-                            style={{
-                              width: '100%',
-                              padding: '10px 16px',
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              fontSize: '14px',
-                              fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                              color: '#ef4444',
-                              textAlign: 'left',
-                              transition: 'all 0.2s ease',
-                              borderRadius: '6px',
-                              fontWeight: 500,
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.backgroundColor = theme === 'dark' 
-                                ? 'rgba(239, 68, 68, 0.15)' 
-                                : 'rgba(239, 68, 68, 0.08)'
-                              e.currentTarget.style.color = '#dc2626'
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.backgroundColor = 'transparent'
-                              e.currentTarget.style.color = '#ef4444'
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      )}
-                      </div>
                     </div>
-                    {project.description && (
-                      <div 
-                        onClick={() => handleOpenProject(project.id)}
-                        style={{
-                          fontSize: '13px',
-                          color: secondaryTextColor,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          cursor: 'pointer'
-                        }}>
-                        {project.description}
-                      </div>
-                    )}
-                <div 
-                  onClick={() => handleOpenProject(project.id)}
-                  style={{
-                  fontSize: '13px',
-                  color: secondaryTextColor,
+                  {project.description && (
+                    <div 
+                      style={{
+                        fontSize: '12px',
+                        color: secondaryTextColor,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        cursor: 'default',
+                        margin: '0 0 2px 0',
+                      }}>
+                      {project.description}
+                    </div>
+                  )}
+                  <div 
+                    style={{
+                      fontSize: '10px',
+                      color: secondaryTextColor,
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px',
-                      marginTop: '2px',
-                      cursor: 'pointer',
+                      gap: '4px',
+                      margin: '0 0 6px 0',
+                      cursor: 'default',
                       fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-                }}>
-                      <span style={{ fontWeight: 500 }}>{project.actualDocumentCount ?? project.documentIds?.length ?? 0} {project.actualDocumentCount === 1 ? 'file' : 'files'}</span>
-                      <span style={{ opacity: 0.5 }}>•</span>
-                      <span>{formatDate(lastOpened)}</span>
-                    </div>
-                </div>
+                    }}>
+                    <span style={{ fontWeight: 400 }}>{project.actualDocumentCount ?? project.documentIds?.length ?? 0} {project.actualDocumentCount === 1 ? 'file' : 'files'}</span>
+                    <span style={{ opacity: 0.5 }}>•</span>
+                    <span>{formatDate(lastOpened)}</span>
+                  </div>
               </div>
               )
             })}
@@ -1388,7 +1383,7 @@ export default function DocumentList() {
             style={{
               backgroundColor: dropdownBg,
               border: `1px solid ${dropdownBorder}`,
-              borderRadius: '6px',
+              borderRadius: '4px',
               padding: '24px',
               minWidth: '400px',
               maxWidth: '500px',
@@ -1429,7 +1424,7 @@ export default function DocumentList() {
                 style={{
                   padding: '8px 16px',
                   border: `1px solid ${dropdownBorder}`,
-                  borderRadius: '6px',
+                  borderRadius: '4px',
                   backgroundColor: 'transparent',
                   color: dropdownTextColor,
                   cursor: 'pointer',
@@ -1451,7 +1446,7 @@ export default function DocumentList() {
                 style={{
                   padding: '8px 16px',
                   border: 'none',
-                  borderRadius: '6px',
+                  borderRadius: '4px',
                   backgroundColor: '#d32f2f',
                   color: '#ffffff',
                   cursor: 'pointer',

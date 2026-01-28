@@ -142,7 +142,7 @@ async function createWindow() {
     show: false, // Don't show window until content is ready (prevents white flash)
     // Use native window controls overlay on Windows (Snap Layouts support)
     titleBarOverlay: shouldUseNativeControlsOverlay ? {
-      color: '#141414',
+      color: '#121212',
       symbolColor: '#bcbcbc',
       height: 36
     } : undefined,

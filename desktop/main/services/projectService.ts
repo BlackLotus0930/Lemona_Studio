@@ -100,7 +100,7 @@ export const projectService = {
   /**
    * Update project basic info
    */
-  async update(id: string, updates: Partial<Pick<Project, 'title' | 'description' | 'intent'>>): Promise<Project | null> {
+  async update(id: string, updates: Partial<Pick<Project, 'title' | 'description' | 'intent' | 'coverImageData'>>): Promise<Project | null> {
     const project = await this.getById(id)
     if (!project) {
       return null
@@ -109,6 +109,7 @@ export const projectService = {
     if (updates.title !== undefined) project.title = updates.title
     if (updates.description !== undefined) project.description = updates.description
     if (updates.intent !== undefined) project.intent = updates.intent
+    if (updates.coverImageData !== undefined) project.coverImageData = updates.coverImageData
     
     project.updatedAt = new Date().toISOString()
 
