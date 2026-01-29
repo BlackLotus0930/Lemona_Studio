@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useImperativeHandle, forwardRef, useLayout
 import { useTheme } from '../../contexts/ThemeContext'
 import { Document } from '@shared/types'
 import * as pdfjsLib from 'pdfjs-dist'
+import * as pdfjsViewer from 'pdfjs-dist/web/pdf_viewer.mjs'
+import 'pdfjs-dist/web/pdf_viewer.css'
 // Import worker URL using Vite's ?url suffix - this only imports the URL string, not the worker code
 // This is the recommended way for Vite and ensures proper worker initialization
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -68,6 +70,7 @@ export interface PDFViewerSearchHandle {
 const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewerProps>(
   ({ document, isAIPanelOpen = false, aiPanelWidth = 20 }, ref) => {
     const { theme } = useTheme()
+    const TextLayerBuilder = (pdfjsViewer as any).TextLayerBuilder
     
     // PDF state
     const [pdfDocument, setPdfDocument] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
@@ -99,6 +102,10 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     const [navBarLeft, setNavBarLeft] = useState<string | null>(null)
     const navBarLeftRef = useRef<string | null>(null) // Track previous position to avoid unnecessary updates
     const renderTaskRef = useRef<any>(null) // Track current render task to cancel if needed
+    const textLayerTaskRef = useRef<any>(null)
+    const scrollTextLayerTaskRefs = useRef<Map<number, any>>(new Map())
+    const textLayerRef = useRef<HTMLDivElement>(null)
+    const scrollTextLayerRefs = useRef<Map<number, HTMLDivElement>>(new Map())
     
     // Inline search state
     const [showInlineSearch, setShowInlineSearch] = useState(false)
@@ -201,6 +208,60 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
     }
 
     // Render PDF page to canvas
+    const renderTextLayerForPage = async (
+      page: pdfjsLib.PDFPageProxy,
+      viewport: pdfjsLib.PageViewport,
+      textLayerElement: HTMLDivElement | null,
+      taskStore?: { current: any } | null,
+      pageNumber?: number
+    ) => {
+      if (!textLayerElement) return
+      textLayerElement.innerHTML = ''
+      textLayerElement.style.width = `${viewport.width}px`
+      textLayerElement.style.height = `${viewport.height}px`
+      textLayerElement.style.setProperty('--scale-factor', `${viewport.scale}`)
+      textLayerElement.style.setProperty('--user-unit', `${viewport.userUnit || 1}`)
+      textLayerElement.style.setProperty('--total-scale-factor', `${viewport.scale * (viewport.userUnit || 1)}`)
+
+      try {
+        if (taskStore?.current?.cancel) {
+          try {
+            taskStore.current.cancel()
+          } catch {
+          }
+        } else if (pageNumber !== undefined) {
+          const prevTask = scrollTextLayerTaskRefs.current.get(pageNumber)
+          if (prevTask?.cancel) {
+            try {
+              prevTask.cancel()
+            } catch {
+            }
+          }
+        }
+
+        const textLayerBuilder = new TextLayerBuilder({
+          pdfPage: page,
+          onAppend: (textLayerDiv: HTMLDivElement) => {
+            textLayerElement.innerHTML = ''
+            textLayerElement.appendChild(textLayerDiv)
+          },
+        })
+
+        if (taskStore) {
+          taskStore.current = textLayerBuilder
+        } else if (pageNumber !== undefined) {
+          scrollTextLayerTaskRefs.current.set(pageNumber, textLayerBuilder)
+        }
+
+        await textLayerBuilder.render({ viewport })
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err)
+        if (errorMessage.includes('cancelled') || errorMessage.includes('cancel')) {
+          return
+        }
+      }
+    }
+
     const renderPage = async (pageNum: number) => {
       if (!pdfDocument || !canvasRef.current) return
 
@@ -254,6 +315,8 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
         renderTaskRef.current = renderTask
         
         await renderTask.promise
+
+        await renderTextLayerForPage(page, viewport, textLayerRef.current, textLayerTaskRef)
         
         // Only update state if this render task is still the current one
         // (prevents race conditions if user navigated away)
@@ -277,6 +340,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
         setError(true)
         setLoading(false)
         renderTaskRef.current = null
+        textLayerTaskRef.current = null
       }
     }
 
@@ -307,6 +371,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
         
         for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
           const canvas = scrollCanvasRefs.current.get(pageNum)
+          const textLayerElement = scrollTextLayerRefs.current.get(pageNum)
           if (!canvas) continue
 
           const page = await pdfDocument.getPage(pageNum)
@@ -329,6 +394,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
           }
           
           await page.render(renderContext as any).promise
+          await renderTextLayerForPage(page, viewport, textLayerElement || null, null, pageNum)
         }
         
         setLoading(false)
@@ -349,6 +415,24 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
           }
           renderTaskRef.current = null
         }
+        if (textLayerTaskRef.current?.cancel) {
+          try {
+            textLayerTaskRef.current.cancel()
+          } catch (cancelError) {
+            // Ignore cancellation errors
+          }
+          textLayerTaskRef.current = null
+        }
+        scrollTextLayerTaskRefs.current.forEach((task) => {
+          if (task?.cancel) {
+            try {
+              task.cancel()
+            } catch (cancelError) {
+              // Ignore cancellation errors
+            }
+          }
+        })
+        scrollTextLayerTaskRefs.current.clear()
       }
     }, [])
 
@@ -364,13 +448,23 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
           }
           renderTaskRef.current = null
         }
+        if (textLayerTaskRef.current?.cancel) {
+          try {
+            textLayerTaskRef.current.cancel()
+          } catch (cancelError) {
+            // Ignore cancellation errors
+          }
+          textLayerTaskRef.current = null
+        }
+        scrollTextLayerTaskRefs.current.clear()
         setPdfDocument(null)
         setError(false)
         previousDocIdRef.current = null
         return
       }
 
-      const isPDF = document.title.toLowerCase().endsWith('.pdf')
+      const documentFileName = document.metadata?.fileName || document.title
+      const isPDF = documentFileName.toLowerCase().endsWith('.pdf')
       if (!isPDF) {
         // Cancel any ongoing render when document changes
         if (renderTaskRef.current) {
@@ -381,6 +475,15 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
           }
           renderTaskRef.current = null
         }
+        if (textLayerTaskRef.current?.cancel) {
+          try {
+            textLayerTaskRef.current.cancel()
+          } catch (cancelError) {
+            // Ignore cancellation errors
+          }
+          textLayerTaskRef.current = null
+        }
+        scrollTextLayerTaskRefs.current.clear()
         setPdfDocument(null)
         setError(false)
         previousDocIdRef.current = null
@@ -390,7 +493,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
       // Check if same document
       const isSameDocument = previousDocIdRef.current === document.id
       
-      // Parse document content to extract PDF data URL
+      // Parse document content to extract PDF data URL (legacy pdfViewer node)
       try {
         const content = JSON.parse(document.content)
         
@@ -407,7 +510,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
           return null
         }
 
-        const src = findPDFSrc(content)
+        const src = findPDFSrc(content) || `document://${document.id}`
         if (!src) {
           setError(true)
           return
@@ -899,27 +1002,65 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
           padding: '20px',
         }}
       >
+        <style>
+          {`
+            .pdf-text-layer {
+              position: absolute;
+              inset: 0;
+              pointer-events: auto;
+              user-select: text;
+              transform-origin: 0 0;
+            }
+            .pdf-text-layer .textLayer {
+              position: absolute;
+              inset: 0;
+              color: transparent;
+              transform-origin: 0 0;
+              mix-blend-mode: multiply;
+            }
+            .pdf-text-layer .textLayer span {
+              position: absolute;
+              white-space: pre;
+              transform-origin: 0 0;
+              line-height: 1;
+            }
+            .pdf-text-layer ::selection {
+              background: rgba(0, 120, 215, 0.18);
+            }
+          `}
+        </style>
         {/* PDF Canvas */}
         {!error ? (
           isScrollMode ? (
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
               {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
-                <canvas
-                  key={pageNum}
-                  ref={(el) => {
-                    if (el) {
-                      scrollCanvasRefs.current.set(pageNum, el)
-                    } else {
-                      scrollCanvasRefs.current.delete(pageNum)
-                    }
-                  }}
-                  style={{
-                    display: 'block',
-                    boxShadow: 'none',
-                    backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fff',
-                    filter: theme === 'dark' ? 'brightness(0.85)' : 'none',
-                  }}
-                />
+                <div key={pageNum} style={{ position: 'relative' }}>
+                  <canvas
+                    ref={(el) => {
+                      if (el) {
+                        scrollCanvasRefs.current.set(pageNum, el)
+                      } else {
+                        scrollCanvasRefs.current.delete(pageNum)
+                      }
+                    }}
+                    style={{
+                      display: 'block',
+                      boxShadow: 'none',
+                      backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fff',
+                    filter: theme === 'dark' ? 'brightness(0.92)' : 'none',
+                    }}
+                  />
+                  <div
+                    ref={(el) => {
+                      if (el) {
+                        scrollTextLayerRefs.current.set(pageNum, el)
+                      } else {
+                        scrollTextLayerRefs.current.delete(pageNum)
+                      }
+                    }}
+                    className="pdf-text-layer"
+                  />
+                </div>
               ))}
             </div>
           ) : (
@@ -932,6 +1073,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                     left: '50%',
                     transform: 'translate(-50%, -50%)',
                     color: theme === 'dark' ? '#D6D6DD' : '#5f6368',
+                    zIndex: 3,
                   }}
                 >
                   Loading PDF...
@@ -943,9 +1085,10 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
                   display: 'block',
                   boxShadow: 'none',
                   backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fff',
-                  filter: theme === 'dark' ? 'brightness(0.85)' : 'none',
+                  filter: theme === 'dark' ? 'brightness(0.92)' : 'none',
                 }}
               />
+              <div ref={textLayerRef} className="pdf-text-layer" style={{ zIndex: 2 }} />
             </div>
           )
         ) : (

@@ -604,19 +604,10 @@ export const documentService = {
             };
         }
         else if (fileExt === 'pdf') {
-            // PDF file - create a PDF viewer node
-            // For large PDFs, don't store base64 in JSON - use document ID reference instead
-            // The frontend will load the PDF file content on demand via IPC
+            // PDF file - keep content minimal; PDF rendering is handled by the fullscreen viewer
             content = {
                 type: 'doc',
                 content: [
-                    {
-                        type: 'pdfViewer',
-                        attrs: {
-                            src: `document://${id}`, // Use document ID reference instead of base64
-                            fileName: finalFileName,
-                        }
-                    },
                     {
                         type: 'paragraph',
                         content: []

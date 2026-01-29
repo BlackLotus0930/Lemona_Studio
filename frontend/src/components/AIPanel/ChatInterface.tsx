@@ -1131,6 +1131,25 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
   }
 
+  const handleDragOver = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy'
+    }
+  }
+
+  const handleDrop = async (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const files = event.dataTransfer?.files
+    if (!files || files.length === 0) return
+    const newAttachments = await processFiles(files)
+    if (newAttachments.length > 0) {
+      setAttachments(prev => [...prev, ...newAttachments])
+    }
+  }
+
   // Remove attachment
   const handleRemoveAttachment = (attachmentId: string) => {
     setAttachments(prev => prev.filter(att => att.id !== attachmentId))
@@ -2767,6 +2786,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         {/* Unified Container - Text input and buttons together */}
         <div 
           ref={unifiedContainerRef}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
           style={{
             padding: '4px 6px',
             backgroundColor: inputBg,

@@ -11,7 +11,6 @@ import Link from '@tiptap/extension-link'
 import { ResizableImage } from '../Editor/ResizableImage'
 import Highlight from '@tiptap/extension-highlight'
 import { MathExtension } from '../Editor/MathExtension'
-import { PDFViewerExtension } from '../Editor/PDFViewer'
 import { TableExtension } from '../Editor/TableExtension'
 import { ChartExtension } from '../Editor/ChartExtension'
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
@@ -3221,7 +3220,6 @@ export default function Layout(): JSX.Element {
           allowBase64: true,
         }),
         MathExtension,
-        PDFViewerExtension,
         TableExtension,
         ChartExtension,
         IndentExtension,
