@@ -593,7 +593,7 @@ export default function ExportModal({
               border: 'none',
               borderRadius: '8px',
               backgroundColor: hasSelection
-                ? (theme === 'dark' ? '#d9779f' : '#e8a5b8')
+                ? (theme === 'dark' ? '#9b6f83' : '#d6a2b2')
                 : (theme === 'dark' ? '#3e3e42' : '#e0e0e0'),
               color: hasSelection ? '#ffffff' : (theme === 'dark' ? '#858585' : '#9e9e9e'),
               cursor: hasSelection ? 'pointer' : 'not-allowed',
@@ -605,25 +605,25 @@ export default function ExportModal({
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
               transition: 'background-color 0.2s ease, transform 0.15s ease',
               boxShadow: hasSelection
-                ? (theme === 'dark' ? '0 1px 3px rgba(217, 119, 159, 0.2)' : '0 1px 3px rgba(232, 165, 184, 0.2)')
+                ? (theme === 'dark' ? '0 1px 3px rgba(155, 111, 131, 0.2)' : '0 1px 3px rgba(214, 162, 178, 0.2)')
                 : 'none'
             }}
             onMouseEnter={(e) => {
               if (hasSelection) {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#e85a8f' : '#f08ba8'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#b18497' : '#cc8fa3'
                 e.currentTarget.style.transform = 'translateY(-1px)'
                 e.currentTarget.style.boxShadow = theme === 'dark' 
-                  ? '0 2px 6px rgba(232, 90, 143, 0.4)' 
-                  : '0 2px 6px rgba(240, 139, 168, 0.4)'
+                  ? '0 2px 6px rgba(177, 132, 151, 0.35)' 
+                  : '0 2px 6px rgba(225, 178, 194, 0.35)'
               }
             }}
             onMouseLeave={(e) => {
               if (hasSelection) {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#d9779f' : '#e8a5b8'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#9b6f83' : '#d6a2b2'
                 e.currentTarget.style.transform = 'translateY(0)'
                 e.currentTarget.style.boxShadow = theme === 'dark' 
-                  ? '0 1px 3px rgba(217, 119, 159, 0.2)' 
-                  : '0 1px 3px rgba(232, 165, 184, 0.2)'
+                  ? '0 1px 3px rgba(155, 111, 131, 0.2)' 
+                  : '0 1px 3px rgba(214, 162, 178, 0.2)'
               }
             }}
           >
@@ -642,7 +642,7 @@ export default function ExportModal({
               border: 'none',
               borderRadius: '8px',
               backgroundColor: hasSelection
-                ? (theme === 'dark' ? '#7bb3d9' : '#8fc4e8')
+                ? (theme === 'dark' ? '#5d8fae' : '#8db5d0')
                 : (theme === 'dark' ? '#3e3e42' : '#e0e0e0'),
               color: hasSelection ? '#ffffff' : (theme === 'dark' ? '#858585' : '#9e9e9e'),
               cursor: hasSelection ? 'pointer' : 'not-allowed',
@@ -654,25 +654,25 @@ export default function ExportModal({
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
               transition: 'background-color 0.2s ease, transform 0.15s ease',
               boxShadow: hasSelection
-                ? (theme === 'dark' ? '0 1px 3px rgba(123, 179, 217, 0.2)' : '0 1px 3px rgba(143, 196, 232, 0.2)')
+                ? (theme === 'dark' ? '0 1px 3px rgba(93, 143, 174, 0.2)' : '0 1px 3px rgba(141, 181, 208, 0.2)')
                 : 'none'
             }}
             onMouseEnter={(e) => {
               if (hasSelection) {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#5fa8d9' : '#6bb8e8'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#507f9d' : '#7aa9c6'
                 e.currentTarget.style.transform = 'translateY(-1px)'
                 e.currentTarget.style.boxShadow = theme === 'dark' 
-                  ? '0 2px 6px rgba(95, 168, 217, 0.4)' 
-                  : '0 2px 6px rgba(107, 184, 232, 0.4)'
+                  ? '0 2px 6px rgba(80, 127, 157, 0.35)' 
+                  : '0 2px 6px rgba(122, 169, 198, 0.35)'
               }
             }}
             onMouseLeave={(e) => {
               if (hasSelection) {
-                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#7bb3d9' : '#8fc4e8'
+                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#5d8fae' : '#8db5d0'
                 e.currentTarget.style.transform = 'translateY(0)'
                 e.currentTarget.style.boxShadow = theme === 'dark' 
-                  ? '0 1px 3px rgba(123, 179, 217, 0.2)' 
-                  : '0 1px 3px rgba(143, 196, 232, 0.2)'
+                  ? '0 1px 3px rgba(93, 143, 174, 0.2)' 
+                  : '0 1px 3px rgba(141, 181, 208, 0.2)'
               }
             }}
           >

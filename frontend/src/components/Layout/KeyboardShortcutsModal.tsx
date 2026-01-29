@@ -99,6 +99,7 @@ export default function KeyboardShortcutsModal({
       category: 'Text Selection',
       shortcuts: [
         { action: 'Improve', keys: ['Ctrl', 'K'] },
+        { action: 'Accept suggestion', keys: ['Ctrl', 'Enter'] },
       ]
     },
     {

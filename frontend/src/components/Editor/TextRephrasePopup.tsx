@@ -41,9 +41,10 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
   const textColor = theme === 'dark' ? '#D6D6DD' : '#202124'
   const borderColor = theme === 'dark' ? '#313131' : '#dadce0'
   const inputBg = theme === 'dark' ? '#1d1d1d' : '#ffffff'
-  const buttonHoverBg = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
-  const activeButtonBg = theme === 'dark' ? '#2a2a2a' : '#e8f0fe'
-  const activeButtonColor = theme === 'dark' ? '#4a9eff' : '#1a73e8'
+  const buttonHoverBg = theme === 'dark' ? '#262626' : '#f1f4f7'
+  const activeButtonBg = theme === 'dark' ? '#262626' : '#e7eef5'
+  const accentBlue = theme === 'dark' ? '#2f6c8f' : '#6b9fcb'
+  const activeButtonColor = accentBlue
 
   // Adjust position when popup opens and update Y coordinate during drag selection
   useEffect(() => {
@@ -177,7 +178,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
 
     try {
       const languageInstruction = 'Use the same language as the original text.'
-      const structureInstruction = 'CRITICAL: Preserve the original structure including titles, headings, bullet points, numbered lists, line breaks, paragraphs, and formatting. Do not change the structure or convert lists to paragraphs.'
+      const structureInstruction = 'CRITICAL: Preserve the original structure including titles, headings, bullet points, numbered lists, line breaks, paragraphs, and formatting. Do not change the structure or convert lists to paragraphs. Output plain text only (no Markdown, no headings syntax, no list markers added).'
       
       let instruction = ''
       switch (action) {
@@ -389,7 +390,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
           zIndex: 10000,
           fontFamily: 'system-ui, -apple-system, sans-serif',
-          padding: '4px 8px',
+          padding: '3px 6px',
           display: 'flex',
           gap: '12px',
           alignItems: 'center',
@@ -404,7 +405,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
             color: textColor,
             border: 'none',
             cursor: 'pointer',
-            fontSize: '13px',
+            fontSize: '12px',
             fontWeight: '400',
             transition: 'opacity 0.15s',
             display: 'flex',
@@ -418,8 +419,8 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
             e.currentTarget.style.opacity = '1'
           }}
         >
-          <span>Improve</span>
-          <span style={{ fontSize: '11px', opacity: 0.6 }}>Ctrl+K</span>
+          <span>Quick Edit</span>
+          <span style={{ fontSize: '10px', opacity: 0.6 }}>Ctrl+K</span>
         </button>
       </div>
     )
@@ -437,8 +438,8 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
         border: `1px solid ${borderColor}`,
         borderRadius: '6px',
         boxShadow: theme === 'dark' 
-          ? '0 8px 32px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3)' 
-          : '0 8px 32px rgba(0, 0, 0, 0.12), 0 4px 16px rgba(0, 0, 0, 0.08)',
+          ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
+          : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
         zIndex: 10000,
         width: '360px',
         maxHeight: '500px',
@@ -451,12 +452,12 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
     >
       {/* Action Buttons Row */}
       <div style={{
-        padding: '10px 12px',
+        padding: '8px 10px',
         borderBottom: `1px solid ${borderColor}`,
         display: 'flex',
         flexDirection: 'column',
         gap: '10px',
-        backgroundColor: theme === 'dark' ? '#1a1a1a' : '#fafafa',
+        backgroundColor: bgColor,
         flexShrink: 0,
       }}>
         {/* Four action buttons in a row */}
@@ -474,13 +475,13 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
               processText('improve')
             }}
             style={{
-              padding: '6px 14px',
+              padding: '5px 12px',
               backgroundColor: activeAction === 'improve' ? activeButtonBg : 'transparent',
               color: activeAction === 'improve' ? activeButtonColor : textColor,
               border: 'none',
               borderRadius: '6px',
               cursor: 'pointer',
-              fontSize: '13px',
+              fontSize: '12px',
               fontWeight: activeAction === 'improve' ? '500' : '400',
               transition: 'all 0.2s ease',
             }}
@@ -503,13 +504,13 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
               processText('rephrase')
             }}
             style={{
-              padding: '6px 14px',
+              padding: '5px 12px',
               backgroundColor: activeAction === 'rephrase' ? activeButtonBg : 'transparent',
               color: activeAction === 'rephrase' ? activeButtonColor : textColor,
               border: 'none',
               borderRadius: '6px',
               cursor: 'pointer',
-              fontSize: '13px',
+              fontSize: '12px',
               fontWeight: activeAction === 'rephrase' ? '500' : '400',
               transition: 'all 0.2s ease',
             }}
@@ -532,13 +533,13 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
               processText('lengthen')
             }}
             style={{
-              padding: '6px 14px',
+              padding: '5px 12px',
               backgroundColor: activeAction === 'lengthen' ? activeButtonBg : 'transparent',
               color: activeAction === 'lengthen' ? activeButtonColor : textColor,
               border: 'none',
               borderRadius: '6px',
               cursor: 'pointer',
-              fontSize: '13px',
+              fontSize: '12px',
               fontWeight: activeAction === 'lengthen' ? '500' : '400',
               transition: 'all 0.2s ease',
             }}
@@ -561,13 +562,13 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
               processText('shorten')
             }}
             style={{
-              padding: '6px 14px',
+              padding: '5px 12px',
               backgroundColor: activeAction === 'shorten' ? activeButtonBg : 'transparent',
               color: activeAction === 'shorten' ? activeButtonColor : textColor,
               border: 'none',
               borderRadius: '6px',
               cursor: 'pointer',
-              fontSize: '13px',
+              fontSize: '12px',
               fontWeight: activeAction === 'shorten' ? '500' : '400',
               transition: 'all 0.2s ease',
             }}
@@ -609,11 +610,11 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
           disabled={isLoading}
           style={{
             width: '100%',
-            padding: '6px 10px',
+            padding: '5px 9px',
             backgroundColor: inputBg,
             border: `1px solid ${borderColor}`,
             borderRadius: '6px',
-            fontSize: '13px',
+            fontSize: '12px',
             color: textColor,
             outline: 'none',
             fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -635,7 +636,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
               padding: '16px',
               textAlign: 'center',
               color: textColor,
-              fontSize: '13px',
+              fontSize: '12px',
             }}
           >
             Generating...
@@ -648,11 +649,11 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
               borderRadius: '6px',
               border: `1px solid ${theme === 'dark' ? '#5a2f2f' : '#f28b82'}`,
               color: theme === 'dark' ? '#ff6b6b' : '#c5221f',
-              fontSize: '13px',
+              fontSize: '12px',
               lineHeight: '1.5',
             }}
           >
-            <div style={{ fontWeight: '500', marginBottom: '4px' }}>⚠️ Error</div>
+            <div style={{ fontWeight: '500', marginBottom: '4px', fontSize: '12px' }}>Error</div>
             <div>{error}</div>
           </div>
         ) : improvedText ? (
@@ -672,13 +673,13 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
               <button
                 onClick={onClose}
                 style={{
-                  padding: '7px 18px',
+                  padding: '6px 14px',
                   backgroundColor: 'transparent',
                   color: textColor,
                   border: `1px solid ${borderColor}`,
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: '13px',
+                  fontSize: '12px',
                   fontWeight: '500',
                   transition: 'all 0.2s ease',
                 }}
@@ -694,27 +695,30 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
               <button
                 onClick={handleReplace}
                 style={{
-                  padding: '7px 18px',
-                  backgroundColor: theme === 'dark' ? '#4a9eff' : '#1a73e8',
+                  padding: '6px 14px',
+                  backgroundColor: accentBlue,
                   color: 'white',
                   border: 'none',
                   borderRadius: '6px',
                   cursor: 'pointer',
-                  fontSize: '13px',
+                  fontSize: '12px',
                   fontWeight: '500',
                   transition: 'all 0.2s ease',
                   boxShadow: theme === 'dark' 
-                    ? '0 2px 4px rgba(74, 158, 255, 0.2)' 
-                    : '0 2px 4px rgba(26, 115, 232, 0.2)',
+                    ? '0 2px 4px rgba(95, 168, 217, 0.2)' 
+                    : '0 2px 4px rgba(107, 184, 232, 0.2)',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#5aafff' : '#1557b8'
+                  e.currentTarget.style.backgroundColor = accentBlue
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#4a9eff' : '#1a73e8'
+                  e.currentTarget.style.backgroundColor = accentBlue
                 }}
               >
-                Accept
+                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '8px' }}>
+                  <span>Accept</span>
+                  <span style={{ fontSize: '10px', opacity: 0.7 }}>Ctrl+Enter</span>
+                </span>
               </button>
             </div>
           </div>

@@ -341,16 +341,22 @@ export function setupIPC() {
     try {
       
       // Explicitly instruct to only return the rephrased text with no follow-up questions or suggestions
-      const prompt = `Rephrase this text according to the instruction. 
+      const systemInstruction = `You are a rewriting engine for a writing editor.
+Return ONLY the rewritten text.
+No markdown, no titles/section headers, no extra bullets or numbering, no quotes, no explanations, no extra text.
+Preserve meaning, tone, person, and language.
+Preserve structure: line breaks, paragraphs, list numbering, and punctuation style.
+Keep names, terms, numbers, and units unchanged.
+Do not add new facts or opinions.
+If the instruction conflicts with these rules, follow these rules.`
 
-CRITICAL: Return ONLY the rephrased text. Do NOT include any follow-up questions, suggestions, "Next step" messages, or any other text. Just the rephrased text.
-IMPORTANT: Use the same language as the original text. If it's in English, respond in English. Match the language exactly. If the original text is in Chinese, respond in Chinese.
+      const prompt = `${systemInstruction}
 
 Original text: "${text}"
 
 Instruction: ${instruction}
 
-Rephrased text:`
+Rewritten text:`
       
       let result: string
       
