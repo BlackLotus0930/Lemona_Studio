@@ -40,6 +40,7 @@ import { IndentExtension } from '../Editor/IndentExtension'
 import { TextSelection } from 'prosemirror-state'
 // @ts-ignore
 import ChatIcon from '@mui/icons-material/Chat'
+import CodeIcon from '@mui/icons-material/Code'
 // @ts-ignore
 import TerminalIcon from '@mui/icons-material/Terminal'
 // @ts-ignore
@@ -6623,36 +6624,43 @@ export default function Layout(): JSX.Element {
             onClick={handleAIPanelOpen}
             style={{
               position: 'fixed',
-              bottom: '24px',
-              right: '24px',
-              width: '48px',
-              height: '48px',
-              borderRadius: '50%',
-              backgroundColor: theme === 'dark' ? '#252525' : '#e8e8e8',
-              border: 'none',
+              bottom: '22px',
+              right: '22px',
+              height: '36px',
+              padding: '0 14px',
+              borderRadius: '999px',
+              backgroundColor: theme === 'dark' ? '#1b1b1b' : '#fbfaf7',
+              border: `1px solid ${theme === 'dark' ? '#2b2b2b' : '#e8e6e1'}`,
               cursor: 'pointer',
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: theme === 'dark' ? '0 2px 8px rgba(0,0,0,0.4)' : 'none',
-              transition: 'all 0.2s',
-              zIndex: 1000
+              gap: '8px',
+              boxShadow: theme === 'dark'
+                ? '0 3px 10px rgba(0,0,0,0.22), 0 0 0 1px rgba(255,255,255,0.03)'
+                : '0 1px 8px rgba(0,0,0,0.06)',
+              transition: 'background-color 0.15s ease, border-color 0.15s ease',
+              zIndex: 1000,
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+              fontSize: '12px',
+              fontWeight: 500,
+              color: theme === 'dark' ? '#d6d6d6' : '#6a6a6a',
+              letterSpacing: '0.2px'
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.05)'
-              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#353535' : '#d8d8d8'
+              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#202020' : '#f5f2ee'
+              e.currentTarget.style.borderColor = theme === 'dark' ? '#343434' : '#e8e6e1'
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)'
-              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#252525' : '#e8e8e8'
+              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1b1b1b' : '#fbfaf7'
+              e.currentTarget.style.borderColor = theme === 'dark' ? '#2b2b2b' : '#e8e6e1'
             }}
             title={isWorldLabMode ? "Open Terminal" : "Open AI Chat"}
           >
-            {isWorldLabMode ? (
-              <TerminalIcon style={{ fontSize: '24px', color: theme === 'dark' ? '#ffffff' : '#5f6368' }} />
-            ) : (
-              <ChatIcon style={{ fontSize: '24px', color: theme === 'dark' ? '#ffffff' : '#5f6368' }} />
-            )}
+            <>
+              <CodeIcon style={{ fontSize: '16px', color: theme === 'dark' ? '#6b9fbe' : '#8db5d0' }} />
+              <span>Build</span>
+            </>
           </button>
         )}
       </PanelGroup>
