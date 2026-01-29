@@ -316,7 +316,7 @@ export default function Layout(): JSX.Element {
     if (updateNotification?.version) {
       ignoredUpdateVersionRef.current = updateNotification.version
       try {
-        localStorage.setItem('lemona:ignored-update-version', updateNotification.version)
+        localStorage.removeItem('lemona:ignored-update-version')
       } catch {
         // Ignore storage errors
       }
@@ -456,13 +456,7 @@ export default function Layout(): JSX.Element {
   const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | null>(null) // Track export format
   const [showCommitSuccessNotification, setShowCommitSuccessNotification] = useState<{ fileCount: number; isIndexing?: boolean } | null>(null) // Track commit success notification
   const commitNotificationTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Track notification auto-hide timeout
-  const initialIgnoredUpdateVersion = (() => {
-    try {
-      return localStorage.getItem('lemona:ignored-update-version')
-    } catch {
-      return null
-    }
-  })()
+  const initialIgnoredUpdateVersion = null
   const [updateNotification, setUpdateNotification] = useState<{ version?: string; downloaded?: boolean } | null>(null)
   const ignoredUpdateVersionRef = useRef<string | null>(initialIgnoredUpdateVersion)
   const installOnDownloadRef = useRef<boolean>(false)
@@ -6754,29 +6748,29 @@ export default function Layout(): JSX.Element {
             position: 'fixed',
             left: '20px',
             bottom: '20px',
-            backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
-            border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
-            borderRadius: '6px',
-            padding: '10px 14px',
+            backgroundColor: theme === 'dark' ? '#1e1e1e' : '#f6f6f4',
+            border: `1px solid ${theme === 'dark' ? '#2b2b2b' : '#e8e6e1'}`,
+            borderRadius: '5px',
+            padding: '8px 12px',
             boxShadow: theme === 'dark'
-              ? '0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3)'
-              : '0 8px 32px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.1)',
+              ? '0 6px 20px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.25)'
+              : '0 4px 14px rgba(0, 0, 0, 0.12)',
             zIndex: 10030,
             display: 'flex',
             alignItems: 'center',
-            gap: '12px',
+            gap: '8px',
             fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            minWidth: '260px',
-            maxWidth: '320px',
+            minWidth: '220px',
+            maxWidth: '300px',
             animation: 'slideInUp 0.3s ease-out'
           }}
         >
           <div style={{ flex: 1 }}>
             <div
               style={{
-                fontSize: '12px',
+                fontSize: '11px',
                 fontWeight: '400',
-                color: theme === 'dark' ? '#ffffff' : '#202124',
+                color: theme === 'dark' ? '#d6d6d6' : '#333333',
                 marginBottom: '2px',
               }}
             >
@@ -6787,12 +6781,12 @@ export default function Layout(): JSX.Element {
             <button
               onClick={handleUpdateNow}
               style={{
-                backgroundColor: theme === 'dark' ? '#2a2a2a' : '#f0f0f0',
-                color: theme === 'dark' ? '#ffffff' : '#1a1a1a',
-                border: `1px solid ${theme === 'dark' ? '#444' : '#d0d0d0'}`,
+                backgroundColor: theme === 'dark' ? '#5d8fae' : '#8db5d0',
+                color: '#ffffff',
+                border: 'none',
                 borderRadius: '5px',
-                padding: '6px 10px',
-                fontSize: '12px',
+                padding: '5px 9px',
+                fontSize: '11px',
                 cursor: 'pointer',
               }}
             >
@@ -6802,11 +6796,11 @@ export default function Layout(): JSX.Element {
               onClick={handleAskLater}
               style={{
                 backgroundColor: 'transparent',
-                color: theme === 'dark' ? '#999' : '#666',
-                border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+                color: theme === 'dark' ? '#8f8f8f' : '#777777',
+                border: `1px solid ${theme === 'dark' ? '#2b2b2b' : '#e0e0e0'}`,
                 borderRadius: '5px',
-                padding: '6px 10px',
-                fontSize: '12px',
+                padding: '5px 9px',
+                fontSize: '11px',
                 cursor: 'pointer',
               }}
             >
