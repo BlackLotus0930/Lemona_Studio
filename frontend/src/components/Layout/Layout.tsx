@@ -6618,43 +6618,55 @@ export default function Layout(): JSX.Element {
             onClick={handleAIPanelOpen}
             style={{
               position: 'fixed',
-              bottom: '22px',
+              bottom: '20px',
               right: '22px',
-              height: '36px',
-              padding: '0 14px',
+              padding: '7px 15px',
+              backgroundColor: 'transparent',
+              color: theme === 'dark' ? '#cfcfcf' : '#202020',
+              border: 'none',
               borderRadius: '999px',
-              backgroundColor: theme === 'dark' ? '#1b1b1b' : '#fbfaf7',
-              border: `1px solid ${theme === 'dark' ? '#2b2b2b' : '#e8e6e1'}`,
+              fontSize: '12px',
+              fontWeight: 550,
               cursor: 'pointer',
-              display: 'inline-flex',
+              display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '8px',
               boxShadow: theme === 'dark'
-                ? '0 3px 10px rgba(0,0,0,0.22), 0 0 0 1px rgba(255,255,255,0.03)'
-                : '0 1px 8px rgba(0,0,0,0.06)',
-              transition: 'background-color 0.15s ease, border-color 0.15s ease',
+                ? 'inset 0 -1px 0 rgba(255, 255, 255, 0.18)'
+                : 'inset 0 -1px 0 rgba(0, 0, 0, 0.28)',
+              transition: 'background-color 0.15s ease, box-shadow 0.15s ease',
               zIndex: 1000,
-              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-              fontSize: '12px',
-              fontWeight: 500,
-              color: theme === 'dark' ? '#d6d6d6' : '#6a6a6a',
-              letterSpacing: '0.2px'
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#202020' : '#f5f2ee'
-              e.currentTarget.style.borderColor = theme === 'dark' ? '#343434' : '#e8e6e1'
+              e.currentTarget.style.backgroundColor = theme === 'dark'
+                ? 'rgba(255, 255, 255, 0.06)'
+                : 'rgba(0, 0, 0, 0.04)'
+              e.currentTarget.style.boxShadow = theme === 'dark'
+                ? 'inset 0 -2px 0 rgba(255, 255, 255, 0.28)'
+                : 'inset 0 -2px 0 rgba(0, 0, 0, 0.4)'
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1b1b1b' : '#fbfaf7'
-              e.currentTarget.style.borderColor = theme === 'dark' ? '#2b2b2b' : '#e8e6e1'
+              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.boxShadow = theme === 'dark'
+                ? 'inset 0 -1px 0 rgba(255, 255, 255, 0.18)'
+                : 'inset 0 -1px 0 rgba(0, 0, 0, 0.28)'
             }}
             title={isWorldLabMode ? "Open Terminal" : "Open AI Chat"}
           >
-            <>
-              <CodeIcon style={{ fontSize: '16px', color: theme === 'dark' ? '#6b9fbe' : '#8db5d0' }} />
-              <span>Build</span>
-            </>
+            {/*
+              Make both icon and text the same, a bit darker grayscale color in both themes.
+              No blue or color tints; neutral gray only.
+            */}
+            {(() => {
+              // Make gray significantly darker in light theme per clarified instruction
+              const btnColor = theme === 'dark' ? '#b0b0b0' : '#242424';
+              return (
+                <>
+                  <CodeIcon style={{ fontSize: '15px', color: btnColor, marginRight: '7px' }} />
+                  <span style={{ fontWeight: 550, marginRight: '2px', color: btnColor }}>Build</span>
+                </>
+              );
+            })()}
           </button>
         )}
       </PanelGroup>
