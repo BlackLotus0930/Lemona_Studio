@@ -103,6 +103,61 @@ function saveOpenTerminalTabs(labName: string, terminalIds: string[], projectId:
   }
 }
 
+type EdgeHandleIds = {
+  sourceHandle?: string
+  targetHandle?: string
+}
+
+function getEdgeHandlesForNodes(
+  sourceNode?: WorldLabNode,
+  targetNode?: WorldLabNode
+): EdgeHandleIds {
+  if (!sourceNode || !targetNode) {
+    return {}
+  }
+
+  const dx = targetNode.position.x - sourceNode.position.x
+  const dy = targetNode.position.y - sourceNode.position.y
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const isRight = dx >= 0
+    return {
+      sourceHandle: isRight ? 'right-source' : 'left-source',
+      targetHandle: isRight ? 'left-target' : 'right-target',
+    }
+  }
+
+  const isDown = dy >= 0
+  return {
+    sourceHandle: isDown ? 'bottom-source' : 'top-source',
+    targetHandle: isDown ? 'top-target' : 'bottom-target',
+  }
+}
+
+function ensureEdgeHandles(
+  edge: WorldLabEdge,
+  nodeById: Map<string, WorldLabNode>
+): WorldLabEdge {
+  const edgeData = (edge as any).data || {}
+  const existingSourceHandle = edge.sourceHandle ?? edgeData.sourceHandle
+  const existingTargetHandle = edge.targetHandle ?? edgeData.targetHandle
+
+  if (existingSourceHandle && existingTargetHandle) {
+    return edge
+  }
+
+  const handles = getEdgeHandlesForNodes(
+    nodeById.get(edge.source),
+    nodeById.get(edge.target)
+  )
+
+  return {
+    ...edge,
+    sourceHandle: existingSourceHandle ?? handles.sourceHandle,
+    targetHandle: existingTargetHandle ?? handles.targetHandle,
+  }
+}
+
 // Helper function to load terminal session from localStorage
 function loadTerminalSession(labName: string, terminalId: string, projectId: string): TerminalSession | null {
   try {
@@ -2051,6 +2106,8 @@ IMPORTANT:
             if (onNodesChange) {
               onNodesChange(updatedNodes)
             }
+
+            const nodeById = new Map(updatedNodes.map(node => [node.id, node]))
             
             // Process edges (create new or update existing)
             const allEdges = Array.isArray(aiResponse.edges) ? aiResponse.edges : []
@@ -2062,6 +2119,7 @@ IMPORTANT:
               const toId = labelToIdMap.get(edge.to)
               
               if (fromId && toId) {
+                const handles = getEdgeHandlesForNodes(nodeById.get(fromId), nodeById.get(toId))
                 // Check if edge already exists
                 const existingEdgeIndex = updatedEdgesList.findIndex(e => 
                   e.source === fromId && e.target === toId
@@ -2076,6 +2134,8 @@ IMPORTANT:
                     type: edge.directional !== undefined 
                       ? (edge.directional ? 'smoothstep' : 'default')
                       : existingEdge.type,
+                    sourceHandle: existingEdge.sourceHandle ?? handles.sourceHandle,
+                    targetHandle: existingEdge.targetHandle ?? handles.targetHandle,
                     data: {
                       ...existingEdge.data,
                       directed: edge.directional !== undefined 
@@ -2092,6 +2152,8 @@ IMPORTANT:
                     target: toId,
                     label: edge.label || undefined,
                     type: edge.directional ? 'smoothstep' : 'default',
+                    sourceHandle: handles.sourceHandle,
+                    targetHandle: handles.targetHandle,
                     data: {
                       directed: edge.directional || false,
                     },
@@ -2101,7 +2163,9 @@ IMPORTANT:
             })
             
             // Add new edges to the updated list
-            const finalEdges = [...updatedEdgesList, ...newEdges]
+            const finalEdges = [...updatedEdgesList, ...newEdges].map(edge =>
+              ensureEdgeHandles(edge, nodeById)
+            )
             
             // Only update if there are changes (new edges or updated edges)
             if ((newEdges.length > 0 || allEdges.length > 0) && onEdgesChange) {
@@ -2271,6 +2335,7 @@ IMPORTANT:
             if (onNodesChange) {
               onNodesChange(updatedNodes)
             }
+            const nodeById = new Map(updatedNodes.map(node => [node.id, node]))
 
             // Create edges (convert labels to IDs using labelToIdMap)
             const newEdges: WorldLabEdge[] = []
@@ -2279,6 +2344,7 @@ IMPORTANT:
               const toId = labelToIdMap.get(edge.to)
               
               if (fromId && toId) {
+                const handles = getEdgeHandlesForNodes(nodeById.get(fromId), nodeById.get(toId))
                 // Check if edge already exists
                 const edgeExists = existingEdges.some(e => 
                   e.source === fromId && e.target === toId
@@ -2292,6 +2358,8 @@ IMPORTANT:
                     target: toId,
                     label: edge.label || undefined,
                     type: edge.directional ? 'smoothstep' : 'default',
+                    sourceHandle: handles.sourceHandle,
+                    targetHandle: handles.targetHandle,
                     data: {
                       directed: edge.directional || false,
                     },
@@ -2301,7 +2369,9 @@ IMPORTANT:
             })
 
             // Update edges
-            const updatedEdges = [...existingEdges, ...newEdges]
+            const updatedEdges = [...existingEdges, ...newEdges].map(edge =>
+              ensureEdgeHandles(edge, nodeById)
+            )
             if (onEdgesChange) {
               onEdgesChange(updatedEdges)
             }
