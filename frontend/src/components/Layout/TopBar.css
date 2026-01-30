@@ -38,17 +38,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 18px;
-  width: auto;
+  height: 20px;
+  width: 22px;
   margin-left: 4px;
   -webkit-app-region: no-drag; /* Prevent dragging on logo */
 }
 
 .logo-image {
   height: 100%;
-  width: auto;
+  width: 100%;
   object-fit: contain;
-  display: block;
 }
 
 .topbar-menu {
