@@ -1,6 +1,6 @@
 {
   "name": "lemona-desktop",
-  "version": "1.2.12",
+  "version": "1.2.13",
   "description": "Lemona Desktop Application",
   "main": "dist/desktop/main/index.js",
   "type": "module",

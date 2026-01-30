@@ -22,6 +22,8 @@ import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { existsSync } from 'fs'
+import http from 'http'
+import https from 'https'
 import { Document } from '../../../shared/types.js'
 import { app } from 'electron'
 
@@ -34,6 +36,82 @@ const projectRoot = isCompiled
   ? path.resolve(__dirname, '../../../../..')
   : path.resolve(__dirname, '../../../..')
 const fontsDir = path.join(projectRoot, 'frontend', 'src', 'assets', 'fonts')
+
+const IMAGE_FETCH_TIMEOUT_MS = 15000
+
+function guessImageMimeType(url: string): string | null {
+  const lower = url.toLowerCase()
+  if (lower.endsWith('.png')) return 'image/png'
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  if (lower.endsWith('.gif')) return 'image/gif'
+  if (lower.endsWith('.webp')) return 'image/webp'
+  if (lower.endsWith('.svg')) return 'image/svg+xml'
+  return null
+}
+
+async function fetchImageAsDataUrl(url: string, timeoutMs: number = IMAGE_FETCH_TIMEOUT_MS): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const client = url.startsWith('https') ? https : http
+      const req = client.get(url, { timeout: timeoutMs }, (res) => {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume()
+          const redirectUrl = new URL(res.headers.location, url).toString()
+          fetchImageAsDataUrl(redirectUrl, timeoutMs).then(resolve)
+          return
+        }
+
+        if (!res.statusCode || res.statusCode >= 400) {
+          res.resume()
+          resolve(null)
+          return
+        }
+
+        const chunks: Buffer[] = []
+        res.on('data', (chunk) => chunks.push(chunk as Buffer))
+        res.on('end', () => {
+          const buffer = Buffer.concat(chunks)
+          const contentType = typeof res.headers['content-type'] === 'string'
+            ? res.headers['content-type'].split(';')[0]
+            : guessImageMimeType(url)
+          if (!contentType || buffer.length === 0) {
+            resolve(null)
+            return
+          }
+          resolve(`data:${contentType};base64,${buffer.toString('base64')}`)
+        })
+      })
+
+      req.on('timeout', () => {
+        req.destroy()
+        resolve(null)
+      })
+      req.on('error', () => resolve(null))
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+async function inlineExternalImages(html: string): Promise<string> {
+  const imgSrcRegex = /<img\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi
+  const sources = new Set<string>()
+  let match: RegExpExecArray | null = null
+  while ((match = imgSrcRegex.exec(html)) !== null) {
+    const src = match[1]
+    if (src && /^https?:\/\//i.test(src)) {
+      sources.add(src)
+    }
+  }
+
+  for (const src of sources) {
+    const dataUrl = await fetchImageAsDataUrl(src)
+    if (dataUrl) {
+      html = html.split(src).join(dataUrl)
+    }
+  }
+  return html
+}
 
 // Font mapping: Editor font name -> Font file name
 const FONT_FILES: Record<string, { regular: string; italic?: string; bold?: string; boldItalic?: string }> = {
@@ -864,15 +942,18 @@ export const exportService = {
 
     try {
       const page = await browser.newPage()
+      // Large documents can take a long time to render
+      page.setDefaultNavigationTimeout(600000)
       
       // Convert TipTap JSON to HTML
       const bodyHTML = tipTapToHTML(content)
-      const html = generateHTMLDocument(bodyHTML)
+      let html = generateHTMLDocument(bodyHTML)
+      html = await inlineExternalImages(html)
       
       // Set content with timeout
       await page.setContent(html, { 
-        waitUntil: 'networkidle0',
-        timeout: 15000 // 15 seconds timeout
+        waitUntil: 'load',
+        timeout: 120000 // 2 minutes timeout
       })
       
       // Wait for all images to load
@@ -964,12 +1045,13 @@ export const exportService = {
         combinedHTML += bodyHTML
       })
       
-      const html = generateHTMLDocument(combinedHTML)
+      let html = generateHTMLDocument(combinedHTML)
+      html = await inlineExternalImages(html)
       
       // Set content with timeout
       await page.setContent(html, { 
-        waitUntil: 'networkidle2',
-        timeout: 300000 // 240 seconds timeout
+        waitUntil: 'load',
+        timeout: 600000 // 10 minutes timeout
       })
       
       // Wait for all images to load
