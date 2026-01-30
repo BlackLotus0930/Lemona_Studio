@@ -618,9 +618,10 @@ export default function DocumentList() {
               src={logoImage} 
               alt="Lemona Logo" 
               style={{
-                width: '18px',
+                width: 'auto',
                 height: '18px',
-                objectFit: 'contain'
+                objectFit: 'contain',
+                display: 'block',
               }}
             />
             <span style={{ 

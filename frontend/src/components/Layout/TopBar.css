@@ -39,15 +39,16 @@
   align-items: center;
   justify-content: center;
   height: 18px;
-  width: 18px;
+  width: auto;
   margin-left: 4px;
   -webkit-app-region: no-drag; /* Prevent dragging on logo */
 }
 
 .logo-image {
   height: 100%;
-  width: 100%;
+  width: auto;
   object-fit: contain;
+  display: block;
 }
 
 .topbar-menu {
