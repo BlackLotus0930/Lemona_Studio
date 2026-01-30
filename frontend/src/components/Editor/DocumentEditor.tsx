@@ -50,7 +50,56 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 })
   
   // Ctrl+K: 唯一允许缓存 selection 的地方
-  const ctrlKSelectionRef = useRef<{ text: string; range: { from: number; to: number } } | null>(null)
+  const ctrlKSelectionRef = useRef<{ 
+    text: string
+    range: { from: number; to: number }
+    contextBefore?: string
+    contextAfter?: string
+    paragraphCount?: number
+  } | null>(null)
+  
+  const getSelectionContext = (from: number, to: number) => {
+    if (!editor || editor.isDestroyed) {
+      return { contextBefore: '', contextAfter: '', paragraphCount: 0 }
+    }
+    
+    const blocks: Array<{ from: number; to: number; text: string }> = []
+    editor.state.doc.descendants((node, pos) => {
+      if (node.isTextblock) {
+        const text = node.textBetween(0, node.content.size, '\n').trim()
+        if (text) {
+          blocks.push({
+            from: pos + 1,
+            to: pos + node.nodeSize - 1,
+            text
+          })
+        }
+      }
+    })
+    
+    const selectedIndexes: number[] = []
+    blocks.forEach((block, index) => {
+      const overlaps = !(to < block.from || from > block.to)
+      if (overlaps) {
+        selectedIndexes.push(index)
+      }
+    })
+    
+    if (selectedIndexes.length === 0) {
+      return { contextBefore: '', contextAfter: '', paragraphCount: 0 }
+    }
+    
+    const firstIndex = selectedIndexes[0]
+    const lastIndex = selectedIndexes[selectedIndexes.length - 1]
+    const beforeBlocks = blocks.slice(Math.max(0, firstIndex - 2), firstIndex)
+    const afterBlocks = blocks.slice(lastIndex + 1, lastIndex + 3)
+    
+    return {
+      contextBefore: beforeBlocks.map((b) => b.text).join('\n\n'),
+      contextAfter: afterBlocks.map((b) => b.text).join('\n\n'),
+      paragraphCount: selectedIndexes.length
+    }
+  }
   
   // Inline search/replace state
   const [showInlineSearch, setShowInlineSearch] = useState(false)
@@ -518,7 +567,8 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       const selected = editor.state.doc.textBetween(from, to)
       if (selected.trim().length > 20) {
         if (!showRephrasePopup && !ctrlKSelectionRef.current) {
-          ctrlKSelectionRef.current = { text: selected, range: { from, to } }
+          const context = getSelectionContext(from, to)
+          ctrlKSelectionRef.current = { text: selected, range: { from, to }, ...context }
         }
         updatePopupPosition()
         setShowRephrasePopup(true)
@@ -592,9 +642,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         }
         
         // CRITICAL: 只缓存一次，缓存后彻底断开 selection 生命周期
+        const context = getSelectionContext(from, to)
         ctrlKSelectionRef.current = {
           text: selected,
-          range: { from, to }
+          range: { from, to },
+          ...context
         }
         
         // 计算位置 - 验证位置有效性
@@ -2674,6 +2726,15 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           }}
           onReadSelection={() => {
             // Improve Button 点击时读取当前 selection
+            if (ctrlKSelectionRef.current?.text) {
+              return { 
+                text: ctrlKSelectionRef.current.text, 
+                range: ctrlKSelectionRef.current.range,
+                contextBefore: ctrlKSelectionRef.current.contextBefore,
+                contextAfter: ctrlKSelectionRef.current.contextAfter,
+                paragraphCount: ctrlKSelectionRef.current.paragraphCount
+              }
+            }
             if (!editor || editor.isDestroyed || !editor.view) {
               return { text: '', range: null }
             }
@@ -2685,7 +2746,14 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
             if (selected.trim().length === 0) {
               return { text: '', range: null }
             }
-            return { text: selected, range: { from, to } }
+            const context = getSelectionContext(from, to)
+            return { 
+              text: selected, 
+              range: { from, to },
+              contextBefore: context.contextBefore,
+              contextAfter: context.contextAfter,
+              paragraphCount: context.paragraphCount
+            }
           }}
         />
       )}

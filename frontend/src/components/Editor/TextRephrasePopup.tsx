@@ -8,7 +8,13 @@ interface TextRephrasePopupProps {
   onReplace: (newText: string) => void
   onClose: () => void
   onInputFocus?: (isFocused: boolean) => void
-  onReadSelection?: () => { text: string; range: { from: number; to: number } | null }
+  onReadSelection?: () => { 
+    text: string
+    range: { from: number; to: number } | null
+    contextBefore?: string
+    contextAfter?: string
+    paragraphCount?: number
+  }
 }
 
 type ActionType = 'improve' | 'rephrase' | 'lengthen' | 'shorten' | 'custom'
@@ -21,6 +27,12 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
   const [improvedText, setImprovedText] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const cachedSelectionRef = useRef<{ 
+    text: string
+    contextBefore?: string
+    contextAfter?: string
+    paragraphCount?: number
+  } | null>(null)
   const popupRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const positionLockedRef = useRef(false) // Track if position has been locked
@@ -72,6 +84,18 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
       }))
     }
   }, [position])
+
+  // Cache selection text as soon as we receive it
+  useEffect(() => {
+    if (selectedText && selectedText.trim().length > 0) {
+      cachedSelectionRef.current = { 
+        text: selectedText,
+        contextBefore: cachedSelectionRef.current?.contextBefore,
+        contextAfter: cachedSelectionRef.current?.contextAfter,
+        paragraphCount: cachedSelectionRef.current?.paragraphCount,
+      }
+    }
+  }, [selectedText])
 
   // Adjust position once when expanding, then lock it
   useEffect(() => {
@@ -178,34 +202,53 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
 
     try {
       const languageInstruction = 'Use the same language as the original text.'
-      const structureInstruction = 'CRITICAL: Preserve the original structure including titles, headings, bullet points, numbered lists, line breaks, paragraphs, and formatting. Do not change the structure or convert lists to paragraphs. Output plain text only (no Markdown, no headings syntax, no list markers added).'
+      const paragraphCount = cachedSelectionRef.current?.paragraphCount
+      const paragraphInstruction = paragraphCount
+        ? `Preserve paragraph breaks and output exactly ${paragraphCount} paragraph(s).`
+        : 'Preserve paragraph breaks exactly; do not merge paragraphs.'
+      const structureInstruction = `CRITICAL: Preserve the original structure including titles, headings, bullet points, numbered lists, line breaks, paragraphs, and formatting. Do not change the structure or convert lists to paragraphs. ${paragraphInstruction} Output plain text only (no Markdown, no headings syntax, no list markers added).`
+      const contextBefore = cachedSelectionRef.current?.contextBefore
+      const contextAfter = cachedSelectionRef.current?.contextAfter
+      const contextInstruction = (contextBefore || contextAfter)
+        ? `Context (do not edit or include in output):\n[Before]\n${contextBefore || ''}\n\n[After]\n${contextAfter || ''}\n\nOnly rewrite the selected text.`
+        : ''
       
       let instruction = ''
       switch (action) {
         case 'improve':
-          instruction = `Improve the clarity, grammar, and flow of this text while maintaining its original meaning and tone. ${languageInstruction} ${structureInstruction}`
+          instruction = `Substantially improve clarity, grammar, and flow. Rewrite awkward phrasing, remove redundancy, and tighten sentences while preserving meaning and tone. ${languageInstruction} ${structureInstruction} ${contextInstruction}`
           break
         case 'rephrase':
-          instruction = `Rephrase this text using different words while keeping the exact same meaning. ${languageInstruction} ${structureInstruction}`
+          instruction = `Rephrase this text with noticeably different wording while keeping the exact same meaning and tone. ${languageInstruction} ${structureInstruction} ${contextInstruction}`
           break
         case 'lengthen':
-          instruction = `Expand this text with more details and examples while keeping the original meaning. ${languageInstruction} ${structureInstruction}`
+          instruction = `Expand this text by roughly 30–60% with additional detail and examples while keeping the original meaning. ${languageInstruction} ${structureInstruction} ${contextInstruction}`
           break
         case 'shorten':
-          instruction = `Make this text shorter and more concise while preserving the key points. ${languageInstruction} ${structureInstruction}`
+          instruction = `Shorten this text by roughly 40–60% while preserving key points and meaning. ${languageInstruction} ${structureInstruction} ${contextInstruction}`
           break
         case 'custom':
-          instruction = prompt ? `${prompt} ${languageInstruction} ${structureInstruction}` : ''
+          instruction = prompt
+            ? `USER INSTRUCTION (follow exactly unless it conflicts with the rules): ${prompt}\n\n${languageInstruction} ${structureInstruction} ${contextInstruction}`
+            : ''
           break
       }
 
       if (!instruction.trim()) return
 
       // Improve Button: 点击时才读取 selection
-      let textToProcess = selectedText
+      let textToProcess = cachedSelectionRef.current?.text || selectedText
       if (!textToProcess && onReadSelection) {
         const selection = onReadSelection()
         textToProcess = selection.text
+        if (selection.text && selection.text.trim().length > 0) {
+          cachedSelectionRef.current = { 
+            text: selection.text,
+            contextBefore: selection.contextBefore,
+            contextAfter: selection.contextAfter,
+            paragraphCount: selection.paragraphCount,
+          }
+        }
       }
       
       if (!textToProcess || textToProcess.trim().length === 0) {

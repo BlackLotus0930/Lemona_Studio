@@ -348,7 +348,8 @@ Preserve meaning, tone, person, and language.
 Preserve structure: line breaks, paragraphs, list numbering, and punctuation style.
 Keep names, terms, numbers, and units unchanged.
 Do not add new facts or opinions.
-If the instruction conflicts with these rules, follow these rules.`
+If the instruction conflicts with these rules, follow these rules.
+If a USER INSTRUCTION is provided, follow it exactly as long as it does not conflict with these rules.`
 
       const prompt = `${systemInstruction}
 
