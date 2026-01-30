@@ -510,16 +510,21 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       
       if (isEmpty) {
         setShowRephrasePopup(false)
+        ctrlKSelectionRef.current = null
         return
       }
       
       // 读取 selection 长度，只有 > 20 才显示
       const selected = editor.state.doc.textBetween(from, to)
       if (selected.trim().length > 20) {
+        if (!showRephrasePopup && !ctrlKSelectionRef.current) {
+          ctrlKSelectionRef.current = { text: selected, range: { from, to } }
+        }
         updatePopupPosition()
         setShowRephrasePopup(true)
       } else {
         setShowRephrasePopup(false)
+        ctrlKSelectionRef.current = null
       }
     }
 
