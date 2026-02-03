@@ -6,6 +6,7 @@
 ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)
 ![Material-UI](https://img.shields.io/badge/Material--UI-007FFF?style=flat-square&logo=mui&logoColor=white)
 ![TipTap](https://img.shields.io/badge/TipTap-FF6B6B?style=flat-square)
+![Total Downloads](https://img.shields.io/github/downloads/BlackLotus0930/Lemona/total)
 
 **An AI-native integrated writing editor.**
 
