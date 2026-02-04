@@ -236,12 +236,12 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
 
       if (!instruction.trim()) return
 
-      // Improve Button: 点击时才读取 selection
+      // Always read the latest selection when possible
       let textToProcess = cachedSelectionRef.current?.text || selectedText
-      if (!textToProcess && onReadSelection) {
+      if (onReadSelection) {
         const selection = onReadSelection()
-        textToProcess = selection.text
         if (selection.text && selection.text.trim().length > 0) {
+          textToProcess = selection.text
           cachedSelectionRef.current = { 
             text: selection.text,
             contextBefore: selection.contextBefore,

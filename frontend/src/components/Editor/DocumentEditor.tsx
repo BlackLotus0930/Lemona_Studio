@@ -47,7 +47,8 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   // Text selection popup state
   // Improve Button: 只看 selection.empty，不缓存，点击时才读取
   const [showRephrasePopup, setShowRephrasePopup] = useState(false)
-  const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 })
+  const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null)
+  const suppressRephrasePopupRef = useRef(false)
   
   // Ctrl+K: 唯一允许缓存 selection 的地方
   const ctrlKSelectionRef = useRef<{ 
@@ -501,13 +502,13 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     if (!editor) return
 
     const updatePopupPosition = () => {
-      if (!scrollContainerRef.current || !editor || editor.isDestroyed || !editor.view) return
+      if (!editor || editor.isDestroyed || !editor.view) return
       
       const { from, to } = editor.state.selection
       if (from === to) return // Empty selection
       
       requestAnimationFrame(() => {
-        if (!scrollContainerRef.current || !editor || editor.isDestroyed || !editor.view) return
+        if (!editor || editor.isDestroyed || !editor.view) return
         
         // Re-read selection positions inside requestAnimationFrame to ensure they're still valid
         const currentSelection = editor.state.selection
@@ -517,11 +518,13 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         // Validate positions are within document bounds
         const docSize = editor.state.doc.content.size
         if (currentFrom < 0 || currentTo < 0 || currentFrom > docSize || currentTo > docSize) {
+          setPopupPosition(null)
           setShowRephrasePopup(false)
           return
         }
         
         if (currentFrom === currentTo) {
+          setPopupPosition(null)
           setShowRephrasePopup(false)
           return
         }
@@ -534,9 +537,13 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           if (startCoords && endCoords) {
             // Position popup right next to the selected text (4px gap for visual separation)
             setPopupPosition({ x: endCoords.right + 4, y: startCoords.top - 4 })
+          } else {
+            setPopupPosition(null)
+            setShowRephrasePopup(false)
           }
         } catch (error) {
           console.warn('[DocumentEditor] Error updating popup position:', error)
+          setPopupPosition(null)
           setShowRephrasePopup(false)
         }
       })
@@ -558,14 +565,21 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       const isEmpty = from === to
       
       if (isEmpty) {
+        setPopupPosition(null)
         setShowRephrasePopup(false)
         ctrlKSelectionRef.current = null
+        suppressRephrasePopupRef.current = false
         return
       }
       
       // 读取 selection 长度，只有 > 20 才显示
       const selected = editor.state.doc.textBetween(from, to)
       if (selected.trim().length > 20) {
+        if (suppressRephrasePopupRef.current) {
+          suppressRephrasePopupRef.current = false
+          setShowRephrasePopup(false)
+          return
+        }
         if (!showRephrasePopup && !ctrlKSelectionRef.current) {
           const context = getSelectionContext(from, to)
           ctrlKSelectionRef.current = { text: selected, range: { from, to }, ...context }
@@ -573,6 +587,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         updatePopupPosition()
         setShowRephrasePopup(true)
       } else {
+        setPopupPosition(null)
         setShowRephrasePopup(false)
         ctrlKSelectionRef.current = null
       }
@@ -2692,7 +2707,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       </div>
       
       {/* Text Rephrase Popup */}
-      {showRephrasePopup && (
+      {showRephrasePopup && popupPosition && (
         <TextRephrasePopup
           selectedText={ctrlKSelectionRef.current?.text || ''}
           position={popupPosition}
@@ -2715,26 +2730,20 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
             }
             // 清理 Ctrl+K 缓存
             ctrlKSelectionRef.current = null
+            setPopupPosition(null)
             setShowRephrasePopup(false)
             isRephrasePopupInputFocusedRef.current = false
           }}
           onClose={() => {
             // 清理 Ctrl+K 缓存
             ctrlKSelectionRef.current = null
+            suppressRephrasePopupRef.current = true
+            setPopupPosition(null)
             setShowRephrasePopup(false)
             isRephrasePopupInputFocusedRef.current = false
           }}
           onReadSelection={() => {
-            // Improve Button 点击时读取当前 selection
-            if (ctrlKSelectionRef.current?.text) {
-              return { 
-                text: ctrlKSelectionRef.current.text, 
-                range: ctrlKSelectionRef.current.range,
-                contextBefore: ctrlKSelectionRef.current.contextBefore,
-                contextAfter: ctrlKSelectionRef.current.contextAfter,
-                paragraphCount: ctrlKSelectionRef.current.paragraphCount
-              }
-            }
+            // Improve Button 点击时读取当前 selection（确保拿到最新拖选范围）
             if (!editor || editor.isDestroyed || !editor.view) {
               return { text: '', range: null }
             }
@@ -2747,13 +2756,15 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
               return { text: '', range: null }
             }
             const context = getSelectionContext(from, to)
-            return { 
+            const selection = { 
               text: selected, 
               range: { from, to },
               contextBefore: context.contextBefore,
               contextAfter: context.contextAfter,
               paragraphCount: context.paragraphCount
             }
+            ctrlKSelectionRef.current = selection
+            return selection
           }}
         />
       )}

@@ -217,9 +217,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         setOpenaiApiKey(openaiKey)
       }
       
-      // Load Smart indexing setting (default to false if not set)
+      // Load Smart indexing setting (default to true if not set)
       const smartIndexingSetting = localStorage.getItem('smartIndexing')
-      const isSmartIndexingEnabled = smartIndexingSetting === null ? false : smartIndexingSetting === 'true'
+      const isSmartIndexingEnabled = smartIndexingSetting === null ? true : smartIndexingSetting === 'true'
       setSmartIndexing(isSmartIndexingEnabled)
       
       // Sync both keys to main process for auto-indexing
