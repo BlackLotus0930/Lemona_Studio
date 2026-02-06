@@ -18,8 +18,22 @@ interface FileExplorerProps {
   onDocumentRename?: (docId: string, newTitle: string) => void
   onDocumentDelete?: (docId: string) => void
   onReorderDocuments?: (documentIds: string[]) => void
+  customFolders?: Array<{ id: string; name: string; parentId?: string | null; order?: number }>
+  projectFileFolderMap?: Record<string, string | null>
+  onProjectFileFolderChange?: (documentId: string, folderId: string | null) => void
+  rootFolderOrder?: Array<'worldlab' | 'library' | 'project'>
+  onReorderRootFolders?: (sourceId: 'worldlab' | 'library' | 'project', targetId: 'worldlab' | 'library' | 'project', position: 'above' | 'below') => void
+  rootFolderMeta?: Record<'worldlab' | 'library' | 'project', { id: 'worldlab' | 'library' | 'project'; name: string; hidden?: boolean }>
+  onRootFolderRename?: (folderId: 'worldlab' | 'library' | 'project', newName: string) => void
+  onRootFolderDelete?: (folderId: 'worldlab' | 'library' | 'project') => void
+  onFolderRename?: (folderId: string, newName: string) => void
+  onFolderDelete?: (folderId: string) => void
   projectName?: string // Project name for the ProjectName folder
   onSelectedFolderChange?: (folderId: 'library' | 'project' | 'worldlab' | null) => void // Callback when folder selection changes
+  onSelectedProjectFolderChange?: (folderId: string | null) => void
+  newlyCreatedFolderId?: string | null
+  onNewlyCreatedFolderHandled?: () => void
+  onReorderProjectFolders?: (sourceId: string, targetId: string, position: 'above' | 'below') => void
   onFileUploaded?: (document: Document, isBatchUpload?: boolean) => void // Callback when a file is uploaded, isBatchUpload indicates if multiple files are being uploaded
   isSearchMode?: boolean // Whether search mode is active
   onSearchModeChange?: (isSearchMode: boolean) => void // Callback to toggle search mode
@@ -45,8 +59,26 @@ function FileExplorer({
   onDocumentRename,
   onDocumentDelete,
   onReorderDocuments,
+  customFolders = [],
+  projectFileFolderMap = {},
+  onProjectFileFolderChange,
+  rootFolderOrder = ['worldlab', 'library', 'project'],
+  onReorderRootFolders,
+  rootFolderMeta = {
+    worldlab: { id: 'worldlab', name: 'worldlab', hidden: false },
+    library: { id: 'library', name: 'library', hidden: false },
+    project: { id: 'project', name: 'workspace', hidden: false },
+  },
+  onRootFolderRename,
+  onRootFolderDelete,
+  onFolderRename,
+  onFolderDelete,
   projectName: _projectName = 'LEMONA',
   onSelectedFolderChange,
+  onSelectedProjectFolderChange,
+  newlyCreatedFolderId,
+  onNewlyCreatedFolderHandled,
+  onReorderProjectFolders,
   onFileUploaded,
   isSearchMode = false,
   onSearchModeChange,
@@ -66,9 +98,12 @@ function FileExplorer({
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null)
   const [dragOverItemId, setDragOverItemId] = useState<string | null>(null)
   const [dragOverFileItemId, setDragOverFileItemId] = useState<string | null>(null) // Track which file item is being dragged over for external files
-  const [dragOverEndZone, setDragOverEndZone] = useState<boolean>(false) // Track if dragging over the end drop zone of project folder
   const [dropPosition, setDropPosition] = useState<'above' | 'below' | null>(null) // Track drop position relative to item
   const [dropTargetId, setDropTargetId] = useState<string | null>(null) // Track which item we're dropping relative to
+  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null)
+  const [folderDropTargetId, setFolderDropTargetId] = useState<string | null>(null)
+  const [folderDropPosition, setFolderDropPosition] = useState<'above' | 'below' | null>(null)
+  const [isExplorerHovered, setIsExplorerHovered] = useState(false)
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['worldlab', 'library', 'project'])) // Default all folders expanded
   
   // Upload queue state - use ref to avoid re-renders and manage queue properly
@@ -477,6 +512,31 @@ function FileExplorer({
     }
   }, [currentDocumentId])
 
+  // Auto-focus rename for newly created folder
+  useEffect(() => {
+    if (!newlyCreatedFolderId) return
+    const folder = customFolders.find(item => item.id === newlyCreatedFolderId)
+    if (!folder) return
+    setExpandedFolders(prev => {
+      const next = new Set(prev)
+      next.add(folder.id)
+      if (folder.parentId) {
+        next.add(folder.parentId as string)
+      }
+      return next
+    })
+    setRenamingId(folder.id)
+    setRenameValue(folder.name)
+    setSelectedId(folder.id)
+    setSelectedFolderId(folder.parentId ? resolveRootFolderId(folder.parentId) : 'project')
+    if (onSelectedProjectFolderChange) {
+      onSelectedProjectFolderChange(folder.id)
+    }
+    if (onNewlyCreatedFolderHandled) {
+      onNewlyCreatedFolderHandled()
+    }
+  }, [newlyCreatedFolderId, customFolders, onNewlyCreatedFolderHandled, onSelectedProjectFolderChange])
+
   const bgColor = theme === 'dark' ? '#141414' : '#FAFAFA'
   const hoverBg = theme === 'dark' ? '#1e1e1e' : '#F0F0ED'
   const selectedBg = hoverBg // Same color for hover and selected
@@ -527,25 +587,75 @@ function FileExplorer({
     document: doc,
   }))
 
+  const projectFilesByFolderId = new Map<string, FileItem[]>()
+  const rootProjectFiles: FileItem[] = []
+  projectFiles.forEach((file) => {
+    const targetFolderId = projectFileFolderMap[file.id] || null
+    if (targetFolderId) {
+      const list = projectFilesByFolderId.get(targetFolderId) || []
+      list.push(file)
+      projectFilesByFolderId.set(targetFolderId, list)
+    } else {
+      rootProjectFiles.push(file)
+    }
+  })
+
+  const buildProjectFolderTree = (parentId: string | null): FileItem[] => {
+    return customFolders
+      .filter(folder => (folder.parentId ?? null) === parentId)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map(folder => ({
+        id: folder.id,
+        name: folder.name,
+        type: 'folder' as const,
+        children: [
+          ...buildProjectFolderTree(folder.id),
+          ...(projectFilesByFolderId.get(folder.id) || []),
+        ],
+      }))
+  }
+
+  const resolveRootFolderId = (folderId: string): 'library' | 'worldlab' | 'project' => {
+    let currentId: string | null = folderId
+    const visited = new Set<string>()
+    while (currentId) {
+      if (currentId === 'library' || currentId === 'worldlab' || currentId === 'project') {
+        return currentId
+      }
+      if (visited.has(currentId)) break
+      visited.add(currentId)
+      const next = customFolders.find(folder => folder.id === currentId)
+      currentId = next?.parentId ?? null
+    }
+    return 'project'
+  }
+
+  const buildFolderNode = (
+    id: string,
+    name: string,
+    files: FileItem[],
+    customParentId: string | null
+  ): FileItem => {
+    const customChildren = buildProjectFolderTree(customParentId)
+    return {
+      id,
+      name,
+      type: 'folder',
+      children: [...customChildren, ...files],
+    }
+  }
+
+  const rootFolderNodesMap = {
+    worldlab: buildFolderNode('worldlab', rootFolderMeta.worldlab?.name || 'worldlab', worldlabFiles, 'worldlab'),
+    library: buildFolderNode('library', rootFolderMeta.library?.name || 'library', libraryFiles, 'library'),
+    project: buildFolderNode('project', rootFolderMeta.project?.name || 'workspace', rootProjectFiles, 'project'),
+  }
+
   const fileTree: FileItem[] = [
-    {
-      id: 'worldlab',
-      name: 'worldlab',
-      type: 'folder',
-      children: worldlabFiles,
-    },
-    {
-      id: 'library',
-      name: 'library',
-      type: 'folder',
-      children: libraryFiles,
-    },
-    {
-      id: 'project',
-      name: 'workspace',
-      type: 'folder',
-      children: projectFiles,
-    },
+    ...rootFolderOrder
+      .filter(id => !rootFolderMeta[id]?.hidden)
+      .map(id => rootFolderNodesMap[id]),
+    ...buildProjectFolderTree(null),
   ]
 
 
@@ -564,19 +674,27 @@ function FileExplorer({
   const handleItemClick = (item: FileItem) => {
     if (item.type === 'folder') {
       // Select folder when clicking on folder name
-      const folderId = item.id === 'library' ? 'library' : item.id === 'worldlab' ? 'worldlab' : 'project'
+      const folderId = item.id === 'library'
+        ? 'library'
+        : item.id === 'worldlab'
+          ? 'worldlab'
+          : item.id === 'project'
+            ? 'project'
+            : resolveRootFolderId(item.id)
+      toggleFolder(item.id)
       setSelectedFolderId(folderId)
       setSelectedId(item.id) // Also set selectedId for visual feedback
       if (onSelectedFolderChange) {
         onSelectedFolderChange(folderId)
       }
+      if (onSelectedProjectFolderChange) {
+        onSelectedProjectFolderChange(item.id.startsWith('folder-') ? item.id : null)
+      }
     } else if (item.document) {
       setSelectedId(item.id)
-      // Determine which folder this file belongs to and set it as selected folder
-      const fileFolderId = item.document.folder === 'library' ? 'library' : item.document.folder === 'worldlab' ? 'worldlab' : 'project'
-      setSelectedFolderId(fileFolderId)
-      if (onSelectedFolderChange) {
-        onSelectedFolderChange(fileFolderId)
+      // Keep folder selection unchanged when selecting a file
+      if (onSelectedProjectFolderChange) {
+        onSelectedProjectFolderChange(null)
       }
       onDocumentClick(item.document.id)
     }
@@ -601,8 +719,14 @@ function FileExplorer({
 
   const handleRenameSubmit = (item: FileItem) => {
     if (renamingId === item.id && renameValue.trim()) {
-      if (item.document && onDocumentRename) {
-      onDocumentRename(item.document.id, renameValue.trim())
+      if (item.type === 'file' && item.document && onDocumentRename) {
+        onDocumentRename(item.document.id, renameValue.trim())
+      } else if (item.type === 'folder' && item.id.startsWith('folder-') && onFolderRename) {
+        onFolderRename(item.id, renameValue.trim())
+      } else if (item.type === 'folder' &&
+        (item.id === 'library' || item.id === 'worldlab' || item.id === 'project') &&
+        onRootFolderRename) {
+        onRootFolderRename(item.id as 'worldlab' | 'library' | 'project', renameValue.trim())
       }
       setRenamingId(null)
       setRenameValue('')
@@ -810,16 +934,46 @@ function FileExplorer({
     const isRenaming = renamingId === item.id
     const isFolder = item.type === 'folder'
     const isExpanded = isFolder && expandedFolders.has(item.id)
-    // Folders have 12px padding, files inside folders have 32px (12 + 20 for arrow/indent)
-    const paddingLeft = isFolder ? 12 : 32 // All files (library and workspace) have 32px padding
+    const isCustomFolder = isFolder && item.id.startsWith('folder-')
+    const isRootFolder = item.id === 'library' || item.id === 'worldlab' || item.id === 'project'
+    const indentBase = 10
+    const indentStep = 10
+    const fileExtraIndent = 10
+    const paddingLeft = indentBase + (indentLevel * indentStep) + (isFolder ? 0 : fileExtraIndent)
+    const showIndentGuide = indentLevel > 0 && (isExplorerHovered || (isSelected && isFolder))
+    const indentGuideLeft = indentBase + ((indentLevel - 1) * indentStep) + 4
+    const getFolderAncestors = (folderId: string): string[] => {
+      const ancestors: string[] = []
+      let currentId: string | null = folderId
+      const visited = new Set<string>()
+      while (currentId) {
+        if (visited.has(currentId)) break
+        visited.add(currentId)
+        ancestors.push(currentId)
+        const next = customFolders.find(folder => folder.id === currentId)
+        currentId = next?.parentId ?? null
+      }
+      return ancestors
+    }
+    const selectedPathIds = (() => {
+      if (!selectedId) return new Set<string>()
+      if (selectedId.startsWith('folder-')) {
+        return new Set(getFolderAncestors(selectedId))
+      }
+      return new Set<string>()
+    })()
+    const isAncestorOfSelected = selectedPathIds.has(item.id) && !isSelected
+    const ancestorBg = theme === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'
     // File items have different text color (#818181), folders keep original color
     const itemTextColor = isFolder ? textColor : '#818181'
     // Check if this item has the context menu open
     const hasContextMenu = contextMenuPos && contextMenuPos.item.id === item.id
     
     // Determine if we should show drop indicator above or below this item
-    const showIndicatorAbove = !isFolder && draggedItemId && dropTargetId === item.id && dropPosition === 'above'
-    const showIndicatorBelow = !isFolder && draggedItemId && dropTargetId === item.id && dropPosition === 'below'
+    const showIndicatorAbove = (!isFolder && draggedItemId && dropTargetId === item.id && dropPosition === 'above') ||
+      (isCustomFolder && draggedFolderId && folderDropTargetId === item.id && folderDropPosition === 'above')
+    const showIndicatorBelow = (!isFolder && draggedItemId && dropTargetId === item.id && dropPosition === 'below') ||
+      (isCustomFolder && draggedFolderId && folderDropTargetId === item.id && folderDropPosition === 'below')
 
     // Animation styles for file items (not folders) - fade in and slide down from top
     const animationStyle = !isFolder ? {
@@ -830,7 +984,10 @@ function FileExplorer({
     } : {}
 
     return (
-      <div key={item.id} style={{ position: 'relative', width: '100%', boxSizing: 'border-box', margin: 0, padding: 0, ...animationStyle }}>
+      <div
+        key={item.id}
+        style={{ position: 'relative', width: '100%', boxSizing: 'border-box', margin: 0, padding: 0, ...animationStyle }}
+      >
         {/* Drop indicator line above */}
         {showIndicatorAbove && (
           <div
@@ -839,7 +996,7 @@ function FileExplorer({
               top: 0,
               left: 0,
               right: 0,
-              height: '2px',
+              height: '1px',
               backgroundColor: indicatorColor,
               zIndex: 1000,
               pointerEvents: 'none',
@@ -847,11 +1004,24 @@ function FileExplorer({
           />
         )}
         <div
-          draggable={!isFolder}
+          data-file-item="true"
+          draggable={!isFolder || isCustomFolder}
           onDragStart={(e) => {
             if (!isFolder) {
               setDraggedItemId(item.id)
-              setDragOverEndZone(false)
+              setDropTargetId(null)
+              setDropPosition(null)
+              setDraggedFolderId(null)
+              setFolderDropTargetId(null)
+              setFolderDropPosition(null)
+              e.dataTransfer.effectAllowed = 'move'
+              return
+            }
+            if (isCustomFolder || isRootFolder) {
+              setDraggedFolderId(item.id)
+              setFolderDropTargetId(null)
+              setFolderDropPosition(null)
+              setDraggedItemId(null)
               setDropTargetId(null)
               setDropPosition(null)
               e.dataTransfer.effectAllowed = 'move'
@@ -863,9 +1033,24 @@ function FileExplorer({
             setDragOverItemId(null)
             setDropTargetId(null)
             setDropPosition(null)
-            setDragOverEndZone(false)
+            setDraggedFolderId(null)
+            setFolderDropTargetId(null)
+            setFolderDropPosition(null)
           }}
           onDragOver={(e) => {
+            if ((isCustomFolder || isRootFolder) && draggedFolderId) {
+              if (draggedFolderId !== item.id) {
+                e.preventDefault()
+                e.stopPropagation()
+                e.dataTransfer.dropEffect = 'move'
+                const rect = e.currentTarget.getBoundingClientRect()
+                const y = e.clientY - rect.top
+                const isTopHalf = y < rect.height / 2
+                setFolderDropTargetId(item.id)
+                setFolderDropPosition(isTopHalf ? 'above' : 'below')
+              }
+              return
+            }
             if (isFolder) {
               // Handle drag over folder (both external files and internal files)
               if (e.dataTransfer.types.includes('Files')) {
@@ -909,6 +1094,14 @@ function FileExplorer({
             }
           }}
           onDragLeave={(e) => {
+            if ((isCustomFolder || isRootFolder) && draggedFolderId) {
+              const relatedTarget = e.relatedTarget as Node | null
+              if (!e.currentTarget.contains(relatedTarget)) {
+                setFolderDropTargetId(null)
+                setFolderDropPosition(null)
+              }
+              return
+            }
             if (isFolder) {
               // Only clear drag over state if we're not moving to a child element
               const relatedTarget = e.relatedTarget as Node | null
@@ -921,7 +1114,6 @@ function FileExplorer({
               if (!e.currentTarget.contains(relatedTarget)) {
                 setDragOverItemId(null)
                 setDragOverFileItemId(null)
-                setDragOverEndZone(false)
                 setDropTargetId(null)
                 setDropPosition(null)
               }
@@ -930,6 +1122,35 @@ function FileExplorer({
           onDrop={(e) => {
             e.preventDefault()
             e.stopPropagation()
+            if ((isCustomFolder || isRootFolder) && draggedFolderId && draggedFolderId !== item.id) {
+              e.preventDefault()
+              e.stopPropagation()
+              if (onReorderRootFolders && (draggedFolderId === 'worldlab' || draggedFolderId === 'library' || draggedFolderId === 'project') &&
+                (item.id === 'worldlab' || item.id === 'library' || item.id === 'project')) {
+                onReorderRootFolders(
+                  draggedFolderId,
+                  item.id,
+                  folderDropPosition || 'below'
+                )
+              } else if (onReorderProjectFolders && draggedFolderId.startsWith('folder-') && item.id.startsWith('folder-')) {
+                onReorderProjectFolders(
+                  draggedFolderId,
+                  item.id,
+                  folderDropPosition || 'below'
+                )
+              } else if (onReorderProjectFolders && draggedFolderId.startsWith('folder-') &&
+                (item.id === 'worldlab' || item.id === 'library' || item.id === 'project')) {
+                onReorderProjectFolders(
+                  draggedFolderId,
+                  item.id,
+                  folderDropPosition || 'below'
+                )
+              }
+              setDraggedFolderId(null)
+              setFolderDropTargetId(null)
+              setFolderDropPosition(null)
+              return
+            }
             if (isFolder) {
               // Handle drop on folder
               const folderId = item.id === 'library' ? 'library' : item.id === 'worldlab' ? 'worldlab' : 'project'
@@ -940,12 +1161,37 @@ function FileExplorer({
                 handleFolderDrop(e, folderId)
               } else if (draggedItemId) {
                 // Handle internal file drop on folder - move file to this folder
-                const draggedItem = fileTree.flatMap(f => f.children || []).find(f => f.id === draggedItemId)
+                const findItemById = (items: FileItem[], id: string): FileItem | null => {
+                  for (const current of items) {
+                    if (current.id === id) return current
+                    if (current.children) {
+                      const found = findItemById(current.children, id)
+                      if (found) return found
+                    }
+                  }
+                  return null
+                }
+                const draggedItem = findItemById(fileTree, draggedItemId)
                 if (draggedItem && draggedItem.document) {
                   const currentFolder = draggedItem.document.folder || 'project'
                   const documentId = draggedItem.document.id
                   // Only move if folder is different
-                  if (currentFolder !== folderId) {
+                  if (item.id.startsWith('folder-')) {
+                    if (currentFolder !== 'project') {
+                      if (onDocumentFolderChange) {
+                        onDocumentFolderChange(documentId, 'project')
+                      }
+                      documentApi.updateFolder(documentId, 'project')
+                        .catch((error) => {
+                          console.error('Failed to move document to project:', error)
+                          alert('Failed to move file to folder')
+                          if (onDocumentFolderChange) {
+                            onDocumentFolderChange(documentId, currentFolder)
+                          }
+                        })
+                    }
+                    onProjectFileFolderChange?.(documentId, item.id)
+                  } else if (currentFolder !== folderId) {
                     // Optimistically update UI first
                     if (onDocumentFolderChange) {
                       onDocumentFolderChange(documentId, folderId)
@@ -961,6 +1207,9 @@ function FileExplorer({
                           onDocumentFolderChange(documentId, currentFolder)
                         }
                       })
+                    onProjectFileFolderChange?.(documentId, null)
+                  } else if (folderId === 'project') {
+                    onProjectFileFolderChange?.(documentId, null)
                   }
                 }
               }
@@ -975,16 +1224,48 @@ function FileExplorer({
                 setDragOverFileItemId(null)
               } else if (draggedItemId && draggedItemId !== item.id) {
                 // Handle internal item drop on file
-                const draggedItem = fileTree.flatMap(f => f.children || []).find(f => f.id === draggedItemId)
-                const dropItem = fileTree.flatMap(f => f.children || []).find(f => f.id === item.id)
+                const findItemById = (items: FileItem[], id: string): FileItem | null => {
+                  for (const current of items) {
+                    if (current.id === id) return current
+                    if (current.children) {
+                      const found = findItemById(current.children, id)
+                      if (found) return found
+                    }
+                  }
+                  return null
+                }
+                const draggedItem = findItemById(fileTree, draggedItemId)
+                const dropItem = findItemById(fileTree, item.id)
                 
                 if (draggedItem && dropItem && draggedItem.document && dropItem.document) {
                   const draggedFolder = draggedItem.document.folder || 'project'
                   const dropFolder = dropItem.document.folder || 'project'
                   const draggedDocumentId = draggedItem.document.id
+                  const dropCustomFolderId = projectFileFolderMap[dropItem.document.id] || null
+                  const draggedCustomFolderId = projectFileFolderMap[draggedItem.document.id] || null
                   
                   // Check if moving between folders
-                  if (draggedFolder !== dropFolder) {
+                  if (dropCustomFolderId) {
+                    if (draggedFolder !== 'project') {
+                      if (onDocumentFolderChange) {
+                        onDocumentFolderChange(draggedDocumentId, 'project')
+                      }
+                      documentApi.updateFolder(draggedDocumentId, 'project')
+                        .catch((error) => {
+                          console.error('Failed to move document to project:', error)
+                          alert('Failed to move file to folder')
+                          if (onDocumentFolderChange) {
+                            onDocumentFolderChange(draggedDocumentId, draggedFolder)
+                          }
+                        })
+                    }
+                    onProjectFileFolderChange?.(draggedDocumentId, dropCustomFolderId)
+                  } else if (draggedCustomFolderId) {
+                    // Move from custom folder to root project via drop on root project file
+                    if (dropFolder === 'project') {
+                      onProjectFileFolderChange?.(draggedDocumentId, null)
+                    }
+                  } else if (draggedFolder !== dropFolder) {
                     // Move to target folder
                     if (onDocumentFolderChange) {
                       onDocumentFolderChange(draggedDocumentId, dropFolder)
@@ -1039,7 +1320,8 @@ function FileExplorer({
             cursor: 'pointer',
             backgroundColor: isSelected ? selectedBg : 
               (!isFolder && dragOverFileItemId === item.id) ? hoverBg :
-              dragOverItemId === item.id ? hoverBg : 'transparent',
+              dragOverItemId === item.id ? hoverBg :
+              isAncestorOfSelected ? ancestorBg : 'transparent',
             color: itemTextColor,
             fontSize: '13px',
             fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
@@ -1053,6 +1335,7 @@ function FileExplorer({
             marginBottom: '0',
             opacity: draggedItemId === item.id ? 0.5 : 1,
             border: hasContextMenu ? `1px solid ${theme === 'dark' ? '#444444' : '#909090'}` : '1px solid transparent',
+            position: 'relative',
           }}
           onClick={() => handleItemClick(item)}
           onDoubleClick={() => handleDoubleClick(item)}
@@ -1075,6 +1358,19 @@ function FileExplorer({
             }
           }}
         >
+          {showIndentGuide && (
+            <div
+              style={{
+                position: 'absolute',
+                left: `${indentGuideLeft}px`,
+                top: '-1px',
+                bottom: '-1px',
+                width: '1px',
+                backgroundColor: theme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
           {/* Folder expand/collapse arrow */}
           {isFolder && (
             <span
@@ -1167,7 +1463,7 @@ function FileExplorer({
               top: isFolder && isExpanded ? '100%' : 'auto',
               left: 0,
               right: 0,
-              height: '2px',
+              height: '1px',
               backgroundColor: indicatorColor,
               zIndex: 1000,
               pointerEvents: 'none',
@@ -1236,106 +1532,6 @@ function FileExplorer({
           >
             {item.children.map((child, childIndex) => renderFileItem(child, indentLevel + 1, childIndex))}
             
-            {/* End drop zone for project folder only - allows dropping at the end */}
-            {item.id === 'project' && (() => {
-              // Calculate file count to determine drop zone height
-              const fileCount = item.children?.length || 0
-              // Increase height when there are fewer files (minimum 300px, decreases as files increase)
-              const dropZoneHeight = Math.max(300 - (fileCount * 10), 80)
-              
-              return (
-                <div
-                  onDragOver={(e) => {
-                    // Handle both internal file drag and external file drag
-                    if (draggedItemId) {
-                      // Check if dragged item is from project folder
-                      const projectFolder = fileTree.find(f => f.id === 'project')
-                      const isFromProjectFolder = projectFolder?.children?.some(child => child.id === draggedItemId)
-                      
-                      if (isFromProjectFolder) {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        e.dataTransfer.dropEffect = 'move'
-                        setDragOverEndZone(true)
-                      }
-                    } else if (e.dataTransfer.types.includes('Files')) {
-                      // External files being dragged
-                      e.preventDefault()
-                      e.stopPropagation()
-                      e.dataTransfer.dropEffect = 'copy'
-                      setDragOverEndZone(true)
-                    }
-                  }}
-                  onDragLeave={(e) => {
-                    const relatedTarget = e.relatedTarget as Node | null
-                    if (!e.currentTarget.contains(relatedTarget)) {
-                      setDragOverEndZone(false)
-                    }
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setDragOverEndZone(false)
-                    
-                    // Handle external file drop
-                    if (e.dataTransfer.types.includes('Files')) {
-                      handleFolderDrop(e, 'project')
-                      return
-                    }
-                    
-                    // Handle internal item reorder - move to end
-                    if (draggedItemId && onReorderDocuments) {
-                      // Get all files from the project folder
-                      const projectFolder = fileTree.find(f => f.id === 'project')
-                      if (projectFolder && projectFolder.children) {
-                        const projectFiles = [...projectFolder.children]
-                        const draggedIndex = projectFiles.findIndex(f => f.id === draggedItemId)
-                        
-                        if (draggedIndex !== -1) {
-                          // Remove from current position and add to end
-                          const newOrder = [...projectFiles]
-                          const [draggedItem] = newOrder.splice(draggedIndex, 1)
-                          newOrder.push(draggedItem)
-                          
-                          const documentIds = newOrder.map(f => f.id).filter(id => {
-                            const fileItem = projectFiles.find(f => f.id === id)
-                            return fileItem?.document
-                          })
-                          
-                          onReorderDocuments(documentIds)
-                        }
-                      }
-                    }
-                    
-                    setDraggedItemId(null)
-                  }}
-                  style={{
-                    position: 'relative',
-                    minHeight: `${dropZoneHeight}px`,
-                    paddingLeft: '32px',
-                    backgroundColor: dragOverEndZone ? hoverBg : 'transparent',
-                    transition: 'background-color 0.15s',
-                    borderTop: dragOverEndZone ? `2px solid ${indicatorColor}` : 'none',
-                  }}
-                >
-                  {/* Drop indicator line at the top of end zone */}
-                  {dragOverEndZone && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: '2px',
-                        backgroundColor: indicatorColor,
-                        zIndex: 1000,
-                        pointerEvents: 'none',
-                      }}
-                    />
-                  )}
-                </div>
-              )
-            })()}
           </div>
         )}
       </div>
@@ -1761,11 +1957,25 @@ function FileExplorer({
           boxSizing: 'border-box',
           position: 'relative',
         }}
-      onClick={() => {
+      onMouseEnter={() => setIsExplorerHovered(true)}
+      onMouseLeave={() => setIsExplorerHovered(false)}
+      onClick={(e) => {
         // Only handle context menu closing if not in search mode
         // In search mode, let search results handle their own clicks
-        if (!isSearchMode) {
+        if (isSearchMode) return
+
+        const target = e.target as HTMLElement
+        const clickedFileItem = target.closest?.('[data-file-item="true"]')
+        if (!clickedFileItem) {
           setContextMenuPos(null)
+          setSelectedId(null)
+          setSelectedFolderId(null)
+          if (onSelectedFolderChange) {
+            onSelectedFolderChange(null)
+          }
+          if (onSelectedProjectFolderChange) {
+            onSelectedProjectFolderChange(null)
+          }
         }
       }}
     >
@@ -1796,14 +2006,16 @@ function FileExplorer({
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Only show rename for files, not folders */}
-          {contextMenuPos.item.type === 'file' && contextMenuPos.item.document && (
+          {/* Rename for files and custom folders */}
+          {((contextMenuPos.item.type === 'file' && contextMenuPos.item.document) ||
+            (contextMenuPos.item.type === 'folder' && (contextMenuPos.item.id.startsWith('folder-') ||
+              contextMenuPos.item.id === 'library' ||
+              contextMenuPos.item.id === 'worldlab' ||
+              contextMenuPos.item.id === 'project'))) && (
             <button
               onClick={(e) => {
-                if (contextMenuPos.item.document) {
-                  setRenamingId(contextMenuPos.item.id)
-                  setRenameValue(contextMenuPos.item.name)
-                }
+                setRenamingId(contextMenuPos.item.id)
+                setRenameValue(contextMenuPos.item.name)
                 setContextMenuPos(null)
                 // Blur the button to prevent focus outline flash
                 e.currentTarget.blur()
@@ -1833,6 +2045,52 @@ function FileExplorer({
           >
             Rename
           </button>
+          )}
+          {contextMenuPos.item.type === 'folder' &&
+            (contextMenuPos.item.id.startsWith('folder-') ||
+              contextMenuPos.item.id === 'library' ||
+              contextMenuPos.item.id === 'worldlab' ||
+              contextMenuPos.item.id === 'project') &&
+            ((contextMenuPos.item.id.startsWith('folder-') && onFolderDelete) ||
+              ((contextMenuPos.item.id === 'library' ||
+                contextMenuPos.item.id === 'worldlab' ||
+                contextMenuPos.item.id === 'project') && onRootFolderDelete)) && (
+            <button
+              onClick={(e) => {
+                if (contextMenuPos.item.id.startsWith('folder-')) {
+                  onFolderDelete?.(contextMenuPos.item.id)
+                } else {
+                  onRootFolderDelete?.(contextMenuPos.item.id as 'worldlab' | 'library' | 'project')
+                }
+                setContextMenuPos(null)
+                // Blur the button to prevent focus outline flash
+                e.currentTarget.blur()
+              }}
+              style={{
+                width: '100%',
+                padding: '8px 16px',
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontSize: '13px',
+                fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
+                color: dropdownTextColor,
+                textAlign: 'left',
+                transition: 'background-color 0.15s',
+                outline: 'none',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = dropdownHoverBg
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }}
+            >
+              Delete
+            </button>
           )}
           {(contextMenuPos.item.document || contextMenuPos.item.type === 'file') && onDocumentDelete && (
             <button

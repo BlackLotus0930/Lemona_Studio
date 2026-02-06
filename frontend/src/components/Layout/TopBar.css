@@ -42,6 +42,7 @@
   width: 20px;
   margin-left: 4px;
   -webkit-app-region: no-drag; /* Prevent dragging on logo */
+  cursor: pointer;
 }
 
 .logo-image {

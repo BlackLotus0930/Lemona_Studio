@@ -714,15 +714,15 @@ function AIPanel({ document, onClose }: AIPanelProps) {
       <div 
         ref={headerScrollRef}
         style={{
-          paddingTop: '6px',
-          paddingBottom: '6px',
-          paddingLeft: '12px',
-          paddingRight: '12px',
+          height: '36px',
+          paddingLeft: '8px',
+          paddingRight: '8px',
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
           backgroundColor: brighterBg,
-          overflow: 'hidden'
+          overflow: 'hidden',
+          boxSizing: 'border-box'
         }}>
         {/* Chat Containers - Scrollable area that compresses */}
         <div 
@@ -775,8 +775,7 @@ function AIPanel({ document, onClose }: AIPanelProps) {
                 }
               }}
               style={{
-                paddingTop: '4px',
-                paddingBottom: '6px',
+                height: '28px',
                 paddingLeft: '8px',
                 paddingRight: '8px',
                 borderRadius: '6px',
@@ -891,7 +890,7 @@ function AIPanel({ document, onClose }: AIPanelProps) {
           <button
             onClick={handleNewChat}
             style={{
-              padding: '4px 5px',
+              padding: '0',
               border: 'none',
               borderRadius: '6px',
               backgroundColor: 'transparent',
@@ -902,6 +901,8 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               alignItems: 'center',
               justifyContent: 'center',
               transition: 'color 0.15s',
+              width: '28px',
+              height: '28px',
               minWidth: '28px',
               minHeight: '28px'
             }}
@@ -913,7 +914,7 @@ function AIPanel({ document, onClose }: AIPanelProps) {
             }}
             title="New chat"
           >
-            <AddIcon style={{ fontSize: '19px', fontWeight: 300 }} />
+            <AddIcon style={{ fontSize: '20px', fontWeight: 300 }} />
           </button>
           
           <button
@@ -923,7 +924,7 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               setShowMenu(false) // Close other menu if open
             }}
             style={{
-              padding: '4px 8px 4px 7px',
+              padding: '0',
               border: 'none',
               borderRadius: '6px',
               backgroundColor: 'transparent',
@@ -934,6 +935,8 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               alignItems: 'center',
               justifyContent: 'center',
               transition: 'color 0.15s',
+              width: '28px',
+              height: '28px',
               minWidth: '28px',
               minHeight: '28px'
             }}
@@ -945,14 +948,14 @@ function AIPanel({ document, onClose }: AIPanelProps) {
             }}
             title="History"
           >
-            <HistoryIcon style={{ fontSize: '16px', fontWeight: 300 }} />
+            <HistoryIcon style={{ fontSize: '17px', fontWeight: 300 }} />
           </button>
           
           </div>
           <button
             onClick={onClose}
             style={{
-              padding: '4px 6px',
+              padding: '0',
               border: 'none',
               borderRadius: '6px',
               backgroundColor: 'transparent',
@@ -965,8 +968,10 @@ function AIPanel({ document, onClose }: AIPanelProps) {
               transition: 'color 0.15s',
               transform: 'translateY(0.5px)',
               marginLeft: '0px',
-              minWidth: '26px',
-              minHeight: '26px'
+              width: '28px',
+              height: '28px',
+              minWidth: '28px',
+              minHeight: '28px'
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.color = theme === 'dark' ? '#d6d6d6' : '#5a5a5a'

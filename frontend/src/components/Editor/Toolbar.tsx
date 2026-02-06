@@ -1,24 +1,8 @@
 import { Editor } from '@tiptap/react'
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useEditorContext } from '../../contexts/EditorContext'
-import ExportModal from '../Layout/ExportModal'
-import KeyboardShortcutsModal from '../Layout/KeyboardShortcutsModal'
-import CommitHistoryModal from '../Layout/CommitHistoryModal'
-import { Document } from '@shared/types'
-// @ts-ignore
-import ShareIcon from '@mui/icons-material/Share'
 // @ts-ignore - Material UI icons
-import SearchIcon from '@mui/icons-material/Search'
-// @ts-ignore
-import HomeIcon from '@mui/icons-material/Home'
-// @ts-ignore
-import DarkModeIcon from '@mui/icons-material/DarkMode'
-// @ts-ignore
-import LightModeIcon from '@mui/icons-material/LightMode'
-// @ts-ignore
-import KeyboardIcon from '@mui/icons-material/Keyboard'
 // @ts-ignore
 import UndoIcon from '@mui/icons-material/Undo'
 // @ts-ignore
@@ -50,10 +34,6 @@ import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted'
 // @ts-ignore
 import FormatListNumberedIcon from '@mui/icons-material/FormatListNumbered'
 // @ts-ignore
-import FormatIndentDecreaseIcon from '@mui/icons-material/FormatIndentDecrease'
-// @ts-ignore
-import FormatIndentIncreaseIcon from '@mui/icons-material/FormatIndentIncrease'
-// @ts-ignore
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
 // @ts-ignore
 import AddIcon from '@mui/icons-material/Add'
@@ -70,24 +50,14 @@ import BarChartIcon from '@mui/icons-material/BarChart'
 // @ts-ignore
 import TableChartIcon from '@mui/icons-material/TableChart'
 // @ts-ignore
-import ShowChartIcon from '@mui/icons-material/ShowChart'
-// @ts-ignore
 import PieChartIcon from '@mui/icons-material/PieChart'
 // @ts-ignore
 import TimelineIcon from '@mui/icons-material/Timeline'
 // @ts-ignore
-import TurnedInNotOutlinedIcon from '@mui/icons-material/TurnedInNotOutlined'
 
 interface ToolbarProps {
   editor: Editor | null
-  onToggleSearch?: () => void
-  isSearchActive?: boolean
-  onExport?: (format: 'pdf' | 'docx', filename?: string, documentIds?: string[], usePageBreaks?: boolean) => void
-  documents?: Document[]
-  projectName?: string
   documentTitle?: string
-  onRestoreCommit?: (commitId: string) => void // Callback to set restored commit parent
-  onDocumentsReload?: () => void // Callback to reload documents after restore
   customUndoRedo?: {
     undo: () => void
     redo: () => void
@@ -98,18 +68,10 @@ interface ToolbarProps {
 
 export default function Toolbar({ 
   editor: editorProp, 
-  onToggleSearch, 
-  isSearchActive = false,
-  onExport,
-  documents = [],
-  projectName = 'LEMONA',
   documentTitle,
-  onRestoreCommit,
-  onDocumentsReload,
   customUndoRedo
 }: ToolbarProps) {
-  const navigate = useNavigate()
-  const { theme, toggleTheme } = useTheme()
+  const { theme } = useTheme()
   const { currentEditor } = useEditorContext()
   // Use currentEditor from context, fallback to editorProp for backward compatibility
   const editor = currentEditor || editorProp
@@ -125,83 +87,6 @@ export default function Toolbar({
   // Only use stable editor if current editor is null/destroyed, otherwise use current editor
   const stableEditor = (editor && !editor.isDestroyed) ? editor : editorRef.current
 
-  // Helper function to safely lift only the current list item by exactly one level
-  const safeLiftCurrentListItem = (editor: Editor) => {
-    if (!editor || editor.isDestroyed) return false
-    
-    const { state } = editor
-    const { $from } = state.selection
-    const { listItem } = state.schema.nodes
-    
-    // Find the current list item that contains the cursor
-    let currentListItemDepth = -1
-    for (let d = $from.depth; d > 0; d--) {
-      const node = $from.node(d)
-      if (node.type === listItem || node.type.name === 'listItem') {
-        currentListItemDepth = d
-        break
-      }
-    }
-    
-    // If not in a list item, return false
-    if (currentListItemDepth === -1) {
-      return false
-    }
-    
-    // Check if we can lift (must have a parent list)
-    if (currentListItemDepth <= 1) {
-      // Already at top level, can't lift
-      return false
-    }
-    
-    // Find the parent list node
-    const parentListDepth = currentListItemDepth - 1
-    const parentList = $from.node(parentListDepth)
-    
-    // Only lift if parent is actually a list (bulletList or orderedList)
-    if (parentList.type.name !== 'bulletList' && parentList.type.name !== 'orderedList') {
-      return false
-    }
-    
-    // Store the current depth before lifting
-    const depthBeforeLift = currentListItemDepth
-    
-    // Use liftListItem - TipTap's liftListItem only lifts one level by default
-    const liftResult = editor.commands.liftListItem('listItem')
-    
-    if (liftResult) {
-      // Verify that we only lifted one level
-      const newState = editor.state
-      const new$from = newState.selection.$from
-      
-      // Find the new list item depth
-      let newListItemDepth = -1
-      for (let d = new$from.depth; d > 0; d--) {
-        const node = new$from.node(d)
-        if (node.type === listItem || node.type.name === 'listItem') {
-          newListItemDepth = d
-          break
-        }
-      }
-      
-      // If we're no longer in a list item, the lift was successful (lifted out of list)
-      if (newListItemDepth === -1) {
-        return true
-      }
-      
-      // If the depth decreased by exactly 1, the lift was successful and limited to one level
-      if (newListItemDepth === depthBeforeLift - 1) {
-        return true
-      }
-      
-      // If depth didn't change or changed incorrectly, something went wrong
-      // But we'll still return true since liftListItem succeeded
-      return true
-    }
-    
-    return false
-  }
-  
   // Check if current document is a PDF (PDFs don't have TipTap editor)
   const isPDF = documentTitle?.toLowerCase().endsWith('.pdf')
   const [fontSize, setFontSize] = useState(14)
@@ -434,19 +319,13 @@ export default function Toolbar({
   const [showHighlightMenu, setShowHighlightMenu] = useState(false)
   const [showAlignMenu, setShowAlignMenu] = useState(false)
   const [showSpacingMenu, setShowSpacingMenu] = useState(false)
-  const [showGraphMenu, setShowGraphMenu] = useState(false)
+  const [showInsertMenu, setShowInsertMenu] = useState(false)
   const [, forceUpdate] = useState({})
   const toolbarRef = useRef<HTMLDivElement>(null)
-  const [showExportModal, setShowExportModal] = useState(false)
-  const [showKeyboardShortcutsModal, setShowKeyboardShortcutsModal] = useState(false)
-  const [showCommitHistoryModal, setShowCommitHistoryModal] = useState(false)
-  const keyboardShortcutsButtonRef = useRef<HTMLButtonElement>(null)
-  const commitHistoryButtonRef = useRef<HTMLButtonElement>(null)
   const [showMathMenu, setShowMathMenu] = useState(false)
   const [showLinkDialog, setShowLinkDialog] = useState(false)
   const [mathFormula, setMathFormula] = useState('')
   const [linkUrl, setLinkUrl] = useState('')
-  const shareButtonRef = useRef<HTMLButtonElement>(null)
   const mathInputRef = useRef<HTMLInputElement>(null)
   const linkInputRef = useRef<HTMLInputElement>(null)
   const styleMenuRef = useRef<HTMLDivElement>(null)
@@ -455,8 +334,7 @@ export default function Toolbar({
   const highlightMenuRef = useRef<HTMLDivElement>(null)
   const alignMenuRef = useRef<HTMLDivElement>(null)
   const spacingMenuRef = useRef<HTMLDivElement>(null)
-  const graphMenuRef = useRef<HTMLDivElement>(null)
-  const mathMenuRef = useRef<HTMLDivElement>(null)
+  const insertMenuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fontSizeMenuRef = useRef<HTMLDivElement>(null)
   // Refs for dropdown menu divs (not buttons)
@@ -467,7 +345,7 @@ export default function Toolbar({
   const highlightDropdownRef = useRef<HTMLDivElement>(null)
   const alignDropdownRef = useRef<HTMLDivElement>(null)
   const spacingDropdownRef = useRef<HTMLDivElement>(null)
-  const graphDropdownRef = useRef<HTMLDivElement>(null)
+  const insertDropdownRef = useRef<HTMLDivElement>(null)
   const mathDropdownRef = useRef<HTMLDivElement>(null)
 
   // Function to close all menus except the one specified
@@ -479,7 +357,7 @@ export default function Toolbar({
     if (except !== 'highlight') setShowHighlightMenu(false)
     if (except !== 'align') setShowAlignMenu(false)
     if (except !== 'spacing') setShowSpacingMenu(false)
-    if (except !== 'graph') setShowGraphMenu(false)
+    if (except !== 'insert') setShowInsertMenu(false)
     if (except !== 'math') setShowMathMenu(false)
   }
 
@@ -614,13 +492,13 @@ export default function Toolbar({
       const isInsideHighlightMenu = highlightMenuRef.current?.contains(target) || highlightDropdownRef.current?.contains(target)
       const isInsideAlignMenu = alignMenuRef.current?.contains(target) || alignDropdownRef.current?.contains(target)
       const isInsideSpacingMenu = spacingMenuRef.current?.contains(target) || spacingDropdownRef.current?.contains(target)
-      const isInsideGraphMenu = graphMenuRef.current?.contains(target) || graphDropdownRef.current?.contains(target)
-      const isInsideMathMenu = mathMenuRef.current?.contains(target) || mathDropdownRef.current?.contains(target)
+      const isInsideInsertMenu = insertMenuRef.current?.contains(target) || insertDropdownRef.current?.contains(target)
+      const isInsideMathMenu = insertMenuRef.current?.contains(target) || mathDropdownRef.current?.contains(target)
       
       // Close menus if click is outside all menus and toolbar
       if (!isInsideToolbar && !isInsideStyleMenu && !isInsideFontMenu && 
           !isInsideFontSizeMenu && !isInsideColorMenu && !isInsideHighlightMenu &&
-          !isInsideAlignMenu && !isInsideSpacingMenu && !isInsideGraphMenu && !isInsideMathMenu) {
+          !isInsideAlignMenu && !isInsideSpacingMenu && !isInsideInsertMenu && !isInsideMathMenu) {
         closeAllMenusExcept(null)
       }
     }
@@ -1062,7 +940,7 @@ export default function Toolbar({
       }
     }
     
-    setShowGraphMenu(false)
+    setShowInsertMenu(false)
   }
 
 
@@ -1086,12 +964,9 @@ export default function Toolbar({
   }
 
   const handleInsertMath = () => {
-    const newState = !showMathMenu
-    closeAllMenusExcept(newState ? 'math' : null)
-    setShowMathMenu(newState)
-    if (newState) {
-      setMathFormula('')
-    }
+    closeAllMenusExcept('math')
+    setShowMathMenu(true)
+    setMathFormula('')
   }
 
   const handleMathSubmit = () => {
@@ -1201,6 +1076,7 @@ export default function Toolbar({
         display: 'flex',
         gap: '2px',
         alignItems: 'center',
+        justifyContent: 'center',
         backgroundColor: toolbarBgColor,
         width: '100%',
         overflowX: 'auto',
@@ -1209,38 +1085,6 @@ export default function Toolbar({
         zIndex: 10005
       }}
     >
-      {/* Home Icon */}
-      <button 
-        style={buttonStyle}
-        title="Home"
-        onMouseDown={(e) => {
-          e.preventDefault()
-          navigate('/documents')
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        <HomeIcon style={{ fontSize: '19px' }} />
-      </button>
-
-      {/* Search */}
-      <button 
-        style={isSearchActive ? activeButtonStyle : buttonStyle}
-        title="Search"
-        onMouseDown={(e) => {
-          e.preventDefault()
-          onToggleSearch?.()
-        }}
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => {
-          if (!isSearchActive) {
-            e.currentTarget.style.backgroundColor = 'transparent'
-          }
-        }}
-      >
-        <SearchIcon style={{ fontSize: '18px', transform: 'translateY(1px)' }} />
-      </button>
-
       {/* Undo/Redo - Use custom handlers if provided, otherwise use editor's undo/redo */}
       <button
         onMouseDown={(e) => {
@@ -1295,41 +1139,6 @@ export default function Toolbar({
         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
       >
         <RedoIcon style={{ fontSize: '20px' }} />
-      </button>
-
-      {/* Theme Toggle */}
-      <button 
-        style={buttonStyle}
-        title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-        onClick={toggleTheme}
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        {theme === 'light' ? (
-          <DarkModeIcon style={{ fontSize: '17px', transform: 'translateY(0.5px)' }} />
-        ) : (
-          <LightModeIcon style={{ fontSize: '17px', transform: 'translateY(0.5px)' }} />
-        )}
-      </button>
-
-      {/* Keyboard Shortcuts */}
-      <button
-        ref={keyboardShortcutsButtonRef}
-        style={showKeyboardShortcutsModal ? activeButtonStyle : buttonStyle}
-        title="Keyboard shortcuts"
-        onClick={() => setShowKeyboardShortcutsModal(!showKeyboardShortcutsModal)}
-        onMouseEnter={(e) => {
-          if (!showKeyboardShortcutsModal) {
-            e.currentTarget.style.backgroundColor = toolbarHoverBg
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!showKeyboardShortcutsModal) {
-            e.currentTarget.style.backgroundColor = 'transparent'
-          }
-        }}
-      >
-        <KeyboardIcon style={{ fontSize: '19px' }} />
       </button>
 
       <div style={{ ...dividerStyle, marginLeft: '7px' }} />
@@ -2033,21 +1842,7 @@ export default function Toolbar({
 
       <div style={dividerStyle} />
 
-      {/* Insert Link */}
-      <button
-        onMouseDown={(e) => {
-          e.preventDefault()
-          handleInsertLink()
-        }}
-        style={buttonStyle}
-        title="Insert link"
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        <LinkIcon style={{ fontSize: '20px' }} />
-      </button>
-
-      {/* Insert Image */}
+      {/* Insert */}
       <input
         ref={fileInputRef}
         type="file"
@@ -2055,53 +1850,43 @@ export default function Toolbar({
         style={{ display: 'none' }}
         onChange={handleImageFileSelect}
       />
-      <button
-        onMouseDown={(e) => {
-          e.preventDefault()
-          handleInsertImage()
-        }}
-        style={buttonStyle}
-        title="Insert image"
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        <ImageIcon style={{ fontSize: '20px' }} />
-      </button>
-
-      {/* Insert Graph */}
-      <div ref={graphMenuRef} style={{ position: 'relative' }}>
+      <div ref={insertMenuRef} style={{ position: 'relative' }}>
         <button
           onMouseDown={(e) => {
             e.preventDefault()
-            const newState = !showGraphMenu
-            closeAllMenusExcept(newState ? 'graph' : null)
-            setShowGraphMenu(newState)
+            const newState = !showInsertMenu
+            closeAllMenusExcept(newState ? 'insert' : null)
+            setShowInsertMenu(newState)
           }}
-          style={showGraphMenu ? activeButtonStyle : buttonStyle}
-          title="Insert graph"
+          style={showInsertMenu ? activeButtonStyle : buttonStyle}
+          title="Insert"
           onMouseEnter={(e) => {
-            if (!showGraphMenu) {
+            if (!showInsertMenu) {
               e.currentTarget.style.backgroundColor = toolbarHoverBg
             }
           }}
           onMouseLeave={(e) => {
-            if (!showGraphMenu) {
+            if (!showInsertMenu) {
               e.currentTarget.style.backgroundColor = 'transparent'
             }
           }}
         >
-          <BarChartIcon style={{ fontSize: '20px' }} />
+          <ImageIcon style={{ fontSize: '18px', marginRight: '2px' }} />
+          <ArrowDropDownIcon style={{ fontSize: '18px' }} />
         </button>
-        {showGraphMenu && (() => {
-          const rect = graphMenuRef.current?.getBoundingClientRect()
-          const graphTypes = [
-            { label: 'Table', value: 'table' as const, icon: TableChartIcon },
-            { label: 'Column', value: 'column' as const, icon: BarChartIcon },
-            { label: 'Line', value: 'line' as const, icon: TimelineIcon },
-            { label: 'Pie', value: 'pie' as const, icon: PieChartIcon },
+        {showInsertMenu && (() => {
+          const rect = insertMenuRef.current?.getBoundingClientRect()
+          const insertItems = [
+            { label: 'Link', icon: LinkIcon, onSelect: () => handleInsertLink() },
+            { label: 'Image', icon: ImageIcon, onSelect: () => handleInsertImage() },
+            { label: 'Math', icon: FunctionsIcon, onSelect: () => handleInsertMath() },
+            { label: 'Table', icon: TableChartIcon, onSelect: () => handleInsertGraph('table') },
+            { label: 'Column', icon: BarChartIcon, onSelect: () => handleInsertGraph('column') },
+            { label: 'Line', icon: TimelineIcon, onSelect: () => handleInsertGraph('line') },
+            { label: 'Pie', icon: PieChartIcon, onSelect: () => handleInsertGraph('pie') },
           ]
           return (
-            <div ref={graphDropdownRef} style={{
+            <div ref={insertDropdownRef} style={{
               position: 'fixed',
               top: rect ? `${rect.bottom + 8}px` : '100%',
               left: rect ? `${rect.left}px` : 0,
@@ -2112,20 +1897,21 @@ export default function Toolbar({
                 ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)' 
                 : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
               zIndex: 10010,
-              minWidth: '150px',
-              maxWidth: '150px',
+              minWidth: '160px',
+              maxWidth: '180px',
               padding: '4px',
               backdropFilter: 'blur(20px)',
               transition: 'opacity 0.2s ease, transform 0.2s ease'
             }}>
-            {graphTypes.map((graphType) => {
-              const IconComponent = graphType.icon
+            {insertItems.map((item) => {
+              const IconComponent = item.icon
               return (
                 <div
-                  key={graphType.value}
+                  key={item.label}
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    handleInsertGraph(graphType.value)
+                    item.onSelect()
+                    setShowInsertMenu(false)
                   }}
                   style={{
                     padding: '10px 14px',
@@ -2148,7 +1934,7 @@ export default function Toolbar({
                   }}
                 >
                   <IconComponent style={{ fontSize: '18px', color: dropdownTextColor }} />
-                  <span>{graphType.label}</span>
+                  <span>{item.label}</span>
                 </div>
               )
             })}
@@ -2158,29 +1944,9 @@ export default function Toolbar({
       </div>
 
       {/* Insert Math Formula */}
-      <div ref={mathMenuRef} style={{ position: 'relative' }}>
-        <button
-          onMouseDown={(e) => {
-            e.preventDefault()
-            handleInsertMath()
-          }}
-          style={showMathMenu ? activeButtonStyle : buttonStyle}
-          title="Insert math formula (inline)"
-          onMouseEnter={(e) => {
-            if (!showMathMenu) {
-              e.currentTarget.style.backgroundColor = toolbarHoverBg
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!showMathMenu) {
-              e.currentTarget.style.backgroundColor = 'transparent'
-            }
-          }}
-        >
-          <FunctionsIcon style={{ fontSize: '20px' }} />
-        </button>
+      <div>
         {showMathMenu && (() => {
-          const rect = mathMenuRef.current?.getBoundingClientRect()
+          const rect = insertMenuRef.current?.getBoundingClientRect()
           const dropdownWidth = 300
           const buttonCenter = rect ? rect.left + rect.width / 2 : 0
           return (
@@ -2274,7 +2040,7 @@ export default function Toolbar({
 
       <div style={dividerStyle} />
 
-      {/* Align & Indent */}
+      {/* Align */}
       <div ref={alignMenuRef} style={{ position: 'relative' }}>
         <button
           onMouseDown={(e) => {
@@ -2284,7 +2050,7 @@ export default function Toolbar({
             setShowAlignMenu(newState)
           }}
           style={{ ...buttonStyle, padding: '4px 4px 4px 4px' }}
-          title="Align & indent"
+          title="Align"
           onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
           onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
         >
@@ -2361,37 +2127,6 @@ export default function Toolbar({
               >
                 <FormatAlignJustifyIcon style={{ fontSize: '20px' }} />
               </button>
-              </div>
-            </div>
-            <div style={{ padding: '4px 0' }}>
-              <div style={{ fontSize: '12px', color: theme === 'dark' ? '#858585' : '#5f6368', padding: '4px 8px' }}>Indent</div>
-              <div style={{ display: 'flex', gap: '4px', padding: '4px' }}>
-                <button
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    if (!canUseEditor()) return
-                    safeLiftCurrentListItem(stableEditor!)
-                    setShowAlignMenu(false)
-                  }}
-                  style={{ ...buttonStyle, minWidth: '36px' }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  <FormatIndentDecreaseIcon style={{ fontSize: '20px' }} />
-                </button>
-                <button
-                  onMouseDown={(e) => {
-                    e.preventDefault()
-                    if (!canUseEditor()) return
-                    stableEditor!.chain().focus().sinkListItem('listItem').run()
-                    setShowAlignMenu(false)
-                  }}
-                  style={{ ...buttonStyle, minWidth: '36px' }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                >
-                  <FormatIndentIncreaseIcon style={{ fontSize: '20px' }} />
-                </button>
               </div>
             </div>
             </div>
@@ -2511,124 +2246,6 @@ export default function Toolbar({
         <FormatListNumberedIcon style={{ fontSize: '20px' }} />
       </button>
 
-      {/* Increase Indent - Disabled for PDF files */}
-      <button
-        onMouseDown={(e) => {
-          e.preventDefault()
-          if (canUseEditor()) {
-            stableEditor!.chain().focus().sinkListItem('listItem').run()
-          }
-        }}
-        disabled={!canUseEditor()}
-        style={buttonStyle}
-        title="Increase indent"
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        <FormatIndentIncreaseIcon style={{ fontSize: '20px' }} />
-      </button>
-
-      {/* Decrease Indent - Disabled for PDF files */}
-      <button
-        onMouseDown={(e) => {
-          e.preventDefault()
-          if (canUseEditor()) {
-            safeLiftCurrentListItem(stableEditor!)
-          }
-        }}
-        disabled={!canUseEditor()}
-        style={buttonStyle}
-        title="Decrease indent"
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = toolbarHoverBg}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-      >
-        <FormatIndentDecreaseIcon style={{ fontSize: '20px' }} />
-      </button>
-
-      <div style={{ flex: 1 }} />
-
-      {/* Commit History Button */}
-      {(() => {
-        // Get projectId from documents (use first document's projectId)
-        // Find first document with a valid projectId
-        const docWithProject = documents.find(doc => doc.projectId && typeof doc.projectId === 'string' && doc.projectId.trim() !== '')
-        const projectId = docWithProject?.projectId || null
-        
-        if (!projectId || projectId.trim() === '') return null // Don't show button if no valid project
-        
-        return (
-          <>
-            <button
-              ref={commitHistoryButtonRef}
-              onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                setShowCommitHistoryModal((prev: boolean) => !prev)
-              }}
-              style={showCommitHistoryModal ? activeButtonStyle : buttonStyle}
-              title="Version History"
-              onMouseEnter={(e) => {
-                if (!showCommitHistoryModal) {
-                  e.currentTarget.style.backgroundColor = toolbarHoverBg
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!showCommitHistoryModal) {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                }
-              }}
-            >
-              <TurnedInNotOutlinedIcon style={{ fontSize: '19px' }} />
-            </button>
-            <CommitHistoryModal
-              projectId={projectId}
-              isOpen={showCommitHistoryModal}
-              onClose={() => setShowCommitHistoryModal(false)}
-              triggerRef={commitHistoryButtonRef}
-              onRestore={onRestoreCommit}
-              onDocumentsReload={onDocumentsReload}
-            />
-          </>
-        )
-      })()}
-
-      {/* Share Button */}
-      {onExport && (
-        <>
-          <button
-            ref={shareButtonRef}
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              setShowExportModal((prev: boolean) => !prev)
-            }}
-            style={showExportModal ? activeButtonStyle : buttonStyle}
-            title="Export"
-            onMouseEnter={(e) => {
-              if (!showExportModal) {
-                e.currentTarget.style.backgroundColor = toolbarHoverBg
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!showExportModal) {
-                e.currentTarget.style.backgroundColor = 'transparent'
-              }
-            }}
-          >
-            <ShareIcon style={{ fontSize: '19px' }} />
-          </button>
-          <ExportModal
-            isOpen={showExportModal}
-            onClose={() => setShowExportModal(false)}
-            onExport={onExport}
-            documents={documents}
-            projectName={projectName}
-            documentTitle={documentTitle}
-            triggerRef={shareButtonRef}
-          />
-        </>
-      )}
-
       {/* Link URL Input Dialog */}
       {showLinkDialog && (
         <div
@@ -2728,12 +2345,6 @@ export default function Toolbar({
         </div>
       )}
 
-      {/* Keyboard Shortcuts Modal */}
-      <KeyboardShortcutsModal
-        isOpen={showKeyboardShortcutsModal}
-        onClose={() => setShowKeyboardShortcutsModal(false)}
-        triggerRef={keyboardShortcutsButtonRef}
-      />
     </div>
   )
 }

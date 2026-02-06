@@ -44,16 +44,31 @@ import CodeIcon from '@mui/icons-material/Code'
 // @ts-ignore
 import TerminalIcon from '@mui/icons-material/Terminal'
 // @ts-ignore
-import AddIcon from '@mui/icons-material/Add'
+import NoteAddOutlinedIcon from '@mui/icons-material/NoteAddOutlined'
 // @ts-ignore
-import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder'
+import CreateNewFolderOutlinedIcon from '@mui/icons-material/CreateNewFolderOutlined'
+import ExportModal from './ExportModal'
+// @ts-ignore
+import ShareIcon from '@mui/icons-material/Share'
+// @ts-ignore
+import SearchIcon from '@mui/icons-material/Search'
+// @ts-ignore
+import FileCopyOutlinedIcon from '@mui/icons-material/FileCopyOutlined'
+// @ts-ignore
+import MergeTypeIcon from '@mui/icons-material/MergeType'
 import TopBar from './TopBar'
 import { useNavigate, useParams } from 'react-router-dom'
 import WordCountModal from './WordCountModal'
+import CommitHistoryModal from './CommitHistoryModal'
 
 const AI_PANEL_STORAGE_KEY = 'aiPanelState'
 const FILE_EXPLORER_SIZE_STORAGE_KEY = 'fileExplorerSize'
 const FILE_EXPLORER_LAST_OPEN_SIZE_KEY = 'fileExplorerLastOpenSize'
+const PROJECT_FOLDERS_STORAGE_KEY = 'projectFolders'
+const PROJECT_FILE_FOLDER_MAP_STORAGE_KEY = 'projectFileFolderMap'
+const PROJECT_ROOT_FOLDER_ORDER_KEY = 'projectRootFolderOrder'
+const PROJECT_ROOT_FOLDER_META_KEY = 'projectRootFolderMeta'
+const TOP_ROW_HEIGHT = 36
 
 interface AIPanelState {
   isOpen: boolean
@@ -123,6 +138,121 @@ function loadFileExplorerLastOpenSize(): number {
     console.error('Failed to load FileExplorer last open size:', error)
   }
   return 14 // Default size
+}
+
+type ProjectFolder = { id: string; name: string; parentId?: string | null; order?: number }
+
+function loadProjectFolders(): ProjectFolder[] {
+  try {
+    const stored = localStorage.getItem(PROJECT_FOLDERS_STORAGE_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string')
+          .map((item, index) => ({
+            id: item.id,
+            name: item.name,
+            parentId: typeof item.parentId === 'string' ? item.parentId : null,
+            order: typeof item.order === 'number' ? item.order : index,
+          }))
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load project folders:', error)
+  }
+  return []
+}
+
+function saveProjectFolders(folders: ProjectFolder[]) {
+  try {
+    localStorage.setItem(PROJECT_FOLDERS_STORAGE_KEY, JSON.stringify(folders))
+  } catch (error) {
+    console.error('Failed to save project folders:', error)
+  }
+}
+
+function loadProjectFileFolderMap(): Record<string, string | null> {
+  try {
+    const stored = localStorage.getItem(PROJECT_FILE_FOLDER_MAP_STORAGE_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (parsed && typeof parsed === 'object') {
+        return parsed as Record<string, string | null>
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load project file folder map:', error)
+  }
+  return {}
+}
+
+function saveProjectFileFolderMap(map: Record<string, string | null>) {
+  try {
+    localStorage.setItem(PROJECT_FILE_FOLDER_MAP_STORAGE_KEY, JSON.stringify(map))
+  } catch (error) {
+    console.error('Failed to save project file folder map:', error)
+  }
+}
+
+function loadProjectRootFolderOrder(): Array<'worldlab' | 'library' | 'project'> {
+  try {
+    const stored = localStorage.getItem(PROJECT_ROOT_FOLDER_ORDER_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter((id) => id === 'worldlab' || id === 'library' || id === 'project')
+        if (valid.length === 3) {
+          return valid as Array<'worldlab' | 'library' | 'project'>
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load root folder order:', error)
+  }
+  return ['worldlab', 'library', 'project']
+}
+
+function saveProjectRootFolderOrder(order: Array<'worldlab' | 'library' | 'project'>) {
+  try {
+    localStorage.setItem(PROJECT_ROOT_FOLDER_ORDER_KEY, JSON.stringify(order))
+  } catch (error) {
+    console.error('Failed to save root folder order:', error)
+  }
+}
+
+type RootFolderMeta = { id: 'worldlab' | 'library' | 'project'; name: string; hidden?: boolean }
+
+function loadProjectRootFolderMeta(): Record<'worldlab' | 'library' | 'project', RootFolderMeta> {
+  const defaults: Record<'worldlab' | 'library' | 'project', RootFolderMeta> = {
+    worldlab: { id: 'worldlab', name: 'worldlab', hidden: true },
+    library: { id: 'library', name: 'library' },
+    project: { id: 'project', name: 'workspace' },
+  }
+  try {
+    const stored = localStorage.getItem(PROJECT_ROOT_FOLDER_META_KEY)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (parsed && typeof parsed === 'object') {
+        return {
+          worldlab: { ...defaults.worldlab, ...(parsed.worldlab || {}) },
+          library: { ...defaults.library, ...(parsed.library || {}) },
+          project: { ...defaults.project, ...(parsed.project || {}) },
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load root folder meta:', error)
+  }
+  return defaults
+}
+
+function saveProjectRootFolderMeta(meta: Record<'worldlab' | 'library' | 'project', RootFolderMeta>) {
+  try {
+    localStorage.setItem(PROJECT_ROOT_FOLDER_META_KEY, JSON.stringify(meta))
+  } catch (error) {
+    console.error('Failed to save root folder meta:', error)
+  }
 }
 
 function saveFileExplorerLastOpenSize(size: number) {
@@ -433,6 +563,18 @@ export default function Layout(): JSX.Element {
   }, [])
   const [fileExplorerSize, setFileExplorerSize] = useState<number>(() => loadFileExplorerSize()) // Track File Explorer size as state
   const [selectedFolder, setSelectedFolder] = useState<'library' | 'project' | 'worldlab' | null>(null) // Track selected folder
+  const [projectFolders, setProjectFolders] = useState<ProjectFolder[]>(() => loadProjectFolders())
+  const [selectedProjectFolderId, setSelectedProjectFolderId] = useState<string | null>(null)
+  const [newlyCreatedFolderId, setNewlyCreatedFolderId] = useState<string | null>(null)
+  const [projectFileFolderMap, setProjectFileFolderMap] = useState<Record<string, string | null>>(
+    () => loadProjectFileFolderMap()
+  )
+  const [rootFolderOrder, setRootFolderOrder] = useState<Array<'worldlab' | 'library' | 'project'>>(
+    () => loadProjectRootFolderOrder()
+  )
+  const [rootFolderMeta, setRootFolderMeta] = useState<Record<'worldlab' | 'library' | 'project', RootFolderMeta>>(
+    () => loadProjectRootFolderMeta()
+  )
   const [isSearchMode, setIsSearchMode] = useState(() => {
     // Restore search mode from sessionStorage if available (persists across navigation)
     try {
@@ -442,6 +584,7 @@ export default function Layout(): JSX.Element {
       return false
     }
   }) // Track search mode state
+  const [isGitMode, setIsGitMode] = useState(false) // Track source control panel state
   const [searchQuery, setSearchQuery] = useState(() => {
     // Restore search query from sessionStorage if available (persists across navigation)
     try {
@@ -454,6 +597,11 @@ export default function Layout(): JSX.Element {
   const [showWordCountModal, setShowWordCountModal] = useState(false) // Track word count modal visibility
   const [isExporting, setIsExporting] = useState(false) // Track export loading state
   const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | null>(null) // Track export format
+  const [showExportModal, setShowExportModal] = useState(false)
+  const exportButtonRef = useRef<HTMLButtonElement>(null)
+  const [showCommitHistoryModal, setShowCommitHistoryModal] = useState(false)
+  const commitHistoryButtonRef = useRef<HTMLButtonElement>(null)
+  const [isProjectHeaderHovered, setIsProjectHeaderHovered] = useState(false)
   const [showCommitSuccessNotification, setShowCommitSuccessNotification] = useState<{ fileCount: number; isIndexing?: boolean } | null>(null) // Track commit success notification
   const commitNotificationTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Track notification auto-hide timeout
   const initialIgnoredUpdateVersion = null
@@ -1039,6 +1187,8 @@ export default function Layout(): JSX.Element {
       // Clear documents immediately when project changes to prevent showing stale data
       setDocuments([])
       setIsLoadingDocuments(true)
+      setSelectedFolder(null)
+      setSelectedProjectFolderId(null)
       
       // Load project name immediately for instant shell UI
       loadProjectName()
@@ -1144,17 +1294,6 @@ export default function Layout(): JSX.Element {
     }
   }, [id, document, documents.length, isLoadingDocuments, openTabs])
 
-  // Set selected folder based on current document's folder
-  useEffect(() => {
-    if (document?.folder === 'library') {
-      setSelectedFolder('library')
-    } else if (document?.folder === 'worldlab') {
-      setSelectedFolder('worldlab')
-    } else if (document && (!document.folder || document.folder === 'project')) {
-      setSelectedFolder('project')
-    }
-    // Don't clear selectedFolder if document is null - keep it for creating new files
-  }, [document?.folder])
 
   // Keyboard shortcuts: Ctrl+F for inline search, Ctrl+Shift+F for global search, Ctrl+Shift+E to toggle FileExplorer
   useEffect(() => {
@@ -2735,17 +2874,22 @@ export default function Layout(): JSX.Element {
   }
 
   const handleCreateDocument = async () => {
+    if (isGitMode) {
+      setIsGitMode(false)
+    }
     try {
       // Use selected folder if available, otherwise check current document's folder or isWorldLabMode
       // If still not determined, default to 'project'
       let folder: 'library' | 'project' | 'worldlab' = 'project'
       if (selectedFolder === 'library' || selectedFolder === 'worldlab') {
         folder = selectedFolder
+      } else if (selectedFolder === 'project') {
+        folder = 'project'
       } else if (isWorldLabMode || document?.folder === 'worldlab') {
         folder = 'worldlab'
       } else if (document?.folder === 'library') {
         folder = 'library'
-      } else if (selectedFolder === 'project' || (!document?.folder || document?.folder === 'project')) {
+      } else if (!selectedFolder && document?.folder === 'project') {
         folder = 'project'
       }
       
@@ -2777,6 +2921,9 @@ export default function Layout(): JSX.Element {
       
       console.log(`[WorldLab] Creating new document: folder=${folder}, title=${newTitle}`)
       const newDoc = await documentApi.create(newTitle, folder)
+      if (folder === 'project') {
+        handleProjectFileFolderChange(newDoc.id, selectedProjectFolderId)
+      }
       
       // Small delay to ensure file is fully written to disk before proceeding
       await new Promise(resolve => setTimeout(resolve, 100))
@@ -2848,6 +2995,230 @@ export default function Layout(): JSX.Element {
       alert('Failed to create document. Please try again.')
       isNewlyCreatedDocRef.current = false
     }
+  }
+
+  const handleCreateFolder = () => {
+    if (isGitMode) {
+      setIsGitMode(false)
+    }
+    if (isSearchMode) {
+      setIsSearchMode(false)
+      setSearchQuery('')
+      try {
+        sessionStorage.setItem('isSearchMode', 'false')
+        sessionStorage.removeItem('searchQuery')
+      } catch (e) {
+        console.warn('Failed to persist search mode:', e)
+      }
+      if (document?.id) {
+        const currentEditor = getEditor(document.id)
+        if (currentEditor && !currentEditor.isDestroyed) {
+          clearSearchHighlights(currentEditor)
+        }
+      }
+    }
+    const existingNames = projectFolders.map(folder => folder.name.toLowerCase())
+    let number = 1
+    let newName = `new folder ${number}`
+    while (existingNames.includes(newName.toLowerCase())) {
+      number += 1
+      newName = `new folder ${number}`
+    }
+    const parentId =
+      selectedProjectFolderId ||
+      (selectedFolder === 'library' ? 'library' :
+        selectedFolder === 'worldlab' ? 'worldlab' :
+          selectedFolder === 'project' ? 'project' : null)
+    const siblingOrders = projectFolders
+      .filter(folder => (folder.parentId ?? null) === parentId)
+      .map(folder => folder.order ?? 0)
+    const nextOrder = siblingOrders.length > 0 ? Math.max(...siblingOrders) + 1 : 0
+    const newFolder: ProjectFolder = { id: `folder-${Date.now()}`, name: newName, parentId, order: nextOrder }
+    setProjectFolders((prev) => {
+      const next = [...prev, newFolder]
+      saveProjectFolders(next)
+      return next
+    })
+    setNewlyCreatedFolderId(newFolder.id)
+  }
+
+  const handleRenameFolder = (folderId: string, newName: string) => {
+    const trimmedName = newName.trim()
+    if (!trimmedName) return
+    setProjectFolders((prev) => {
+      const next = prev.map(folder => folder.id === folderId ? { ...folder, name: trimmedName } : folder)
+      saveProjectFolders(next)
+      return next
+    })
+  }
+
+  const handleDeleteFolder = (folderId: string) => {
+    setProjectFolders((prev) => {
+      const idsToDelete = new Set<string>()
+      const collectDescendants = (id: string) => {
+        idsToDelete.add(id)
+        prev.forEach(folder => {
+          if ((folder.parentId ?? null) === id) {
+            collectDescendants(folder.id)
+          }
+        })
+      }
+      collectDescendants(folderId)
+      const next = prev.filter(folder => !idsToDelete.has(folder.id))
+      saveProjectFolders(next)
+      return next
+    })
+  }
+
+  const handleProjectFileFolderChange = (documentId: string, folderId: string | null) => {
+    setProjectFileFolderMap((prev) => {
+      const next = { ...prev, [documentId]: folderId }
+      if (!folderId) {
+        delete next[documentId]
+      }
+      saveProjectFileFolderMap(next)
+      return next
+    })
+  }
+
+  const handleReorderRootFolders = (
+    sourceId: 'worldlab' | 'library' | 'project',
+    targetId: 'worldlab' | 'library' | 'project',
+    position: 'above' | 'below'
+  ) => {
+    setRootFolderOrder((prev) => {
+      if (sourceId === targetId) return prev
+      const next = prev.filter(id => id !== sourceId)
+      const targetIndex = next.indexOf(targetId)
+      const insertIndex = position === 'above' ? targetIndex : targetIndex + 1
+      next.splice(insertIndex, 0, sourceId)
+      saveProjectRootFolderOrder(next)
+      return next
+    })
+  }
+
+  const handleRootFolderRename = (folderId: 'worldlab' | 'library' | 'project', newName: string) => {
+    const trimmedName = newName.trim()
+    if (!trimmedName) return
+    setRootFolderMeta((prev) => {
+      const next = {
+        ...prev,
+        [folderId]: { ...prev[folderId], name: trimmedName },
+      }
+      saveProjectRootFolderMeta(next)
+      return next
+    })
+  }
+
+  const handleRootFolderDelete = (folderId: 'worldlab' | 'library' | 'project') => {
+    setRootFolderMeta((prev) => {
+      const next = {
+        ...prev,
+        [folderId]: { ...prev[folderId], hidden: true },
+      }
+      saveProjectRootFolderMeta(next)
+      return next
+    })
+  }
+
+  const handleReorderProjectFolders = (
+    sourceId: string,
+    targetId: string,
+    position: 'above' | 'below'
+  ) => {
+    setProjectFolders((prev) => {
+      const source = prev.find(folder => folder.id === sourceId)
+      const target = prev.find(folder => folder.id === targetId)
+      if (!source || !target) {
+        // Handle root <-> folder moves
+        const rootIds = new Set(['library', 'worldlab', 'project'])
+        if (!rootIds.has(sourceId) && rootIds.has(targetId)) {
+          const targetParent = targetId
+          const targetSiblings = prev
+            .filter(folder => (folder.parentId ?? null) === targetParent && folder.id !== sourceId)
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+          const insertIndex = position === 'above' ? 0 : targetSiblings.length
+          const nextTargetSiblings = [...targetSiblings]
+          const sourceFolder = prev.find(folder => folder.id === sourceId)
+          if (!sourceFolder) return prev
+          nextTargetSiblings.splice(insertIndex, 0, { ...sourceFolder, parentId: targetParent })
+
+          const targetOrderMap = new Map<string, number>()
+          nextTargetSiblings.forEach((folder, index) => {
+            targetOrderMap.set(folder.id, index)
+          })
+
+          const next = prev.map(folder => {
+            if (folder.id === sourceId) {
+              return {
+                ...folder,
+                parentId: targetParent,
+                order: targetOrderMap.get(folder.id) ?? folder.order,
+              }
+            }
+            if ((folder.parentId ?? null) === targetParent && targetOrderMap.has(folder.id)) {
+              return { ...folder, order: targetOrderMap.get(folder.id) }
+            }
+            return folder
+          })
+
+          saveProjectFolders(next)
+          return next
+        }
+        if (rootIds.has(sourceId) && !rootIds.has(targetId)) {
+          return prev
+        }
+        return prev
+      }
+
+      const sourceParent = source.parentId ?? null
+      const targetParent = target.parentId ?? null
+
+      const targetSiblings = prev
+        .filter(folder => (folder.parentId ?? null) === targetParent && folder.id !== sourceId)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+      const targetIndex = targetSiblings.findIndex(folder => folder.id === targetId)
+      const insertIndex = position === 'above' ? targetIndex : targetIndex + 1
+
+      const nextTargetSiblings = [...targetSiblings]
+      nextTargetSiblings.splice(insertIndex, 0, { ...source, parentId: targetParent })
+
+      const targetOrderMap = new Map<string, number>()
+      nextTargetSiblings.forEach((folder, index) => {
+        targetOrderMap.set(folder.id, index)
+      })
+
+      const sourceSiblings = prev
+        .filter(folder => (folder.parentId ?? null) === sourceParent && folder.id !== sourceId)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+      const sourceOrderMap = new Map<string, number>()
+      sourceSiblings.forEach((folder, index) => {
+        sourceOrderMap.set(folder.id, index)
+      })
+
+      const next = prev.map(folder => {
+        if (folder.id === sourceId) {
+          return {
+            ...folder,
+            parentId: targetParent,
+            order: targetOrderMap.get(folder.id) ?? folder.order,
+          }
+        }
+        if ((folder.parentId ?? null) === targetParent && targetOrderMap.has(folder.id)) {
+          return { ...folder, order: targetOrderMap.get(folder.id) }
+        }
+        if ((folder.parentId ?? null) === sourceParent && sourceOrderMap.has(folder.id)) {
+          return { ...folder, order: sourceOrderMap.get(folder.id) }
+        }
+        return folder
+      })
+
+      saveProjectFolders(next)
+      return next
+    })
   }
 
 
@@ -5864,18 +6235,6 @@ export default function Layout(): JSX.Element {
     }
   }
 
-  const handleTitleUpdate = async (newTitle: string) => {
-    if (!document || !newTitle.trim() || newTitle === document.title) return
-    
-    try {
-      // IPC returns data directly, not wrapped in { data: ... }
-      const updatedDocument = await documentApi.updateTitle(document.id, newTitle.trim())
-      setDocument(updatedDocument)
-    } catch (error) {
-      console.error('Failed to update document title:', error)
-    }
-  }
-
   // Show shell UI immediately - no full-screen loading blocker
   // Skeletons will handle loading states for progressive reveal
 
@@ -5901,30 +6260,6 @@ export default function Layout(): JSX.Element {
       }}>
         {/* Top Bar - Logo + Tabs */}
       <TopBar 
-        onExport={handleExport}
-        documentTitle={document?.title}
-        documentId={document?.id}
-        onTitleUpdate={handleTitleUpdate}
-        documents={documents}
-        projectName={projectName}
-        editor={document?.id ? getEditor(document.id) : null}
-        onToggleFileExplorer={() => {
-          if (fileExplorerPanelRef.current) {
-            const currentSize = fileExplorerPanelRef.current.getSize()
-            if (currentSize > 0) {
-              // Closing: save current size for next time
-              saveFileExplorerLastOpenSize(currentSize)
-              fileExplorerPanelRef.current.resize(0)
-            } else {
-              // Opening: restore last open size
-              const lastOpenSize = loadFileExplorerLastOpenSize()
-              fileExplorerPanelRef.current.resize(lastOpenSize)
-            }
-          }
-        }}
-        onToggleAIPanel={() => {
-          setIsAIPanelOpen(!isAIPanelOpen)
-        }}
         openTabs={openTabs}
         activeTabId={activeTabId}
         onTabClick={handleTabClick}
@@ -5932,130 +6267,7 @@ export default function Layout(): JSX.Element {
         onTabReorder={handleTabReorder}
       />
       
-      {/* Separator line between topbar and toolbar */}
-      <div style={{
-        width: '100%',
-        height: 0,
-        borderTop: `1px solid ${borderColor}`,
-        margin: 0,
-        padding: 0,
-        flexShrink: 0,
-        boxSizing: 'border-box'
-      }} />
-      
-      {/* Toolbar - Independent, full width - Always visible */}
-      <div style={{ 
-        width: '100%',
-        backgroundColor: theme === 'dark' ? '#141414' : '#ffffff',
-        padding: '8px 16px',
-        zIndex: 10003,
-        position: 'relative',
-        overflow: 'visible'
-      }}>
-        <Toolbar 
-          editor={document?.id ? getEditor(document.id) : null}
-          onExport={handleExport}
-          documents={documents}
-          projectName={projectName}
-          documentTitle={document?.title}
-          onRestoreCommit={(commitId: string) => {
-            setRestoredCommitParentId(commitId)
-          }}
-          customUndoRedo={isWorldLabMode && worldLabUndoRedo ? worldLabUndoRedo : undefined}
-          onDocumentsReload={async () => {
-            // Reload documents to refresh editor content after restore
-            const currentProjectId = document?.projectId
-            const currentDocId = document?.id
-            
-            await loadDocuments(currentProjectId)
-            
-            // Also reload current document if it exists and update editor content
-            if (currentDocId) {
-              try {
-                const updatedDoc = await documentApi.get(currentDocId)
-                
-                if (!updatedDoc) {
-                  return
-                }
-                
-                // Parse content for editor
-                let parsedContent: any = ''
-                try {
-                  if (updatedDoc.content) {
-                    parsedContent = JSON.parse(updatedDoc.content)
-                  }
-                } catch (parseError: any) {
-                  return
-                }
-                
-                // Update document state to trigger editor refresh
-                setDocument(updatedDoc)
-                
-                // Also update in documents array
-                setDocuments(prevDocs => {
-                  return prevDocs.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc)
-                })
-                
-                // Update in open tabs
-                setOpenTabs(prevTabs => {
-                  return prevTabs.map(tab => tab.id === updatedDoc.id ? updatedDoc : tab)
-                })
-                
-                // Manually update editor content
-                const editor = getEditor(currentDocId)
-                
-                if (!editor || editor.isDestroyed) {
-                  return
-                }
-                
-                editor.commands.setContent(parsedContent, { emitUpdate: false })
-              } catch (error: any) {
-                // Silent error handling
-              }
-            }
-          }}
-          onToggleSearch={() => {
-            setIsSearchMode((prev) => {
-              const newValue = !prev
-              // Persist search mode state
-              try {
-                if (newValue) {
-                  sessionStorage.setItem('isSearchMode', 'true')
-                  // Keep existing search query if there is one
-                  if (searchQuery) {
-                    sessionStorage.setItem('searchQuery', searchQuery)
-                  }
-                } else {
-                  // User explicitly turned off search mode - clear everything
-                  sessionStorage.setItem('isSearchMode', 'false')
-                  sessionStorage.removeItem('searchQuery')
-                  setSearchQuery('') // Clear the query state
-                  // Clear highlights immediately when search mode is turned off
-                  if (document?.id) {
-                    const currentEditor = getEditor(document.id)
-                    if (currentEditor && !currentEditor.isDestroyed) {
-                      clearSearchHighlights(currentEditor)
-                    }
-                  }
-                }
-              } catch (e) {
-                console.warn('Failed to persist search mode:', e)
-              }
-              // Ensure FileExplorer is visible when entering search mode
-              if (newValue && fileExplorerPanelRef.current) {
-                const currentSize = fileExplorerPanelRef.current.getSize()
-                if (currentSize === 0) {
-                  fileExplorerPanelRef.current.resize(14)
-                }
-              }
-              return newValue
-            })
-          }}
-          isSearchActive={isSearchMode}
-        />
-      </div>
-      
-      {/* Separator line between toolbar and editor */}
+      {/* Separator line between topbar and content */}
       <div style={{
         width: '100%',
         height: 0,
@@ -6112,20 +6324,254 @@ export default function Layout(): JSX.Element {
             flexDirection: 'column',
             backgroundColor: bgColor
           }}>
-            {/* File Explorer Header */}
+            {/* File Explorer Section Bar */}
             <div style={{
-              padding: '8px 12px',
-              fontSize: '11px',
-              fontWeight: 600,
-              color: secondaryTextColor,
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              height: `${TOP_ROW_HEIGHT}px`,
+              padding: '0 6px',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between',
-              backgroundColor: theme === 'dark' ? '#141414' : '#fafafa'
+              justifyContent: 'center',
+              backgroundColor: theme === 'dark' ? '#141414' : '#fafafa',
+              borderBottom: `1px solid ${borderColor}`
             }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <button
+                  style={{
+                    border: 'none',
+                    background: (!isSearchMode && !isGitMode) ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8') : 'transparent',
+                    cursor: 'pointer',
+                    padding: '6px',
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: secondaryTextColor,
+                    opacity: 0.9,
+                    boxSizing: 'border-box'
+                  }}
+                  title="File Explorer"
+                  onClick={() => {
+                    if (isSearchMode || isGitMode) {
+                      setIsSearchMode(false)
+                      setIsGitMode(false)
+                      setSearchQuery('')
+                      try {
+                        sessionStorage.setItem('isSearchMode', 'false')
+                        sessionStorage.removeItem('searchQuery')
+                      } catch (e) {
+                        console.warn('Failed to persist search mode:', e)
+                      }
+                      if (document?.id) {
+                        const currentEditor = getEditor(document.id)
+                        if (currentEditor && !currentEditor.isDestroyed) {
+                          clearSearchHighlights(currentEditor)
+                        }
+                      }
+                    }
+                    if (fileExplorerPanelRef.current) {
+                      const currentSize = fileExplorerPanelRef.current.getSize()
+                      if (currentSize === 0) {
+                        const lastOpenSize = loadFileExplorerLastOpenSize()
+                        fileExplorerPanelRef.current.resize(lastOpenSize)
+                      }
+                    }
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = (!isSearchMode && !isGitMode)
+                      ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8')
+                      : 'transparent'
+                  }}
+                >
+                  <FileCopyOutlinedIcon style={{ fontSize: '16px' }} />
+                </button>
+                <button
+                  style={{
+                    border: 'none',
+                    background: isSearchMode ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8') : 'transparent',
+                    cursor: 'pointer',
+                    padding: '6px',
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: secondaryTextColor,
+                    opacity: 0.9,
+                    boxSizing: 'border-box'
+                  }}
+                  title="Search"
+                  onClick={() => {
+                    setIsGitMode(false)
+                    setIsSearchMode((prev) => {
+                      const newValue = !prev
+                      // Persist search mode state
+                      try {
+                        if (newValue) {
+                          sessionStorage.setItem('isSearchMode', 'true')
+                          // Keep existing search query if there is one
+                          if (searchQuery) {
+                            sessionStorage.setItem('searchQuery', searchQuery)
+                          }
+                        } else {
+                          // User explicitly turned off search mode - clear everything
+                          sessionStorage.setItem('isSearchMode', 'false')
+                          sessionStorage.removeItem('searchQuery')
+                          setSearchQuery('') // Clear the query state
+                          // Clear highlights immediately when search mode is turned off
+                          if (document?.id) {
+                            const currentEditor = getEditor(document.id)
+                            if (currentEditor && !currentEditor.isDestroyed) {
+                              clearSearchHighlights(currentEditor)
+                            }
+                          }
+                        }
+                      } catch (e) {
+                        console.warn('Failed to persist search mode:', e)
+                      }
+                      // Ensure FileExplorer is visible when entering search mode
+                      if (newValue && fileExplorerPanelRef.current) {
+                        const currentSize = fileExplorerPanelRef.current.getSize()
+                        if (currentSize === 0) {
+                          fileExplorerPanelRef.current.resize(14)
+                        }
+                      }
+                      return newValue
+                    })
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = isSearchMode
+                      ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8')
+                      : 'transparent'
+                  }}
+                >
+                  <SearchIcon style={{ fontSize: '18px' }} />
+                </button>
+                <button
+                  style={{
+                    border: 'none',
+                    background: isGitMode ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8') : 'transparent',
+                    cursor: 'pointer',
+                    padding: '6px',
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: secondaryTextColor,
+                    opacity: 0.9,
+                    boxSizing: 'border-box'
+                  }}
+                  title="Source Control (coming soon)"
+                  onClick={() => {
+                    if (isSearchMode) {
+                      setIsSearchMode(false)
+                      setSearchQuery('')
+                      try {
+                        sessionStorage.setItem('isSearchMode', 'false')
+                        sessionStorage.removeItem('searchQuery')
+                      } catch (e) {
+                        console.warn('Failed to persist search mode:', e)
+                      }
+                      if (document?.id) {
+                        const currentEditor = getEditor(document.id)
+                        if (currentEditor && !currentEditor.isDestroyed) {
+                          clearSearchHighlights(currentEditor)
+                        }
+                      }
+                    }
+                    setIsGitMode(true)
+                    if (fileExplorerPanelRef.current) {
+                      const currentSize = fileExplorerPanelRef.current.getSize()
+                      if (currentSize === 0) {
+                        const lastOpenSize = loadFileExplorerLastOpenSize()
+                        fileExplorerPanelRef.current.resize(lastOpenSize)
+                      }
+                    }
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = isGitMode
+                      ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8')
+                      : 'transparent'
+                  }}
+                >
+                  <MergeTypeIcon style={{ fontSize: '19px' }} />
+                </button>
+                <button
+                  ref={exportButtonRef}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    padding: '6px',
+                    width: '30px',
+                    height: '30px',
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: secondaryTextColor,
+                    opacity: 0.9,
+                    boxSizing: 'border-box'
+                  }}
+                  title="Export"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setShowExportModal((prev) => !prev)
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent'
+                  }}
+                >
+                  <ShareIcon style={{ fontSize: '17px' }} />
+                </button>
+              </div>
+              <ExportModal
+                isOpen={showExportModal}
+                onClose={() => setShowExportModal(false)}
+                onExport={handleExport}
+                documents={documents}
+                projectName={projectName}
+                documentTitle={document?.title}
+                triggerRef={exportButtonRef}
+              />
+            </div>
+
+            {/* File Explorer Header */}
+            <div
+              onMouseEnter={() => setIsProjectHeaderHovered(true)}
+              onMouseLeave={() => setIsProjectHeaderHovered(false)}
+              style={{
+                padding: '6px 12px',
+                fontSize: '11px',
+                fontWeight: 600,
+                color: secondaryTextColor,
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: theme === 'dark' ? '#141414' : '#fafafa',
+                minHeight: '28px'
+              }}
+            >
               {isSearchMode ? (
                 <span>SEARCH</span>
               ) : isRenamingProject ? (
@@ -6195,69 +6641,220 @@ export default function Layout(): JSX.Element {
                   {projectName.toUpperCase()}
                 </span>
               )}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <button
-                  onClick={handleCreateDocument}
-                  style={{
-                    border: 'none',
-                    background: 'transparent',
-                    cursor: 'pointer',
-                    padding: '2px 4px',
-                    borderRadius: '2px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    opacity: 0.7,
-                    transition: 'opacity 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.opacity = '1'
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.opacity = '0.7'
-                    e.currentTarget.style.backgroundColor = 'transparent'
-                  }}
-                  title="New File"
-                >
-                  {/* @ts-ignore */}
-                  <AddIcon style={{ fontSize: '14px', color: secondaryTextColor }} />
-                </button>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  minHeight: '20px'
+                }}
+              >
+                {!isSearchMode && !isGitMode && (
+                  <>
+                    <button
+                      onClick={handleCreateDocument}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        padding: '2px 4px',
+                        borderRadius: '2px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: isProjectHeaderHovered ? 0.7 : 0,
+                        transition: 'opacity 0.2s',
+                        pointerEvents: isProjectHeaderHovered ? 'auto' : 'none'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.opacity = '1'
+                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.opacity = isProjectHeaderHovered ? '0.7' : '0'
+                        e.currentTarget.style.backgroundColor = 'transparent'
+                      }}
+                      title="New File"
+                    >
+                      <NoteAddOutlinedIcon style={{ fontSize: '14px', color: secondaryTextColor }} />
+                    </button>
+                    <button
+                      onClick={handleCreateFolder}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        padding: '2px 4px',
+                        borderRadius: '2px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: isProjectHeaderHovered ? 0.7 : 0,
+                        transition: 'opacity 0.2s',
+                        pointerEvents: isProjectHeaderHovered ? 'auto' : 'none'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.opacity = '1'
+                        e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.opacity = isProjectHeaderHovered ? '0.7' : '0'
+                        e.currentTarget.style.backgroundColor = 'transparent'
+                      }}
+                      title="new folder"
+                    >
+                      <CreateNewFolderOutlinedIcon style={{ fontSize: '14px', color: secondaryTextColor }} />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             
             {/* File Explorer Content */}
             <div style={{ flex: 1, overflow: 'hidden', backgroundColor: bgColor, padding: 0, margin: 0 }}>
-              <FileExplorer
-                  documents={documents}
-                  currentDocumentId={document?.id || null}
-                  onDocumentClick={handleDocumentClick}
-                  onDocumentRename={handleDocumentRename}
-                  onDocumentDelete={handleDocumentDelete}
-                  onReorderDocuments={handleReorderDocuments}
-                  projectName={projectName}
-                  isSearchMode={isSearchMode}
-                  onSearchModeChange={setIsSearchMode}
-                  onSearchQueryChange={setSearchQuery}
-                  searchQueryProp={searchQuery}
-                  onDocumentsUpdated={loadDocuments}
-                  onDocumentChange={setDocument}
-                  onDocumentFolderChange={(documentId, folder) => {
-                    // Optimistically update document folder without full refresh
-                    setDocuments((prevDocs) => 
-                      prevDocs.map(doc => 
-                        doc.id === documentId ? { ...doc, folder, updatedAt: new Date().toISOString() } : doc
-                      )
+              {isGitMode ? (
+                <div style={{
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '10px',
+                  color: secondaryTextColor,
+                  fontSize: '12px',
+                  backgroundColor: bgColor
+                }}>
+                  <div>Source Control (coming soon)</div>
+                  {(() => {
+                    const docWithProject = documents.find(doc => doc.projectId && typeof doc.projectId === 'string' && doc.projectId.trim() !== '')
+                    const projectId = docWithProject?.projectId || null
+                    if (!projectId || projectId.trim() === '') return null
+                    return (
+                      <>
+                        <button
+                          ref={commitHistoryButtonRef}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setShowCommitHistoryModal(true)
+                          }}
+                          style={{
+                            border: `1px solid ${borderColor}`,
+                            backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff',
+                            color: secondaryTextColor,
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '12px'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#232323' : '#f1f3f4'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1a1a1a' : '#ffffff'
+                          }}
+                        >
+                          Version History
+                        </button>
+                        <CommitHistoryModal
+                          projectId={projectId}
+                          isOpen={showCommitHistoryModal}
+                          onClose={() => setShowCommitHistoryModal(false)}
+                          triggerRef={commitHistoryButtonRef}
+                          onRestore={setRestoredCommitParentId}
+                          onDocumentsReload={async () => {
+                            const currentProjectId = document?.projectId
+                            const currentDocId = document?.id
+                            
+                            await loadDocuments(currentProjectId)
+                            
+                            if (currentDocId) {
+                              try {
+                                const updatedDoc = await documentApi.get(currentDocId)
+                                if (!updatedDoc) {
+                                  return
+                                }
+                                let parsedContent: any = ''
+                                try {
+                                  if (updatedDoc.content) {
+                                    parsedContent = JSON.parse(updatedDoc.content)
+                                  }
+                                } catch (parseError: any) {
+                                  return
+                                }
+                                setDocument(updatedDoc)
+                                setDocuments(prevDocs => {
+                                  return prevDocs.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc)
+                                })
+                                setOpenTabs(prevTabs => {
+                                  return prevTabs.map(tab => tab.id === updatedDoc.id ? updatedDoc : tab)
+                                })
+                                const editor = getEditor(currentDocId)
+                                if (!editor || editor.isDestroyed) {
+                                  return
+                                }
+                                editor.commands.setContent(parsedContent, { emitUpdate: false })
+                              } catch (error: any) {
+                                // Silent error handling
+                              }
+                            }
+                          }}
+                        />
+                      </>
                     )
-                  }}
-                  onSelectedFolderChange={(folder) => {
-                    try {
-                      setSelectedFolder(folder)
-                    } catch (error) {
-                      console.error('[Layout] Error setting selectedFolder:', error)
-                    }
-                  }}
-                  onFileUploaded={async (newDoc, isBatchUpload = false) => {
+                  })()}
+                </div>
+              ) : (
+                <FileExplorer
+                    documents={documents}
+                    currentDocumentId={document?.id || null}
+                    onDocumentClick={handleDocumentClick}
+                    onDocumentRename={handleDocumentRename}
+                    onDocumentDelete={handleDocumentDelete}
+                    onReorderDocuments={handleReorderDocuments}
+                    customFolders={projectFolders}
+                    onFolderRename={handleRenameFolder}
+                    onFolderDelete={handleDeleteFolder}
+                    newlyCreatedFolderId={newlyCreatedFolderId}
+                    onNewlyCreatedFolderHandled={() => setNewlyCreatedFolderId(null)}
+                    projectFileFolderMap={projectFileFolderMap}
+                    onProjectFileFolderChange={handleProjectFileFolderChange}
+                    rootFolderOrder={rootFolderOrder}
+                    onReorderRootFolders={handleReorderRootFolders}
+                    rootFolderMeta={rootFolderMeta}
+                    onRootFolderRename={handleRootFolderRename}
+                    onRootFolderDelete={handleRootFolderDelete}
+                    projectName={projectName}
+                    isSearchMode={isSearchMode}
+                    onSearchModeChange={setIsSearchMode}
+                    onSearchQueryChange={setSearchQuery}
+                    searchQueryProp={searchQuery}
+                    onDocumentsUpdated={loadDocuments}
+                    onDocumentChange={setDocument}
+                    onReorderProjectFolders={handleReorderProjectFolders}
+                    onDocumentFolderChange={(documentId, folder) => {
+                      // Optimistically update document folder without full refresh
+                      setDocuments((prevDocs) => 
+                        prevDocs.map(doc => 
+                          doc.id === documentId ? { ...doc, folder, updatedAt: new Date().toISOString() } : doc
+                        )
+                      )
+                      if (folder !== 'project') {
+                        handleProjectFileFolderChange(documentId, null)
+                      }
+                    }}
+                    onSelectedFolderChange={(folder) => {
+                      try {
+                        setSelectedFolder(folder)
+                      } catch (error) {
+                        console.error('[Layout] Error setting selectedFolder:', error)
+                      }
+                    }}
+                    onSelectedProjectFolderChange={(folderId: string | null) => {
+                      setSelectedProjectFolderId(folderId)
+                    }}
+                    onFileUploaded={async (newDoc, isBatchUpload = false) => {
                     // Optimistically add the new document to the list without full reload
                     // This avoids re-rendering the entire file explorer and prevents deleted files from reappearing
                     setDocuments((prevDocs) => {
@@ -6382,6 +6979,7 @@ export default function Layout(): JSX.Element {
                     }
                   }}
                 />
+              )}
             </div>
           </div>
         </Panel>
@@ -6468,68 +7066,101 @@ export default function Layout(): JSX.Element {
               }}
             />
           ) : (
-            <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-              {/* Render all PDF Viewers for open PDF tabs, but only show the active one */}
-              {openTabs
-                .filter(tab => tab.title.toLowerCase().endsWith('.pdf'))
-                .map(tab => {
-                  const tabPdfViewerRef = getPdfViewerRef(tab.id)
-                  
-                  // Find the document for this tab (use current document if it's the active one)
-                  const tabDocument = document?.id === tab.id ? document : (documents.find(doc => doc.id === tab.id) || tab)
-                  const isActive = document?.id === tab.id
-                  
-                  return (
-                    <div
-                      key={tab.id}
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        height: '100%',
-                        display: isActive ? 'block' : 'none', // Hide inactive PDF viewers
-                        pointerEvents: isActive ? 'auto' : 'none', // Disable pointer events for hidden viewers
-                      }}
-                    >
-                      <FullScreenPDFViewer 
-                        ref={tabPdfViewerRef} 
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+              {document && !document.title.toLowerCase().endsWith('.pdf') && (
+                <>
+                  <div style={{ 
+                    width: '100%',
+                    backgroundColor: theme === 'dark' ? '#141414' : '#ffffff',
+                    height: `${TOP_ROW_HEIGHT}px`,
+                    padding: '0 12px',
+                    zIndex: 10003,
+                    position: 'relative',
+                    overflow: 'visible',
+                    display: 'flex',
+                    alignItems: 'center',
+                    boxSizing: 'border-box'
+                  }}>
+                    <Toolbar 
+                      editor={document?.id ? getEditor(document.id) : null}
+                      documentTitle={document?.title}
+                      customUndoRedo={isWorldLabMode && worldLabUndoRedo ? worldLabUndoRedo : undefined}
+                    />
+                  </div>
+                  <div style={{
+                    width: '100%',
+                    height: 0,
+                    borderTop: `1px solid ${borderColor}`,
+                    margin: 0,
+                    padding: 0,
+                    flexShrink: 0,
+                    boxSizing: 'border-box'
+                  }} />
+                </>
+              )}
+              <div style={{ width: '100%', flex: 1, position: 'relative' }}>
+                {/* Render all PDF Viewers for open PDF tabs, but only show the active one */}
+                {openTabs
+                  .filter(tab => tab.title.toLowerCase().endsWith('.pdf'))
+                  .map(tab => {
+                    const tabPdfViewerRef = getPdfViewerRef(tab.id)
+                    
+                    // Find the document for this tab (use current document if it's the active one)
+                    const tabDocument = document?.id === tab.id ? document : (documents.find(doc => doc.id === tab.id) || tab)
+                    const isActive = document?.id === tab.id
+                    
+                    return (
+                      <div
+                        key={tab.id}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          display: isActive ? 'block' : 'none', // Hide inactive PDF viewers
+                          pointerEvents: isActive ? 'auto' : 'none', // Disable pointer events for hidden viewers
+                        }}
+                      >
+                        <FullScreenPDFViewer 
+                          ref={tabPdfViewerRef} 
+                          document={tabDocument}
+                          isAIPanelOpen={isAIPanelOpen}
+                          aiPanelWidth={aiPanelWidth}
+                        />
+                      </div>
+                    )
+                  })}
+                
+                {/* Render DocumentEditor for non-PDF documents - one for each open tab */}
+                {openTabs
+                  .filter(tab => !tab.title.toLowerCase().endsWith('.pdf'))
+                  .map(tab => {
+                    // Find the document for this tab (use current document if it's the active one)
+                    const tabDocument = document?.id === tab.id ? document : (documents.find(doc => doc.id === tab.id) || tab)
+                    const isActive = activeTabId === tab.id
+                    
+                    const tabDocumentEditorRef = getDocumentEditorRef(tab.id)
+                    
+                    return (
+                      <DocumentEditorWrapper
+                        key={tab.id}
                         document={tabDocument}
+                        isActive={isActive}
+                        onEditorCreated={(docId, editor) => {
+                          setEditor(docId, editor)
+                        }}
+                        onDocumentChange={setDocument}
                         isAIPanelOpen={isAIPanelOpen}
                         aiPanelWidth={aiPanelWidth}
+                        createEditorConfigFn={createEditorConfig}
+                        editorRef={tabDocumentEditorRef}
+                        onUpdate={handleEditorUpdate}
                       />
-                    </div>
-                  )
-                })}
-              
-              {/* Render DocumentEditor for non-PDF documents - one for each open tab */}
-              {openTabs
-                .filter(tab => !tab.title.toLowerCase().endsWith('.pdf'))
-                .map(tab => {
-                  // Find the document for this tab (use current document if it's the active one)
-                  const tabDocument = document?.id === tab.id ? document : (documents.find(doc => doc.id === tab.id) || tab)
-                  const isActive = activeTabId === tab.id
-                  
-                  const tabDocumentEditorRef = getDocumentEditorRef(tab.id)
-                  
-                  return (
-                    <DocumentEditorWrapper
-                      key={tab.id}
-                      document={tabDocument}
-                      isActive={isActive}
-                      onEditorCreated={(docId, editor) => {
-                        setEditor(docId, editor)
-                      }}
-                      onDocumentChange={setDocument}
-                      isAIPanelOpen={isAIPanelOpen}
-                      aiPanelWidth={aiPanelWidth}
-                      createEditorConfigFn={createEditorConfig}
-                      editorRef={tabDocumentEditorRef}
-                      onUpdate={handleEditorUpdate}
-                    />
-                  )
-                })}
-              
+                    )
+                  })}
+                
+              </div>
             </div>
           )}
         </Panel>
