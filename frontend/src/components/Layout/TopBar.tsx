@@ -13,6 +13,8 @@ import DarkModeIcon from '@mui/icons-material/DarkMode'
 import LightModeIcon from '@mui/icons-material/LightMode'
 // @ts-ignore
 import KeyboardIcon from '@mui/icons-material/Keyboard'
+// @ts-ignore
+import ShareIcon from '@mui/icons-material/Share'
 
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electron !== undefined
@@ -23,6 +25,8 @@ interface TopBarProps {
   onTabClick?: (docId: string) => void
   onTabClose?: (e: React.MouseEvent, docId: string) => void
   onTabReorder?: (draggedId: string, targetId: string, position: 'left' | 'right') => void
+  onExportClick?: () => void
+  exportButtonRef?: React.RefObject<HTMLButtonElement>
 }
 
 function TopBar({ 
@@ -30,7 +34,9 @@ function TopBar({
   activeTabId,
   onTabClick,
   onTabClose,
-  onTabReorder
+  onTabReorder,
+  onExportClick,
+  exportButtonRef
 }: TopBarProps) {
   const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
@@ -192,6 +198,20 @@ function TopBar({
                 </div>
 
         <div className="topbar-right">
+          {onExportClick && (
+            <button
+              ref={exportButtonRef}
+              className="window-control-btn settings-btn"
+              title="Export"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onExportClick()
+              }}
+            >
+              <ShareIcon style={{ fontSize: '18px' }} />
+            </button>
+          )}
           <div style={{ position: 'relative' }}>
             <button
               ref={settingsButtonRef}
@@ -296,7 +316,7 @@ function TopBar({
           <KeyboardShortcutsModal
             isOpen={showKeyboardShortcutsModal}
             onClose={() => setShowKeyboardShortcutsModal(false)}
-            triggerRef={settingsButtonRef}
+            triggerRef={keyboardShortcutsButtonRef}
           />
         </div>
       </div>

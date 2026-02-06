@@ -184,8 +184,8 @@ export default function KeyboardShortcutsModal({
         ref={modalRef}
         style={{
           position: 'fixed',
-          top: rect ? `${rect.bottom + 8}px` : '100%',
-          right: rect ? `${Math.max(8, window.innerWidth - rect.right)}px` : '8px',
+          top: rect ? `${rect.bottom + 4}px` : '100%',
+          left: '24px',
           backgroundColor: dropdownBg,
           border: `1px solid ${dropdownBorder}`,
           borderRadius: '8px',

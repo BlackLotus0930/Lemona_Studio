@@ -425,6 +425,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
 
   // Save Google API key to localStorage and main process
   const handleApiKeyChange = async (value: string) => {
+    // Check if API key is being added (was empty, now has value)
+    const hadKeyBefore = (googleApiKey && googleApiKey.trim().length > 0) ||
+                         (openaiApiKey && openaiApiKey.trim().length > 0)
+    
     setGoogleApiKey(value)
     try {
       if (value) {
@@ -437,6 +441,39 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         const currentOpenaiKey = localStorage.getItem('openaiApiKey') || undefined
         await settingsApi.saveApiKeys(value || undefined, currentOpenaiKey)
         
+        // If API key was just added (was empty, now has value) and we have a projectId,
+        // trigger indexing for the current project (only if Smart indexing is enabled)
+        const hasKeyNow = (value && value.trim().length > 0) ||
+                         (currentOpenaiKey && currentOpenaiKey.trim().length > 0)
+        
+        if (!hadKeyBefore && hasKeyNow && projectId) {
+          // Check if Smart indexing is enabled before triggering indexing
+          settingsApi.getSmartIndexing().then((smartIndexingEnabled) => {
+            if (!smartIndexingEnabled) {
+              console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for project ${projectId}`)
+              return
+            }
+            
+            console.log(`[Auto-Indexing] API key was just added in project ${projectId}, starting library file indexing...`)
+            indexingApi.indexProjectLibraryFiles(
+              projectId,
+              value || undefined,
+              currentOpenaiKey,
+              true // onlyUnindexed = true
+            ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+              const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+              const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+              if (successCount > 0 || errorCount > 0) {
+                console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
+              }
+            }).catch((error) => {
+              // Don't show error to user - indexing failures shouldn't interrupt workflow
+              console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
+            })
+          }).catch((error) => {
+            console.warn('[Auto-Indexing] Failed to get Smart indexing setting:', error)
+          })
+        }
       } catch (error) {
         console.error('Failed to save Google API key to main process:', error)
       }
@@ -447,6 +484,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
 
   // Save OpenAI API key to localStorage and main process
   const handleOpenaiApiKeyChange = async (value: string) => {
+    // Check if API key is being added (was empty, now has value)
+    const hadKeyBefore = (googleApiKey && googleApiKey.trim().length > 0) ||
+                         (openaiApiKey && openaiApiKey.trim().length > 0)
+    
     setOpenaiApiKey(value)
     try {
       if (value) {
@@ -459,6 +500,39 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         const currentGoogleKey = localStorage.getItem('googleApiKey') || undefined
         await settingsApi.saveApiKeys(currentGoogleKey, value || undefined)
         
+        // If API key was just added (was empty, now has value) and we have a projectId,
+        // trigger indexing for the current project (only if Smart indexing is enabled)
+        const hasKeyNow = (currentGoogleKey && currentGoogleKey.trim().length > 0) ||
+                         (value && value.trim().length > 0)
+        
+        if (!hadKeyBefore && hasKeyNow && projectId) {
+          // Check if Smart indexing is enabled before triggering indexing
+          settingsApi.getSmartIndexing().then((smartIndexingEnabled) => {
+            if (!smartIndexingEnabled) {
+              console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for project ${projectId}`)
+              return
+            }
+            
+            console.log(`[Auto-Indexing] API key was just added in project ${projectId}, starting library file indexing...`)
+            indexingApi.indexProjectLibraryFiles(
+              projectId,
+              currentGoogleKey,
+              value || undefined,
+              true // onlyUnindexed = true
+            ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+              const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+              const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+              if (successCount > 0 || errorCount > 0) {
+                console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
+              }
+            }).catch((error) => {
+              // Don't show error to user - indexing failures shouldn't interrupt workflow
+              console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
+            })
+          }).catch((error) => {
+            console.warn('[Auto-Indexing] Failed to get Smart indexing setting:', error)
+          })
+        }
       } catch (error) {
         console.error('Failed to save OpenAI API key to main process:', error)
       }

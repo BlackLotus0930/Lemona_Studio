@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import { Document } from '@shared/types'
 // @ts-ignore
@@ -29,6 +29,7 @@ export default function ExportModal({
   const [downloadFilename, setDownloadFilename] = useState(projectName)
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<Set<string>>(new Set())
   const [usePageBreaks, setUsePageBreaks] = useState(true) // Default to true to maintain current behavior
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
   const shareMenuRef = useRef<HTMLDivElement>(null)
   const fileDropdownRef = useRef<HTMLDivElement>(null)
   const fileSelectButtonRef = useRef<HTMLButtonElement>(null)
@@ -70,6 +71,19 @@ export default function ExportModal({
       setUsePageBreaks(true) // Reset to default (true) when modal opens
     }
   }, [isOpen])
+
+  useLayoutEffect(() => {
+    if (!isOpen) return
+    const updateRect = () => {
+      const rect = triggerRef?.current?.getBoundingClientRect() || null
+      setAnchorRect(rect)
+    }
+    updateRect()
+    if (!triggerRef?.current) {
+      const rafId = requestAnimationFrame(updateRect)
+      return () => cancelAnimationFrame(rafId)
+    }
+  }, [isOpen, triggerRef])
 
   // Close dropdown when clicking outside of it
   useEffect(() => {
@@ -183,7 +197,7 @@ export default function ExportModal({
 
   if (!isOpen) return null
 
-  const rect = triggerRef?.current?.getBoundingClientRect()
+  const rect = anchorRect
 
   return (
     <div 

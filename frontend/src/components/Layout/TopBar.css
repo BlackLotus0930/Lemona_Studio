@@ -31,7 +31,7 @@
 }
 
 .topbar-native-controls .topbar-content {
-  padding-right: 144px; /* Reserve space for native window controls */
+  padding-right: 140px; /* Reserve space for native window controls */
 }
 
 .topbar-logo {
@@ -94,7 +94,7 @@
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   -webkit-app-region: no-drag;
   flex-shrink: 0; /* Don't shrink, only take necessary space */
 }
@@ -107,7 +107,7 @@
 }
 
 .window-control-btn {
-  width: 46px;
+  width: 38px;
   height: 32px;
   border: none;
   background: transparent;
