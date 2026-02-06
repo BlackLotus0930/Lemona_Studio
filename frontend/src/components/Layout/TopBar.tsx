@@ -296,7 +296,7 @@ function TopBar({
           <KeyboardShortcutsModal
             isOpen={showKeyboardShortcutsModal}
             onClose={() => setShowKeyboardShortcutsModal(false)}
-            triggerRef={keyboardShortcutsButtonRef}
+            triggerRef={settingsButtonRef}
           />
         </div>
       </div>

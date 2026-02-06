@@ -496,8 +496,6 @@ export default function Layout(): JSX.Element {
   const documentsRef = useRef<Document[]>([]) // Ref to store latest documents for use in callbacks
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(true)
   const [projectName, setProjectName] = useState<string>('LEMONA')
-  const [isRenamingProject, setIsRenamingProject] = useState(false)
-  const [projectRenameValue, setProjectRenameValue] = useState('')
   
   // Sync documentsRef with documents state
   useEffect(() => {
@@ -598,7 +596,12 @@ export default function Layout(): JSX.Element {
   const [isExporting, setIsExporting] = useState(false) // Track export loading state
   const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | null>(null) // Track export format
   const [showExportModal, setShowExportModal] = useState(false)
+  const [showExportPanel, setShowExportPanel] = useState(false)
+  const [exportFilename, setExportFilename] = useState('')
+  const [exportFolderFilter, setExportFolderFilter] = useState<'all' | 'worldlab' | 'library' | 'project'>('all')
+  const [selectedExportDocumentIds, setSelectedExportDocumentIds] = useState<string[]>([])
   const exportButtonRef = useRef<HTMLButtonElement>(null)
+  const exportSelectAllRef = useRef<HTMLInputElement>(null)
   const [showCommitHistoryModal, setShowCommitHistoryModal] = useState(false)
   const commitHistoryButtonRef = useRef<HTMLButtonElement>(null)
   const [isProjectHeaderHovered, setIsProjectHeaderHovered] = useState(false)
@@ -795,11 +798,93 @@ export default function Layout(): JSX.Element {
   const bgColor = theme === 'dark' ? '#141414' : '#FAFAFA'
   const borderColor = theme === 'dark' ? '#232323' : '#e8eaed'
   const secondaryTextColor = theme === 'dark' ? '#858585' : '#5f6368'
+  const primaryTextColor = theme === 'dark' ? '#e6e6e6' : '#202124'
+  const inputBgColor = theme === 'dark' ? '#1b1b1b' : '#ffffff'
+  const inputBorderColor = theme === 'dark' ? '#2a2a2a' : '#dadce0'
+  const exportAccentColor = theme === 'dark' ? '#6ba8c7' : '#c0c4c9'
+  const exportPdfBg = theme === 'dark' ? '#9b6f83' : '#d6a2b2'
+  const exportPdfHoverBg = theme === 'dark' ? '#b18497' : '#cc8fa3'
+  const exportDocxBg = theme === 'dark' ? '#5d8fae' : '#8db5d0'
+  const exportDocxHoverBg = theme === 'dark' ? '#507f9d' : '#7aa9c6'
+  const exportDisabledBg = theme === 'dark' ? '#3e3e42' : '#e0e0e0'
+  const exportDisabledText = theme === 'dark' ? '#858585' : '#9e9e9e'
+  const exportCheckboxBg = theme === 'dark' ? '#1b1b1b' : '#ffffff'
+  const exportCheckboxBorder = theme === 'dark' ? '#3a3a3a' : '#cdd0d4'
+  const exportCheckboxCheckedBg = theme === 'dark' ? exportAccentColor : '#e6e6e6'
+  const exportCheckboxCheckColor = theme === 'dark' ? '#ffffff' : '#5f6368'
+  const exportCheckboxCheckSvg = `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 10" fill="none"><path d="M1 5L4.5 8.5L11 1" stroke="${exportCheckboxCheckColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  )}`
+  const exportCheckboxIndeterminateSvg = `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 2" fill="none"><path d="M1 1H11" stroke="${exportCheckboxCheckColor}" stroke-width="2" stroke-linecap="round"/></svg>`
+  )}`
+  
+  const exportFolderOptions = useMemo(() => {
+    return rootFolderOrder
+      .filter((folderId) => {
+        const meta = rootFolderMeta[folderId]
+        if (!meta) return false
+        if (!meta.hidden) return true
+        return documents.some((doc) => {
+          const folder = doc.folder && doc.folder.trim() !== '' ? doc.folder : 'project'
+          return folder === folderId
+        })
+      })
+      .map((folderId) => ({
+        id: folderId,
+        name: rootFolderMeta[folderId]?.name || folderId
+      }))
+  }, [rootFolderOrder, rootFolderMeta, documents])
+  
+  const exportDocuments = useMemo(() => {
+    return documents.map((doc) => {
+      const folderId = doc.folder && doc.folder.trim() !== '' ? doc.folder : 'project'
+      return {
+        id: doc.id,
+        title: doc.title && doc.title.trim() !== '' ? doc.title : 'Untitled',
+        folderId: folderId as 'worldlab' | 'library' | 'project'
+      }
+    })
+  }, [documents])
+  
+  const filteredExportDocuments = useMemo(() => {
+    if (exportFolderFilter === 'all') {
+      return exportDocuments
+    }
+    return exportDocuments.filter((doc) => doc.folderId === exportFolderFilter)
+  }, [exportFolderFilter, exportDocuments])
+  
+  const filteredExportIds = useMemo(() => {
+    return filteredExportDocuments.map((doc) => doc.id)
+  }, [filteredExportDocuments])
+  
+  const isExportAllSelected = filteredExportIds.length > 0 && filteredExportIds.every((id) => selectedExportDocumentIds.includes(id))
+  const isExportSelectIndeterminate = filteredExportIds.some((id) => selectedExportDocumentIds.includes(id)) && !isExportAllSelected
+  const trimmedExportFilename = exportFilename.trim()
+  const canExport = trimmedExportFilename.length > 0 && selectedExportDocumentIds.length > 0 && !isExporting
 
   // Sync loading state ref for placeholder
   useEffect(() => {
     isLoadingDocumentRef.current = isLoadingDocument
   }, [isLoadingDocument])
+  
+  useEffect(() => {
+    if (exportSelectAllRef.current) {
+      exportSelectAllRef.current.indeterminate = isExportSelectIndeterminate
+    }
+  }, [isExportSelectIndeterminate])
+  
+  useEffect(() => {
+    if (!showExportPanel) {
+      return
+    }
+    const fallbackName = (document?.title || projectName || 'export').trim()
+    setExportFilename((prev) => (prev.trim() ? prev : fallbackName))
+    setSelectedExportDocumentIds((prev) => {
+      if (prev.length > 0) return prev
+      return document?.id ? [document.id] : []
+    })
+  }, [showExportPanel, document?.id, document?.title, projectName])
 
   // Restore search mode and query from sessionStorage when document changes (after navigation)
   useEffect(() => {
@@ -2532,39 +2617,6 @@ export default function Layout(): JSX.Element {
     } catch (error) {
       console.error('Failed to rename document:', error)
       alert('Failed to rename document. Please try again.')
-    }
-  }
-
-  const handleProjectRename = async (newTitle: string) => {
-    const projectId = document?.projectId
-    
-    if (!projectId || !newTitle.trim()) {
-      setIsRenamingProject(false)
-      setProjectRenameValue(projectName)
-      return
-    }
-    
-    try {
-      // Update project via API
-      await projectApi.update(projectId, { title: newTitle.trim() })
-      
-      // Reload project from API to ensure we have the latest data
-      const updatedProject = await projectApi.getById(projectId)
-      if (updatedProject) {
-        setProjectName(updatedProject.title)
-      } else {
-        setProjectName(newTitle.trim())
-      }
-      
-      setIsRenamingProject(false)
-      
-      // Notify DocumentList to refresh projects list
-      window.dispatchEvent(new CustomEvent('projectRenamed', { detail: { projectId } }))
-    } catch (error) {
-      console.error('Failed to rename project:', error)
-      alert('Failed to rename project. Please try again.')
-      setIsRenamingProject(false)
-      setProjectRenameValue(projectName)
     }
   }
 
@@ -6289,7 +6341,7 @@ export default function Layout(): JSX.Element {
           order={1}
           ref={fileExplorerPanelRef}
           defaultSize={fileExplorerSize} 
-          minSize={0}
+          minSize={12}
           maxSize={30}
           collapsible={true}
           onResize={(size) => {
@@ -6338,7 +6390,7 @@ export default function Layout(): JSX.Element {
                 <button
                   style={{
                     border: 'none',
-                    background: (!isSearchMode && !isGitMode) ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8') : 'transparent',
+                    background: (!isSearchMode && !isGitMode && !showExportPanel) ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8') : 'transparent',
                     cursor: 'pointer',
                     padding: '6px',
                     width: '30px',
@@ -6353,9 +6405,10 @@ export default function Layout(): JSX.Element {
                   }}
                   title="File Explorer"
                   onClick={() => {
-                    if (isSearchMode || isGitMode) {
+                    if (isSearchMode || isGitMode || showExportPanel) {
                       setIsSearchMode(false)
                       setIsGitMode(false)
+                      setShowExportPanel(false)
                       setSearchQuery('')
                       try {
                         sessionStorage.setItem('isSearchMode', 'false')
@@ -6382,7 +6435,7 @@ export default function Layout(): JSX.Element {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = (!isSearchMode && !isGitMode)
+                    e.currentTarget.style.backgroundColor = (!isSearchMode && !isGitMode && !showExportPanel)
                       ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8')
                       : 'transparent'
                   }}
@@ -6408,6 +6461,7 @@ export default function Layout(): JSX.Element {
                   title="Search"
                   onClick={() => {
                     setIsGitMode(false)
+                    setShowExportPanel(false)
                     setIsSearchMode((prev) => {
                       const newValue = !prev
                       // Persist search mode state
@@ -6489,7 +6543,8 @@ export default function Layout(): JSX.Element {
                         }
                       }
                     }
-                    setIsGitMode(true)
+                    setIsGitMode((prev) => !prev)
+                    setShowExportPanel(false)
                     if (fileExplorerPanelRef.current) {
                       const currentSize = fileExplorerPanelRef.current.getSize()
                       if (currentSize === 0) {
@@ -6513,7 +6568,7 @@ export default function Layout(): JSX.Element {
                   ref={exportButtonRef}
                   style={{
                     border: 'none',
-                    background: 'transparent',
+                    background: showExportPanel ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8') : 'transparent',
                     cursor: 'pointer',
                     padding: '6px',
                     width: '30px',
@@ -6530,13 +6585,19 @@ export default function Layout(): JSX.Element {
                   onClick={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
-                    setShowExportModal((prev) => !prev)
+                    setIsSearchMode(false)
+                    setIsGitMode(false)
+                    setSearchQuery('')
+                    setShowExportPanel((prev) => !prev)
+                    setShowExportModal(false)
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent'
+                    e.currentTarget.style.backgroundColor = showExportPanel
+                      ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8')
+                      : 'transparent'
                   }}
                 >
                   <ShareIcon style={{ fontSize: '17px' }} />
@@ -6572,75 +6633,15 @@ export default function Layout(): JSX.Element {
                 minHeight: '28px'
               }}
             >
-              {isSearchMode ? (
-                <span>SEARCH</span>
-              ) : isRenamingProject ? (
-                <input
-                  value={projectRenameValue}
-                  onChange={(e) => setProjectRenameValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      if (projectRenameValue.trim()) {
-                        handleProjectRename(projectRenameValue)
-                      }
-                    } else if (e.key === 'Escape') {
-                      setIsRenamingProject(false)
-                      setProjectRenameValue(projectName)
-                    }
-                  }}
-                  autoFocus
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    color: theme === 'dark' ? '#D6D6DD' : '#202124',
-                    backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff',
-                    border: `1px solid ${borderColor}`,
-                    borderRadius: '3px',
-                    padding: '2px 4px',
-                    outline: 'none',
-                    textTransform: 'uppercase',
-                    fontFamily: 'inherit',
-                    flex: 1,
-                    minWidth: 0,
-                    maxWidth: 'calc(100% - 30px)',
-                    letterSpacing: '0.5px',
-                    transition: 'all 0.2s ease',
-                    animation: 'fadeInScale 0.15s ease-out'
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.borderColor = borderColor
-                    e.target.style.backgroundColor = theme === 'dark' ? '#1f1f1f' : '#ffffff'
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = borderColor
-                    e.target.style.backgroundColor = theme === 'dark' ? '#1a1a1a' : '#ffffff'
-                    if (projectRenameValue.trim()) {
-                      handleProjectRename(projectRenameValue)
-                    } else {
-                      setIsRenamingProject(false)
-                      setProjectRenameValue(projectName)
-                    }
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <span 
-                  onDoubleClick={() => {
-                    const projectId = document?.projectId
-                    if (projectId) {
-                      setIsRenamingProject(true)
-                      setProjectRenameValue(projectName)
-                    }
-                  }}
-                  style={{ 
-                    cursor: document?.projectId ? 'pointer' : 'default',
-                    userSelect: 'none'
-                  }}
-                  title={document?.projectId ? "Double-click to rename project" : undefined}
-                >
-                  {projectName.toUpperCase()}
-                </span>
-              )}
+              <span>
+                {(showExportPanel
+                  ? 'EXPORT'
+                  : isGitMode
+                    ? 'SOURCE CONTROL'
+                    : isSearchMode
+                      ? 'SEARCH'
+                      : 'FILES')}
+              </span>
               <div
                 style={{
                   display: 'flex',
@@ -6649,7 +6650,7 @@ export default function Layout(): JSX.Element {
                   minHeight: '20px'
                 }}
               >
-                {!isSearchMode && !isGitMode && (
+                {!isSearchMode && !isGitMode && !showExportPanel && (
                   <>
                     <button
                       onClick={handleCreateDocument}
@@ -6804,6 +6805,292 @@ export default function Layout(): JSX.Element {
                       </>
                     )
                   })()}
+                </div>
+              ) : showExportPanel ? (
+                <div style={{
+                  width: '100%',
+                  height: '100%',
+                  backgroundColor: bgColor,
+                  display: 'flex',
+                  flexDirection: 'column'
+                }}>
+                  <div style={{
+                    padding: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    overflow: 'auto'
+                  }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div style={{
+                        fontSize: '11px',
+                        color: secondaryTextColor,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.4px'
+                      }}>
+                        Filename
+                      </div>
+                      <input
+                        type="text"
+                        value={exportFilename}
+                        onChange={(e) => setExportFilename(e.target.value)}
+                        placeholder={document?.title || projectName || 'export'}
+                        style={{
+                          width: '100%',
+                          backgroundColor: inputBgColor,
+                          color: primaryTextColor,
+                          border: `1px solid ${inputBorderColor}`,
+                          borderRadius: '6px',
+                          padding: '8px 10px',
+                          fontSize: '12px',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}>
+                        <div style={{
+                          fontSize: '11px',
+                          color: secondaryTextColor,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.4px'
+                        }}>
+                          Files
+                        </div>
+                        <label style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontSize: '12px',
+                          color: secondaryTextColor,
+                          cursor: 'pointer'
+                        }}>
+                          <input
+                            ref={exportSelectAllRef}
+                            type="checkbox"
+                            checked={isExportAllSelected}
+                            onChange={() => {
+                              if (isExportAllSelected) {
+                                setSelectedExportDocumentIds([])
+                                return
+                              }
+                              setSelectedExportDocumentIds(filteredExportIds)
+                            }}
+                            style={{
+                              cursor: 'pointer',
+                              width: '14px',
+                              height: '14px',
+                              borderRadius: '3px',
+                              border: `1px solid ${exportCheckboxBorder}`,
+                              backgroundColor: isExportSelectIndeterminate || isExportAllSelected
+                                ? exportCheckboxCheckedBg
+                                : exportCheckboxBg,
+                              backgroundImage: isExportSelectIndeterminate
+                                ? `url("${exportCheckboxIndeterminateSvg}")`
+                                : (isExportAllSelected ? `url("${exportCheckboxCheckSvg}")` : 'none'),
+                              backgroundRepeat: 'no-repeat',
+                              backgroundPosition: 'center',
+                              backgroundSize: '10px 10px',
+                              appearance: 'none',
+                              WebkitAppearance: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                          />
+                          Select all
+                        </label>
+                      </div>
+                      
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}>
+                        <select
+                          value={exportFolderFilter}
+                          onChange={(e) => setExportFolderFilter(e.target.value as 'all' | 'worldlab' | 'library' | 'project')}
+                          style={{
+                            flex: 1,
+                            backgroundColor: inputBgColor,
+                            color: primaryTextColor,
+                            border: `1px solid ${inputBorderColor}`,
+                            borderRadius: '6px',
+                            padding: '6px 8px',
+                            fontSize: '12px',
+                            outline: 'none'
+                          }}
+                        >
+                          <option value="all">All folders</option>
+                          {exportFolderOptions.map((folder) => (
+                            <option key={folder.id} value={folder.id}>
+                              {folder.name}
+                            </option>
+                          ))}
+                        </select>
+                        <div style={{ fontSize: '11px', color: secondaryTextColor }}>
+                          {selectedExportDocumentIds.length} selected
+                        </div>
+                      </div>
+                      
+                      <div style={{
+                        border: `1px solid ${inputBorderColor}`,
+                        borderRadius: '6px',
+                        backgroundColor: inputBgColor,
+                        maxHeight: '220px',
+                        overflow: 'auto',
+                        padding: '6px'
+                      }}>
+                        {filteredExportDocuments.length === 0 ? (
+                          <div style={{ fontSize: '12px', color: secondaryTextColor, padding: '6px' }}>
+                            No files in this folder
+                          </div>
+                        ) : (
+                          filteredExportDocuments.map((doc) => {
+                            const isChecked = selectedExportDocumentIds.includes(doc.id)
+                            return (
+                              <label
+                                key={doc.id}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  padding: '6px',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  color: primaryTextColor,
+                                  fontSize: '12px'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = theme === 'dark' ? '#232323' : '#f1f3f4'
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor = 'transparent'
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    setSelectedExportDocumentIds((prev) => {
+                                      if (prev.includes(doc.id)) {
+                                        return prev.filter((id) => id !== doc.id)
+                                      }
+                                      return [...prev, doc.id]
+                                    })
+                                  }}
+                                  style={{
+                                    cursor: 'pointer',
+                                    width: '14px',
+                                    height: '14px',
+                                    borderRadius: '3px',
+                                    border: `1px solid ${exportCheckboxBorder}`,
+                                    backgroundColor: isChecked ? exportCheckboxCheckedBg : exportCheckboxBg,
+                                    backgroundImage: isChecked ? `url("${exportCheckboxCheckSvg}")` : 'none',
+                                    backgroundRepeat: 'no-repeat',
+                                    backgroundPosition: 'center',
+                                    backgroundSize: '10px 10px',
+                                    appearance: 'none',
+                                    WebkitAppearance: 'none',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                  }}
+                                />
+                                <span style={{ flex: 1 }}>{doc.title}</span>
+                              </label>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        onClick={() => handleExport('pdf', trimmedExportFilename, selectedExportDocumentIds)}
+                        disabled={!canExport || (isExporting && exportFormat !== 'pdf')}
+                        style={{
+                          flex: 1,
+                          border: 'none',
+                          backgroundColor: canExport ? exportPdfBg : exportDisabledBg,
+                          color: canExport ? '#ffffff' : exportDisabledText,
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          cursor: canExport ? 'pointer' : 'not-allowed',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          transition: 'background-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease',
+                          boxShadow: canExport
+                            ? (theme === 'dark' ? '0 1px 3px rgba(155, 111, 131, 0.2)' : '0 1px 3px rgba(214, 162, 178, 0.2)')
+                            : 'none'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (canExport) {
+                            e.currentTarget.style.backgroundColor = exportPdfHoverBg
+                            e.currentTarget.style.transform = 'translateY(-1px)'
+                            e.currentTarget.style.boxShadow = theme === 'dark'
+                              ? '0 2px 6px rgba(177, 132, 151, 0.35)'
+                              : '0 2px 6px rgba(225, 178, 194, 0.35)'
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (canExport) {
+                            e.currentTarget.style.backgroundColor = exportPdfBg
+                            e.currentTarget.style.transform = 'translateY(0)'
+                            e.currentTarget.style.boxShadow = theme === 'dark'
+                              ? '0 1px 3px rgba(155, 111, 131, 0.2)'
+                              : '0 1px 3px rgba(214, 162, 178, 0.2)'
+                          }
+                        }}
+                      >
+                        {isExporting && exportFormat === 'pdf' ? 'PDF...' : 'PDF'}
+                      </button>
+                      <button
+                        onClick={() => handleExport('docx', trimmedExportFilename, selectedExportDocumentIds)}
+                        disabled={!canExport || (isExporting && exportFormat !== 'docx')}
+                        style={{
+                          flex: 1,
+                          border: 'none',
+                          backgroundColor: canExport ? exportDocxBg : exportDisabledBg,
+                          color: canExport ? '#ffffff' : exportDisabledText,
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          cursor: canExport ? 'pointer' : 'not-allowed',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          transition: 'background-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease',
+                          boxShadow: canExport
+                            ? (theme === 'dark' ? '0 1px 3px rgba(93, 143, 174, 0.2)' : '0 1px 3px rgba(141, 181, 208, 0.2)')
+                            : 'none'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (canExport) {
+                            e.currentTarget.style.backgroundColor = exportDocxHoverBg
+                            e.currentTarget.style.transform = 'translateY(-1px)'
+                            e.currentTarget.style.boxShadow = theme === 'dark'
+                              ? '0 2px 6px rgba(80, 127, 157, 0.35)'
+                              : '0 2px 6px rgba(122, 169, 198, 0.35)'
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (canExport) {
+                            e.currentTarget.style.backgroundColor = exportDocxBg
+                            e.currentTarget.style.transform = 'translateY(0)'
+                            e.currentTarget.style.boxShadow = theme === 'dark'
+                              ? '0 1px 3px rgba(93, 143, 174, 0.2)'
+                              : '0 1px 3px rgba(141, 181, 208, 0.2)'
+                          }
+                        }}
+                      >
+                        {isExporting && exportFormat === 'docx' ? 'DOCX...' : 'DOCX'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <FileExplorer
@@ -7008,7 +7295,8 @@ export default function Layout(): JSX.Element {
               boxSizing: 'border-box',
               alignSelf: 'stretch',
               cursor: 'ew-resize',
-              pointerEvents: 'none'
+              pointerEvents: 'none',
+              zIndex: 10010
             }}
           />
           <PanelResizeHandle 
@@ -7213,7 +7501,7 @@ export default function Layout(): JSX.Element {
               order={3}
               ref={aiPanelRef} 
               defaultSize={(aiPanelWidth / 100) * (100 - fileExplorerSize)} 
-              minSize={15}
+              minSize={20}
               onResize={handleAIPanelResize}
             >
               {isWorldLabMode && worldLabData ? (
