@@ -40,14 +40,92 @@ import FolderIcon from '@mui/icons-material/Folder'
 // @ts-ignore
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
 
+type ChatMode = 'ask' | 'agent'
+
+interface AgentActionPayload {
+  actions?: Array<{
+    type: 'create_file' | 'edit_file' | 'edit_block'
+    fileName?: string
+    targetDocumentId?: string
+    content: string
+    oldContent?: string
+    newContent?: string
+  }>
+}
+
+interface AgentFileProposal {
+  id: string
+  messageId: string
+  type: 'create_file' | 'edit_file' | 'edit_block'
+  fileName: string
+  content: string
+  patchOldText?: string
+  patchNewText?: string
+  patchOccurrenceIndex?: number
+  patchPrefixAnchor?: string
+  patchSuffixAnchor?: string
+  targetDocumentId?: string
+  candidateTargets?: Array<{ documentId: string; title: string }>
+  oldText: string
+  status: 'pending' | 'needs_target' | 'accepted' | 'rejected' | 'error'
+  error?: string
+}
+
+type MentionOption = {
+  type: 'library' | 'file' | 'folder'
+  id?: string
+  name: string
+  folder?: string
+  fileType?: 'pdf' | 'docx'
+}
+
+type ProjectFolderMention = {
+  id: string
+  fullPath: string
+}
+
+const AGENT_ACTION_BLOCK_NAME = 'lemona-actions'
+const AGENT_LOCATE_BLOCK_NAME = 'lemona-block-locate'
+const AGENT_PROMPT_PREFIX = `You are in AGENT MODE.
+
+When the user asks to create or edit files, include exactly one fenced block using this format:
+\`\`\`${AGENT_ACTION_BLOCK_NAME}
+{
+  "actions": [
+    { "type": "edit_block", "targetDocumentId": "doc_id", "fileName": "display-title", "oldContent": "exact existing text to replace", "newContent": "replacement text" }
+  ]
+}
+\`\`\`
+
+Rules:
+- Preferred action type for edits: "edit_block" (surgical find-and-replace)
+  - "oldContent": the exact text currently in the document that should be replaced (copy verbatim, preserve whitespace)
+  - "newContent": the replacement text
+  - Only the matched region is changed; everything else stays untouched
+  - If multiple blocks need editing, use multiple edit_block actions in the same array
+- "create_file": for new files only, requires "fileName" and "content" (full file text)
+- "edit_file": AVOID unless creating entirely new content for an existing empty file; requires "content" with full text
+- "targetDocumentId" must come from AVAILABLE_FILES
+- "fileName" is display-only for edit actions
+- Never output the entire file content when only a small section needs changing
+- CRITICAL formatting rule for "newContent":
+  - Match the writing style, tone, and format of "oldContent"
+  - If the original text is prose paragraphs, write prose paragraphs — do NOT convert to bullet lists
+  - Do NOT add markdown syntax (-, *, #, **) unless the original text already uses it
+- Keep a normal explanation outside the block
+- Do not include any extra keys`
+
+
 const ONBOARDING_DOCUMENT_TITLE = 'Lemona'
 const ONBOARDING_USER_MESSAGE = 'What can you do to help me?'
+const PROJECT_FOLDERS_STORAGE_KEY = 'projectFolders'
+const PROJECT_ROOT_FOLDER_META_KEY = 'projectRootFolderMeta'
 const ONBOARDING_ASSISTANT_MESSAGE = [
-  "Welcome to Lemona! I'm your writing copilot. I use semantic search to find the most relevant context from your project and library, keeping my suggestions grounded in your work. It's faster, more accurate, and more efficient than uploading full documents to AI models.",
+  "Welcome to Lemona! I'm your writing copilot. I use semantic search to find the most relevant context from your project, keeping my suggestions grounded in your work. It's faster, more accurate, and more efficient than uploading full documents to AI models.",
   '',
   'Quick tips:',
-  '- Ctrl S to save and index your workspace files ($0.02-0.15 per 1M tokens).',
-  '- Turn on "library indexing" in the API key menu to auto-index /library.',
+  '- Upload PDFs to index them for search. DOCX files are editable and indexed when you press Ctrl+S.',
+  '- Ctrl+S to save and index your written files ($0.02-0.15 per 1M tokens).',
   '- Use @ to mention a file for precise search.',
   '- Use one API key for the best AI experience.',
 ].join('\n')
@@ -101,13 +179,20 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     return 'gemini-3-flash-preview'
   })
   const [selectedStyle, setSelectedStyle] = useState<'Normal' | 'Learning' | 'Concise' | 'Explanatory' | 'Formal'>('Concise')
+  const [chatMode, setChatMode] = useState<ChatMode>(() => {
+    try {
+      const saved = localStorage.getItem('lemonaChatMode')
+      return saved === 'agent' ? 'agent' : 'ask'
+    } catch {
+      return 'ask'
+    }
+  })
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [googleApiKey, setGoogleApiKey] = useState('')
   const [openaiApiKey, setOpenaiApiKey] = useState('')
-  const [smartIndexing, setSmartIndexing] = useState(false)
   const [modalPosition, setModalPosition] = useState<{ top: number; left?: number; right?: number }>({ top: 0, left: 0 })
   const modelDropdownRef = useRef<HTMLDivElement>(null)
   const modelNameRef = useRef<HTMLButtonElement>(null)
@@ -155,12 +240,609 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [showMentionDropdown, setShowMentionDropdown] = useState(false)
   const mentionDropdownRef = useRef<HTMLDivElement>(null)
   const [isInMentionMode, setIsInMentionMode] = useState(false)
+  const [agentProposals, setAgentProposals] = useState<AgentFileProposal[]>([])
+
+  const logAgent = (stage: string, details: Record<string, any> = {}) => {
+    console.info('[AgentFlow]', stage, {
+      chatId,
+      documentId: documentId || null,
+      ...details,
+    })
+  }
 
   const generateMessageId = () => {
     if (typeof globalThis !== 'undefined' && globalThis.crypto?.randomUUID) {
       return `msg_${globalThis.crypto.randomUUID()}`
     }
     return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  }
+
+  const extractTextFromTipTap = (contentString?: string): string => {
+    if (!contentString) return ''
+    try {
+      const parsed = JSON.parse(contentString)
+      const chunks: string[] = []
+      const walk = (node: any) => {
+        if (!node) return
+        if (node.type === 'text' && typeof node.text === 'string') {
+          chunks.push(node.text)
+        }
+        if (Array.isArray(node.content)) {
+          node.content.forEach(walk)
+          if (node.type === 'paragraph' || node.type === 'heading' || node.type === 'blockquote' || node.type === 'listItem') {
+            chunks.push('\n')
+          }
+        }
+      }
+      walk(parsed)
+      return chunks.join('').replace(/\n{3,}/g, '\n\n').trim()
+    } catch {
+      return ''
+    }
+  }
+
+  const plainTextToTipTap = (text: string): string => {
+    const lines = text.replace(/\r\n/g, '\n').split('\n')
+    const content = lines.map(line => ({
+      type: 'paragraph',
+      content: line.length > 0 ? [{ type: 'text', text: line }] : [],
+    }))
+    return JSON.stringify({ type: 'doc', content })
+  }
+
+  const normalizeFileName = (value: string): { full: string; base: string } => {
+    const cleaned = value
+      .trim()
+      .replace(/^["'`]+|["'`]+$/g, '')
+      .split(/[\\/]/)
+      .pop() || ''
+    const lower = cleaned.toLowerCase()
+    const base = lower.replace(/\.[^/.]+$/, '')
+    return { full: lower, base }
+  }
+
+  const extractMentionFileNames = (text: string): string[] => {
+    const matches = text.match(/@([^\s,;:!?()[\]{}]+)/g) || []
+    return matches.map(token => token.slice(1))
+  }
+
+  const resolveAgentFileTargets = (
+    requestedFileName: string,
+    docs: Document[],
+    userText: string
+  ): { targetDocumentId?: string; candidateTargets?: Array<{ documentId: string; title: string }> } => {
+    const mentionSet = new Set(extractMentionFileNames(userText).map(m => normalizeFileName(m).full))
+    const normalizedRequest = normalizeFileName(requestedFileName)
+    const requestTokens = normalizedRequest.base.split(/[^a-z0-9]+/i).filter(Boolean)
+
+    const scored = docs.map((doc) => {
+      const normalizedDoc = normalizeFileName(doc.title || '')
+      let score = 0
+
+      if (normalizedRequest.full === normalizedDoc.full) score = 120
+      else if (normalizedRequest.full === normalizedDoc.base) score = 112
+      else if (normalizedRequest.base === normalizedDoc.base) score = 106
+      else if (normalizedRequest.base === normalizedDoc.full) score = 100
+      else if (
+        normalizedDoc.full.includes(normalizedRequest.full) ||
+        normalizedRequest.full.includes(normalizedDoc.full) ||
+        normalizedDoc.base.includes(normalizedRequest.base) ||
+        normalizedRequest.base.includes(normalizedDoc.base)
+      ) {
+        score = 74
+      } else if (requestTokens.length > 0) {
+        const docTokens = normalizedDoc.base.split(/[^a-z0-9]+/i).filter(Boolean)
+        const overlap = requestTokens.filter(token => docTokens.includes(token)).length
+        if (overlap > 0) {
+          score = 52 + Math.floor((overlap / Math.max(requestTokens.length, 1)) * 18)
+        }
+      }
+
+      if (mentionSet.has(normalizedDoc.full) || mentionSet.has(normalizedDoc.base)) {
+        score += 12
+      }
+
+      return { doc, score }
+    }).filter(item => item.score > 0).sort((a, b) => b.score - a.score)
+
+    if (scored.length === 0) return {}
+
+    const topScore = scored[0].score
+    const topCandidates = scored.filter(item => item.score >= Math.max(topScore - 6, 90))
+    if (topCandidates.length === 1) {
+      return { targetDocumentId: topCandidates[0].doc.id }
+    }
+    if (topCandidates.length > 1) {
+      return {
+        candidateTargets: topCandidates.slice(0, 6).map(item => ({
+          documentId: item.doc.id,
+          title: item.doc.title,
+        })),
+      }
+    }
+
+    const mediumCandidates = scored.filter(item => item.score >= 65).slice(0, 6)
+    if (mediumCandidates.length === 1) {
+      return { targetDocumentId: mediumCandidates[0].doc.id }
+    }
+    if (mediumCandidates.length > 1) {
+      return {
+        candidateTargets: mediumCandidates.map(item => ({
+          documentId: item.doc.id,
+          title: item.doc.title,
+        })),
+      }
+    }
+
+    return {}
+  }
+
+  const buildAgentAvailableFilesContext = (docs: Document[]): string => {
+    if (!docs || docs.length === 0) return 'AVAILABLE_FILES:\n- (none)'
+    const lines = docs.slice(0, 300).map((doc) => `- ${doc.id}: ${doc.title}`)
+    return `AVAILABLE_FILES:\n${lines.join('\n')}`
+  }
+
+  const extractTextBlocksFromTipTap = (contentString?: string): Array<{ id: string; type: string; text: string }> => {
+    if (!contentString) return []
+    try {
+      const parsed = JSON.parse(contentString)
+      const blocks: Array<{ id: string; type: string; text: string }> = []
+      let blockIndex = 0
+      const walk = (node: any) => {
+        if (!node) return
+        if (Array.isArray(node)) {
+          node.forEach(walk)
+          return
+        }
+        if (node.type && Array.isArray(node.content) && (node.type === 'paragraph' || node.type === 'heading' || node.type === 'blockquote' || node.type === 'listItem')) {
+          const textChunks: string[] = []
+          const collectText = (child: any) => {
+            if (!child) return
+            if (child.type === 'text' && typeof child.text === 'string') {
+              textChunks.push(child.text)
+            }
+            if (Array.isArray(child.content)) {
+              child.content.forEach(collectText)
+            }
+          }
+          node.content.forEach(collectText)
+          const text = textChunks.join('').trim()
+          if (text.length > 0) {
+            blocks.push({ id: `blk_${blockIndex}`, type: node.type, text })
+            blockIndex += 1
+          }
+        }
+        if (Array.isArray(node.content)) {
+          node.content.forEach(walk)
+        }
+      }
+      walk(parsed)
+      return blocks
+    } catch {
+      const plain = String(contentString || '').replace(/\r\n/g, '\n').trim()
+      if (!plain) return []
+      return plain
+        .split(/\n{2,}/)
+        .map(part => part.trim())
+        .filter(Boolean)
+        .slice(0, 240)
+        .map((text, index) => ({ id: `blk_${index}`, type: 'paragraph', text }))
+    }
+  }
+
+  const readAssistantContentFromStream = async (response: Response): Promise<string> => {
+    const reader = response.body?.getReader()
+    if (!reader) return ''
+    const decoder = new TextDecoder()
+    let content = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      const chunk = decoder.decode(value)
+      const lines = chunk.split('\n')
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(line.slice(6))
+          if (data?.chunk && !String(data.chunk).includes('__METADATA__')) {
+            content += data.chunk
+          }
+        } catch {
+          // Ignore malformed stream lines
+        }
+      }
+    }
+    return content
+  }
+
+  const parseLocatedBlockIds = (messageContent: string, validIds: Set<string>): string[] => {
+    const blockRegex = new RegExp(`\`\`\`${AGENT_LOCATE_BLOCK_NAME}\\s*([\\s\\S]*?)\`\`\``, 'i')
+    const match = messageContent.match(blockRegex)
+
+    const validateIds = (ids: string[]): string[] =>
+      ids.map(id => id.trim()).filter(id => validIds.has(id))
+
+    if (!match) {
+      // Fallback: extract all blk_X from plain text
+      const fallbackMatches = messageContent.match(/\bblk_\d+\b/gi)
+      if (!fallbackMatches) return []
+      return validateIds([...new Set(fallbackMatches)])
+    }
+
+    try {
+      const parsed = JSON.parse(match[1].trim())
+      // Support new array format: { "targetBlockIds": ["blk_3", "blk_7"] }
+      if (Array.isArray(parsed.targetBlockIds)) {
+        const ids = validateIds(parsed.targetBlockIds)
+        if (ids.length > 0) return ids
+      }
+      // Support legacy single format: { "targetBlockId": "blk_3" }
+      if (parsed.targetBlockId) {
+        const ids = validateIds([parsed.targetBlockId])
+        if (ids.length > 0) return ids
+      }
+      return []
+    } catch {
+      // JSON parse failed — extract all blk_X from the fenced block content
+      const fallbackMatches = match[1].match(/\bblk_\d+\b/gi)
+      if (!fallbackMatches) return []
+      return validateIds([...new Set(fallbackMatches)])
+    }
+  }
+
+  const chooseBlockByHeuristic = (
+    blocks: Array<{ id: string; type: string; text: string }>,
+    userText: string
+  ): string | null => {
+    if (!blocks.length) return null
+    const tokens = (userText || '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter(token => token.length >= 2)
+    if (!tokens.length) {
+      return blocks[0].id
+    }
+    const scored = blocks.map(block => {
+      const blockLower = block.text.toLowerCase()
+      const overlap = tokens.filter(token => blockLower.includes(token)).length
+      const typeBonus = block.type === 'heading' ? 0.5 : 0
+      return { id: block.id, score: overlap + typeBonus }
+    })
+    scored.sort((a, b) => b.score - a.score)
+    if (scored[0].score <= 0) {
+      return blocks[0].id
+    }
+    return scored[0].id
+  }
+
+  const extractPatchSegment = (
+    oldText: string,
+    newText: string
+  ): {
+    oldSegment: string
+    newSegment: string
+    occurrenceIndex: number
+    prefixAnchor: string
+    suffixAnchor: string
+  } => {
+    const oldValue = (oldText || '').replace(/\r\n/g, '\n')
+    const newValue = (newText || '').replace(/\r\n/g, '\n')
+    if (oldValue === newValue) {
+      return { oldSegment: '', newSegment: '', occurrenceIndex: 0, prefixAnchor: '', suffixAnchor: '' }
+    }
+
+    let prefix = 0
+    const minLen = Math.min(oldValue.length, newValue.length)
+    while (prefix < minLen && oldValue[prefix] === newValue[prefix]) {
+      prefix += 1
+    }
+
+    let suffix = 0
+    const oldRemain = oldValue.length - prefix
+    const newRemain = newValue.length - prefix
+    const maxSuffix = Math.min(oldRemain, newRemain)
+    while (
+      suffix < maxSuffix &&
+      oldValue[oldValue.length - 1 - suffix] === newValue[newValue.length - 1 - suffix]
+    ) {
+      suffix += 1
+    }
+
+    const oldSegment = oldValue.slice(prefix, oldValue.length - suffix)
+    const newSegment = newValue.slice(prefix, newValue.length - suffix)
+    const anchorWindow = 80
+    const prefixAnchor = oldValue.slice(Math.max(0, prefix - anchorWindow), prefix)
+    const suffixAnchor = oldValue.slice(oldValue.length - suffix, Math.min(oldValue.length, oldValue.length - suffix + anchorWindow))
+
+    let occurrenceIndex = 0
+    if (oldSegment.length > 0) {
+      let searchFrom = 0
+      while (true) {
+        const idx = oldValue.indexOf(oldSegment, searchFrom)
+        if (idx < 0 || idx >= prefix) break
+        occurrenceIndex += 1
+        searchFrom = idx + Math.max(1, oldSegment.length)
+      }
+    }
+
+    return { oldSegment, newSegment, occurrenceIndex, prefixAnchor, suffixAnchor }
+  }
+
+  const parseAgentActions = (messageContent: string): { cleanedContent: string; actions: AgentActionPayload['actions'] } => {
+    const blockRegex = new RegExp(`\`\`\`${AGENT_ACTION_BLOCK_NAME}\\s*([\\s\\S]*?)\`\`\``, 'i')
+    const match = messageContent.match(blockRegex)
+    if (!match) return { cleanedContent: messageContent, actions: [] }
+
+    const cleanedContent = messageContent.replace(blockRegex, '').trim()
+    try {
+      const parsed: AgentActionPayload = JSON.parse(match[1].trim())
+      const actions = Array.isArray(parsed.actions) ? parsed.actions.filter(action => {
+        if (!action) return false
+        if (action.type === 'create_file') {
+          return typeof action.content === 'string' && typeof action.fileName === 'string' && action.fileName.trim().length > 0
+        }
+        if (action.type === 'edit_block') {
+          return typeof action.oldContent === 'string' && typeof action.newContent === 'string' &&
+            ((typeof action.targetDocumentId === 'string' && action.targetDocumentId.trim().length > 0) ||
+             (typeof action.fileName === 'string' && action.fileName.trim().length > 0))
+        }
+        if (action.type === 'edit_file') {
+          return typeof action.content === 'string' &&
+            ((typeof action.targetDocumentId === 'string' && action.targetDocumentId.trim().length > 0) ||
+             (typeof action.fileName === 'string' && action.fileName.trim().length > 0))
+        }
+        return false
+      }) : []
+      return { cleanedContent, actions }
+    } catch {
+      return { cleanedContent, actions: [] }
+    }
+  }
+
+  const rejectAgentProposal = (proposalId: string) => {
+    setAgentProposals(prev => prev.map(proposal =>
+      proposal.id === proposalId ? { ...proposal, status: 'rejected' } : proposal
+    ))
+    window.dispatchEvent(new CustomEvent('lemona:agent-diff-clear', { detail: { proposalId } }))
+  }
+
+  const selectAgentProposalTarget = async (proposalId: string, targetDocumentId: string) => {
+    try {
+      const proposal = agentProposals.find(p => p.id === proposalId)
+      if (!proposal) return
+      const targetDoc = await documentApi.get(targetDocumentId)
+      if (!targetDoc) return
+
+      const oldText = extractTextFromTipTap(targetDoc.content)
+      const patch = extractPatchSegment(oldText, proposal.content)
+      setAgentProposals(prev => prev.map(item => {
+        if (item.id !== proposalId) return item
+        return {
+          ...item,
+          targetDocumentId,
+          candidateTargets: undefined,
+          oldText,
+          patchOldText: patch.oldSegment,
+          patchNewText: patch.newSegment,
+          patchOccurrenceIndex: patch.occurrenceIndex,
+          patchPrefixAnchor: patch.prefixAnchor,
+          patchSuffixAnchor: patch.suffixAnchor,
+          status: 'pending',
+          error: undefined,
+        }
+      }))
+
+      window.dispatchEvent(new CustomEvent('lemona:agent-diff-preview', {
+        detail: {
+          proposalId,
+          documentId: targetDocumentId,
+          fileName: targetDoc.title,
+          oldText,
+          newText: proposal.content,
+        }
+      }))
+    } catch (error) {
+      console.warn('[ChatInterface] Failed to select proposal target:', error)
+    }
+  }
+
+  const applyAgentProposal = async (proposalId: string) => {
+    const proposal = agentProposals.find(item => item.id === proposalId)
+    if (!proposal) return
+
+    try {
+      let awaitingPatchAck = false
+      if (proposal.type === 'edit_block' && proposal.targetDocumentId && proposal.patchOldText !== undefined && proposal.patchNewText !== undefined) {
+        // edit_block always uses patch path
+        if (proposal.targetDocumentId === documentId) {
+          logAgent('apply_edit_block_patch', {
+            proposalId,
+            targetDocumentId: proposal.targetDocumentId,
+            oldChars: proposal.patchOldText.length,
+            newChars: proposal.patchNewText.length,
+          })
+          window.dispatchEvent(new CustomEvent('lemona:agent-apply-editor-patch', {
+            detail: {
+              proposalId: proposal.id,
+              documentId: proposal.targetDocumentId,
+              oldText: proposal.patchOldText,
+              newText: proposal.patchNewText,
+              occurrenceIndex: proposal.patchOccurrenceIndex ?? 0,
+              prefixAnchor: proposal.patchPrefixAnchor || '',
+              suffixAnchor: proposal.patchSuffixAnchor || '',
+            }
+          }))
+          awaitingPatchAck = true
+        } else {
+          // For non-current document, apply text replacement via API
+          logAgent('apply_edit_block_api', { proposalId, targetDocumentId: proposal.targetDocumentId })
+          const targetDoc = await documentApi.get(proposal.targetDocumentId)
+          if (targetDoc) {
+            const fullText = extractTextFromTipTap(targetDoc.content)
+            const patched = fullText.replace(proposal.patchOldText, proposal.patchNewText)
+            if (patched !== fullText) {
+              await documentApi.update(proposal.targetDocumentId, plainTextToTipTap(patched))
+            }
+          }
+          window.dispatchEvent(new CustomEvent('lemona:documents-refresh-request', { detail: { projectId } }))
+        }
+      } else if (proposal.type === 'create_file') {
+        logAgent('apply_create_file', { proposalId, fileName: proposal.fileName })
+        const created = await documentApi.create(proposal.fileName, 'project')
+        await documentApi.update(created.id, plainTextToTipTap(proposal.content))
+        if (projectId) {
+          await projectApi.addDocument(projectId, created.id)
+        }
+        window.dispatchEvent(new CustomEvent('lemona:documents-refresh-request', { detail: { projectId } }))
+      } else if (proposal.targetDocumentId) {
+        if (proposal.targetDocumentId === documentId && proposal.patchOldText !== undefined && proposal.patchNewText !== undefined) {
+          logAgent('apply_patch_dispatch', {
+            proposalId,
+            targetDocumentId: proposal.targetDocumentId,
+            oldChars: proposal.patchOldText.length,
+            newChars: proposal.patchNewText.length,
+          })
+          window.dispatchEvent(new CustomEvent('lemona:agent-apply-editor-patch', {
+            detail: {
+              proposalId: proposal.id,
+              documentId: proposal.targetDocumentId,
+              oldText: proposal.patchOldText,
+              newText: proposal.patchNewText,
+              occurrenceIndex: proposal.patchOccurrenceIndex ?? 0,
+              prefixAnchor: proposal.patchPrefixAnchor || '',
+              suffixAnchor: proposal.patchSuffixAnchor || '',
+            }
+          }))
+          awaitingPatchAck = true
+        } else {
+          logAgent('apply_full_update', { proposalId, targetDocumentId: proposal.targetDocumentId })
+          await documentApi.update(proposal.targetDocumentId, plainTextToTipTap(proposal.content))
+          if (proposal.targetDocumentId === documentId) {
+            window.dispatchEvent(new CustomEvent('lemona:agent-apply-editor-content', {
+              detail: {
+                documentId: proposal.targetDocumentId,
+                content: plainTextToTipTap(proposal.content),
+              }
+            }))
+          }
+          window.dispatchEvent(new CustomEvent('lemona:documents-refresh-request', { detail: { projectId } }))
+        }
+      } else {
+        setAgentProposals(prev => prev.map(item =>
+          item.id === proposalId ? { ...item, status: 'needs_target', error: 'Select a target file first' } : item
+        ))
+        return
+      }
+
+      if (awaitingPatchAck) {
+        return
+      }
+
+      setAgentProposals(prev => prev.map(item =>
+        item.id === proposalId ? { ...item, status: 'accepted' } : item
+      ))
+      window.dispatchEvent(new CustomEvent('lemona:agent-diff-clear', { detail: { proposalId } }))
+    } catch (error: any) {
+      setAgentProposals(prev => prev.map(item =>
+        item.id === proposalId ? { ...item, status: 'error', error: error?.message || 'Failed to apply action' } : item
+      ))
+    }
+  }
+
+  const handleUndoAllProposals = () => {
+    const pendingIds = agentProposals
+      .filter(proposal => proposal.status === 'pending' || proposal.status === 'needs_target')
+      .map(proposal => proposal.id)
+
+    if (pendingIds.length === 0) return
+    setAgentProposals(prev => prev.map(proposal =>
+      pendingIds.includes(proposal.id) ? { ...proposal, status: 'rejected' } : proposal
+    ))
+    window.dispatchEvent(new CustomEvent('lemona:agent-diff-clear', { detail: {} }))
+  }
+
+  const handleKeepAllProposals = async () => {
+    const pending = agentProposals.filter(proposal => proposal.status === 'pending')
+    for (const proposal of pending) {
+      await applyAgentProposal(proposal.id)
+    }
+  }
+
+  // Dispatch preview for a proposal, collecting ALL pending edit_block patches for the same document
+  const dispatchPreviewForProposal = (proposal: AgentFileProposal) => {
+    if (!proposal.targetDocumentId) return
+    // Never re-preview a non-pending proposal — the document has already changed
+    if (proposal.status !== 'pending') return
+
+    // Collect all pending edit_block patches for the same document
+    const allDocPatches = agentProposals.filter(
+      p => p.status === 'pending' && p.targetDocumentId === proposal.targetDocumentId &&
+           p.type === 'edit_block' && p.patchOldText && p.patchNewText
+    )
+
+    if (allDocPatches.length > 0) {
+      window.dispatchEvent(new CustomEvent('lemona:agent-diff-preview', {
+        detail: {
+          proposalId: allDocPatches[0].id,
+          documentId: proposal.targetDocumentId,
+          fileName: allDocPatches[0].fileName,
+          oldText: allDocPatches[0].patchOldText,
+          newText: allDocPatches[0].patchNewText,
+          isPatch: true,
+          patches: allDocPatches.map(p => ({
+            proposalId: p.id,
+            oldText: p.patchOldText!,
+            newText: p.patchNewText!,
+          })),
+        }
+      }))
+    } else if (proposal.type !== 'edit_block') {
+      // Fallback: single non-edit_block proposal (only if still pending)
+      window.dispatchEvent(new CustomEvent('lemona:agent-diff-preview', {
+        detail: {
+          proposalId: proposal.id,
+          documentId: proposal.targetDocumentId,
+          fileName: proposal.fileName,
+          oldText: proposal.oldText,
+          newText: proposal.content,
+        }
+      }))
+    }
+  }
+
+  const openAndFocusProposalDiff = (proposal: AgentFileProposal) => {
+    if (!proposal.targetDocumentId) return
+    // Only allow preview for pending proposals — accepted/rejected diffs are stale
+    if (proposal.status !== 'pending') return
+    const isPatchPreview = proposal.type === 'edit_block' && proposal.patchOldText !== undefined && proposal.patchNewText !== undefined
+    const oldText = isPatchPreview ? (proposal.patchOldText || '') : proposal.oldText
+    const newText = isPatchPreview ? (proposal.patchNewText || '') : proposal.content
+    window.dispatchEvent(new CustomEvent('lemona:open-document-from-ai-diff', {
+      detail: {
+        proposalId: proposal.id,
+        documentId: proposal.targetDocumentId,
+        fileName: proposal.fileName,
+        oldText,
+        newText,
+      }
+    }))
+
+    const fireFocus = () => {
+      dispatchPreviewForProposal(proposal)
+      window.dispatchEvent(new CustomEvent('lemona:agent-focus-diff', {
+        detail: {
+          proposalId: proposal.id,
+          documentId: proposal.targetDocumentId,
+          oldText,
+          newText,
+        }
+      }))
+    }
+    fireFocus()
+    window.setTimeout(fireFocus, 120)
+    window.setTimeout(fireFocus, 360)
   }
 
   const buildOnboardingMessages = async (): Promise<AIChatMessage[] | null> => {
@@ -217,22 +899,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         setOpenaiApiKey(openaiKey)
       }
       
-      // Load Smart indexing setting (default to true if not set)
-      const smartIndexingSetting = localStorage.getItem('smartIndexing')
-      const isSmartIndexingEnabled = smartIndexingSetting === null ? true : smartIndexingSetting === 'true'
-      setSmartIndexing(isSmartIndexingEnabled)
-      
-      // Sync both keys to main process for auto-indexing
+      // Sync keys to main process for auto-indexing
       if (googleKey || openaiKey) {
         settingsApi.saveApiKeys(googleKey, openaiKey).catch((error) => {
           console.error('Failed to sync API keys to main process:', error)
         })
       }
-      
-      // Sync Smart indexing setting to main process
-      settingsApi.saveSmartIndexing(isSmartIndexingEnabled).catch((error) => {
-        console.error('Failed to sync Smart indexing setting to main process:', error)
-      })
     } catch (error) {
       console.error('Failed to load API keys:', error)
     }
@@ -246,6 +918,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       console.error('Failed to save selected model:', error)
     }
   }, [selectedModel])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('lemonaChatMode', chatMode)
+    } catch (error) {
+      console.error('Failed to save chat mode:', error)
+    }
+  }, [chatMode])
 
   // Validate model compatibility with available API keys on mount and when keys change
   // Only switch if the current model is incompatible (e.g., GPT model but no OpenAI key)
@@ -292,24 +972,24 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
   }
 
-  // Load documents for @mention autocomplete (workspace files only)
+  // Helper: PDF files indexed on upload (library index). DOCX is editable, indexed on Ctrl+S.
+  const isUploadedFile = (doc: Document) => {
+    const ext = (doc.title || '').toLowerCase().split('.').pop() || ''
+    return ext === 'pdf'
+  }
+
+  // Load documents for @mention autocomplete
   const loadMentionDocuments = async () => {
     try {
       const docs = await documentApi.list()
       setAllDocuments(docs)
       
-      // Filter to only show workspace files (folder === 'project' or undefined/null)
-      // Library files are handled separately in getFilteredMentions based on index status
+      // Filter to written/created files (non-uploaded) for workspace mentions
+      // Uploaded files (PDF/DOCX) are shown separately in getFilteredMentions if indexed
       const mentionableDocs = docs.filter((doc: Document) => {
-        // Only include workspace files (folder === 'project' or undefined/null)
-        // Exclude library files (they will be shown separately if indexed)
-        if (doc.folder === 'library') {
-          return false
-        }
+        if (isUploadedFile(doc)) return false
         
-        // Include documents from the current project only
-        // Must have matching projectId (folder can be 'project' or undefined/null)
-        if (projectId && doc.projectId === projectId) {
+        if (projectId && doc.projectId === projectId && doc.folder !== 'worldlab') {
           return true
         }
         
@@ -323,9 +1003,12 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
   }
 
-  // Fetch indexing statuses for library files
+  // Fetch indexing statuses for uploaded files (PDF, DOCX)
   useEffect(() => {
-    const libraryDocs = allDocuments.filter(doc => doc.folder === 'library' && projectId && doc.projectId === projectId)
+    const libraryDocs = allDocuments.filter(doc => {
+      const ext = (doc.title || '').toLowerCase().split('.').pop() || ''
+      return ext === 'pdf' && projectId && doc.projectId === projectId && doc.folder !== 'worldlab'
+    })
     if (libraryDocs.length === 0) {
       setLibraryFileIndexingStatuses(new Map())
       return
@@ -447,31 +1130,20 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                          (currentOpenaiKey && currentOpenaiKey.trim().length > 0)
         
         if (!hadKeyBefore && hasKeyNow && projectId) {
-          // Check if Smart indexing is enabled before triggering indexing
-          settingsApi.getSmartIndexing().then((smartIndexingEnabled) => {
-            if (!smartIndexingEnabled) {
-              console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for project ${projectId}`)
-              return
+          console.log(`[Auto-Indexing] API key was just added in project ${projectId}, starting PDF indexing...`)
+          indexingApi.indexProjectLibraryFiles(
+            projectId,
+            value || undefined,
+            currentOpenaiKey,
+            true // onlyUnindexed = true
+          ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+            const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+            const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+            if (successCount > 0 || errorCount > 0) {
+              console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
             }
-            
-            console.log(`[Auto-Indexing] API key was just added in project ${projectId}, starting library file indexing...`)
-            indexingApi.indexProjectLibraryFiles(
-              projectId,
-              value || undefined,
-              currentOpenaiKey,
-              true // onlyUnindexed = true
-            ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
-              const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
-              const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
-              if (successCount > 0 || errorCount > 0) {
-                console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
-              }
-            }).catch((error) => {
-              // Don't show error to user - indexing failures shouldn't interrupt workflow
-              console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
-            })
           }).catch((error) => {
-            console.warn('[Auto-Indexing] Failed to get Smart indexing setting:', error)
+            console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
           })
         }
       } catch (error) {
@@ -506,31 +1178,20 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                          (value && value.trim().length > 0)
         
         if (!hadKeyBefore && hasKeyNow && projectId) {
-          // Check if Smart indexing is enabled before triggering indexing
-          settingsApi.getSmartIndexing().then((smartIndexingEnabled) => {
-            if (!smartIndexingEnabled) {
-              console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for project ${projectId}`)
-              return
+          console.log(`[Auto-Indexing] API key was just added in project ${projectId}, starting PDF indexing...`)
+          indexingApi.indexProjectLibraryFiles(
+            projectId,
+            currentGoogleKey,
+            value || undefined,
+            true // onlyUnindexed = true
+          ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
+            const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
+            const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
+            if (successCount > 0 || errorCount > 0) {
+              console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
             }
-            
-            console.log(`[Auto-Indexing] API key was just added in project ${projectId}, starting library file indexing...`)
-            indexingApi.indexProjectLibraryFiles(
-              projectId,
-              currentGoogleKey,
-              value || undefined,
-              true // onlyUnindexed = true
-            ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
-              const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
-              const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
-              if (successCount > 0 || errorCount > 0) {
-                console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
-              }
-            }).catch((error) => {
-              // Don't show error to user - indexing failures shouldn't interrupt workflow
-              console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
-            })
           }).catch((error) => {
-            console.warn('[Auto-Indexing] Failed to get Smart indexing setting:', error)
+            console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
           })
         }
       } catch (error) {
@@ -741,6 +1402,75 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       }
     }
   }, [messages, isStreaming])
+
+  useEffect(() => {
+    const handleAccept = (event: Event) => {
+      const customEvent = event as CustomEvent<{ proposalId?: string }>
+      if (customEvent.detail?.proposalId) {
+        void applyAgentProposal(customEvent.detail.proposalId)
+      }
+    }
+
+    const handleReject = (event: Event) => {
+      const customEvent = event as CustomEvent<{ proposalId?: string }>
+      if (customEvent.detail?.proposalId) {
+        rejectAgentProposal(customEvent.detail.proposalId)
+      }
+    }
+
+    const handlePatchApplied = (event: Event) => {
+      const customEvent = event as CustomEvent<{ proposalId?: string }>
+      const proposalId = customEvent.detail?.proposalId
+      if (!proposalId) return
+      logAgent('patch_applied', { proposalId })
+      setAgentProposals(prev => prev.map(item =>
+        item.id === proposalId ? { ...item, status: 'accepted', error: undefined } : item
+      ))
+      window.dispatchEvent(new CustomEvent('lemona:agent-diff-clear', { detail: { proposalId } }))
+    }
+
+    const handlePatchFailed = (event: Event) => {
+      const customEvent = event as CustomEvent<{ proposalId?: string; message?: string }>
+      const proposalId = customEvent.detail?.proposalId
+      if (!proposalId) return
+      console.warn('[AgentFlow] patch_failed', {
+        chatId,
+        documentId: documentId || null,
+        proposalId,
+        message: customEvent.detail?.message || 'Patch failed. Please refine the request.',
+      })
+      setAgentProposals(prev => prev.map(item =>
+        item.id === proposalId
+          ? { ...item, status: 'error', error: customEvent.detail?.message || 'Patch failed. Please refine the request.' }
+          : item
+      ))
+      window.dispatchEvent(new CustomEvent('lemona:agent-diff-clear', { detail: { proposalId } }))
+    }
+
+    window.addEventListener('lemona:agent-diff-accept', handleAccept as EventListener)
+    window.addEventListener('lemona:agent-diff-reject', handleReject as EventListener)
+    window.addEventListener('lemona:agent-patch-applied', handlePatchApplied as EventListener)
+    window.addEventListener('lemona:agent-patch-failed', handlePatchFailed as EventListener)
+    return () => {
+      window.removeEventListener('lemona:agent-diff-accept', handleAccept as EventListener)
+      window.removeEventListener('lemona:agent-diff-reject', handleReject as EventListener)
+      window.removeEventListener('lemona:agent-patch-applied', handlePatchApplied as EventListener)
+      window.removeEventListener('lemona:agent-patch-failed', handlePatchFailed as EventListener)
+    }
+  }, [agentProposals, documentId, projectId])
+
+  useEffect(() => {
+    if (!documentId) return
+    const currentDocProposal = agentProposals.find(proposal =>
+      proposal.status === 'pending' &&
+      proposal.targetDocumentId === documentId
+    )
+    if (currentDocProposal) {
+      dispatchPreviewForProposal(currentDocProposal)
+    } else {
+      window.dispatchEvent(new CustomEvent('lemona:agent-diff-clear', { detail: {} }))
+    }
+  }, [documentId, agentProposals])
 
   // Measure input container width to match user message width
   useEffect(() => {
@@ -1192,9 +1922,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       const isLibrary = mentionName === 'Library'
       
       // Check if this is a prefix of a document title (like "file" -> "file (2).pdf")
-      // Search in both workspace files and library files (if indexed)
+      // Search in both workspace files and uploaded files (if indexed)
       const allMentionableDocs = isLibraryIndexed 
-        ? [...libraryDocuments, ...allDocuments.filter(doc => doc.folder === 'library' && doc.projectId === projectId)]
+        ? [...libraryDocuments, ...allDocuments.filter(doc => isUploadedFile(doc) && doc.projectId === projectId)]
         : libraryDocuments
       let matchedDoc = allMentionableDocs.find(doc => doc.title === mentionName || doc.id === mentionName)
       
@@ -1461,34 +2191,107 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
 
   const getFilteredMentions = () => {
     const query = mentionQuery.toLowerCase().trim()
-    const mentions: Array<{ 
-      type: 'library' | 'file', 
-      id?: string, 
-      name: string, 
-      folder?: string,
-      fileType?: 'pdf' | 'docx'
-    }> = []
-    
-    // Only include @Library option if library is indexed and query matches
-    if (isLibraryIndexed && (!query || 'library'.includes(query))) {
-      mentions.push({ type: 'library', name: 'Library' })
+    const mentions: MentionOption[] = []
+
+    const getProjectFolderMentions = (): ProjectFolderMention[] => {
+      try {
+        const defaultRootMeta = {
+          worldlab: { id: 'worldlab', name: 'worldlab', hidden: true },
+          library: { id: 'library', name: 'library', hidden: false },
+          project: { id: 'project', name: 'workspace', hidden: false },
+        }
+        const storedRootMetaRaw = localStorage.getItem(PROJECT_ROOT_FOLDER_META_KEY)
+        let rootMeta = defaultRootMeta
+        if (storedRootMetaRaw) {
+          const parsed = JSON.parse(storedRootMetaRaw)
+          if (parsed && typeof parsed === 'object') {
+            rootMeta = {
+              worldlab: { ...defaultRootMeta.worldlab, ...(parsed.worldlab || {}) },
+              library: { ...defaultRootMeta.library, ...(parsed.library || {}) },
+              project: { ...defaultRootMeta.project, ...(parsed.project || {}) },
+            }
+          }
+        }
+
+        const rootFolders = [rootMeta.project, rootMeta.library, rootMeta.worldlab]
+          .filter(root => !root.hidden)
+          .map(root => ({ id: root.id, fullPath: root.name.trim() }))
+          .filter(root => root.fullPath.length > 0)
+
+        const rootIdToName = new Map(rootFolders.map(root => [root.id, root.fullPath]))
+
+        const raw = localStorage.getItem(PROJECT_FOLDERS_STORAGE_KEY)
+        if (!raw) return rootFolders
+        const parsed = JSON.parse(raw) as Array<{ id?: string; name?: string; parentId?: string | null; order?: number }>
+        if (!Array.isArray(parsed)) return rootFolders
+
+        const folders = parsed
+          .filter(item => item && typeof item.id === 'string' && typeof item.name === 'string')
+          .map(item => ({
+            id: item.id as string,
+            name: (item.name as string).trim(),
+            parentId: typeof item.parentId === 'string' ? item.parentId : null,
+            order: typeof item.order === 'number' ? item.order : 0,
+          }))
+          .filter(item => item.name.length > 0 && !rootIdToName.has(item.id))
+
+        if (folders.length === 0) return rootFolders
+
+        const byId = new Map(folders.map(folder => [folder.id, folder]))
+
+        const buildPath = (folderId: string): string => {
+          const segments: string[] = []
+          const visited = new Set<string>()
+          let currentId: string | null = folderId
+          while (currentId) {
+            if (visited.has(currentId)) return ''
+            visited.add(currentId)
+            if (rootIdToName.has(currentId)) {
+              segments.unshift(rootIdToName.get(currentId) || '')
+              break
+            }
+            const current = byId.get(currentId)
+            if (!current) return ''
+            segments.unshift(current.name)
+            currentId = current.parentId ?? 'project'
+          }
+          return segments.join('/')
+        }
+
+        const dedup = new Set<string>()
+        const nestedFolders = folders
+          .map(folder => ({ id: folder.id, fullPath: buildPath(folder.id) }))
+          .filter(folder => folder.fullPath.length > 0)
+        return [...rootFolders, ...nestedFolders]
+          .filter(folder => {
+            const key = folder.fullPath.toLowerCase()
+            if (dedup.has(key)) return false
+            dedup.add(key)
+            return true
+          })
+          .sort((a, b) => a.fullPath.localeCompare(b.fullPath))
+      } catch {
+        return []
+      }
     }
+
+    const projectFolders = getProjectFolderMentions()
+      .filter(folder => !query || folder.fullPath.toLowerCase().includes(query))
+    projectFolders.forEach((folder) => {
+      mentions.push({
+        type: 'folder',
+        id: folder.id,
+        name: folder.fullPath,
+        folder: 'project',
+      })
+    })
     
-    // Only show library files if library is indexed
+    // Only show uploaded files (PDF/DOCX) if indexed
     if (isLibraryIndexed) {
-      // Filter library documents from allDocuments: only PDF and DOCX files from current project's library folder
       const libraryFiles = allDocuments.filter((doc: Document) => {
-        // Only include files in library folder
-        if (doc.folder !== 'library') return false
-        
-        // Only include files from current project
+        if (!isUploadedFile(doc)) return false
         if (projectId && doc.projectId !== projectId) return false
-        
-        // Only include PDF and DOCX files
-        const fileName = doc.title.toLowerCase()
-        const isPDF = fileName.endsWith('.pdf')
-        const isDOCX = fileName.endsWith('.docx')
-        if (!isPDF && !isDOCX) return false
+        if (doc.folder === 'worldlab') return false
         
         // Only include files that are indexed (status === 'completed')
         const indexingStatus = libraryFileIndexingStatuses.get(doc.id)
@@ -1568,7 +2371,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     return mentions
   }
 
-  const insertMention = (mention: { type: 'library' | 'file', id?: string, name: string }) => {
+  const insertMention = (mention: MentionOption) => {
     if (!textareaRef.current || mentionStartIndexRef.current === -1) return
     
     const textarea = textareaRef.current
@@ -1730,13 +2533,126 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     try {
       // Reset cancellation flag
       isStreamCancelledRef.current = false
+      if (chatMode === 'agent') {
+        logAgent('request_started', { userChars: userMessage.content?.length || 0 })
+      }
       
       // Create abort controller for this request
       abortControllerRef.current = new AbortController()
       
       // Pass chat history (excluding the just-added user message) for conversation continuity
       const chatHistoryForAPI = messages.filter(msg => msg.id !== userMessage.id)
-      const response = await aiApi.streamChat(userMessage.content, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined, selectedStyle, projectId, googleApiKey, openaiApiKey)
+      let projectScopedDocs: Document[] = []
+      let targetBlockInstruction = ''
+      if (chatMode === 'agent') {
+        const docs = await documentApi.list()
+        projectScopedDocs = docs.filter((doc: Document) => {
+          const sameProject = projectId ? doc.projectId === projectId : true
+          return sameProject && doc.folder !== 'worldlab'
+        })
+
+        const currentDocBlocks = extractTextBlocksFromTipTap(documentContent)
+        if (currentDocBlocks.length > 0) {
+          const validIds = new Set(currentDocBlocks.map(block => block.id))
+          let resolvedBlockIds: string[] = []
+          let locateSource: 'llm' | 'heuristic' | 'none' = 'none'
+          try {
+            const listedBlocks = currentDocBlocks
+              .slice(0, 220)
+              .map(block => `- ${block.id} [${block.type}] ${block.text.slice(0, 180).replace(/\n/g, ' ')}`)
+              .join('\n')
+
+            const locatePrompt = `You are Step 1 (Locate target blocks) in a two-step editing agent.
+From the BLOCKS list below, choose ALL block IDs that need to be modified to fulfill the user's request.
+- Select only blocks whose content directly needs changing.
+- If only one block needs editing, return an array with one element.
+- If multiple blocks need editing, return all of them.
+Return exactly one JSON block:
+\`\`\`${AGENT_LOCATE_BLOCK_NAME}
+{ "targetBlockIds": ["blk_x", "blk_y"], "reason": "short reason" }
+\`\`\`
+
+User request:
+${userMessage.content}
+
+BLOCKS:
+${listedBlocks}`
+
+            const locateResponse = await aiApi.streamChat(
+              locatePrompt,
+              documentContent,
+              documentId,
+              [],
+              false,
+              selectedModel,
+              undefined,
+              'Concise',
+              projectId,
+              googleApiKey,
+              openaiApiKey
+            )
+            const locateContent = await readAssistantContentFromStream(locateResponse)
+            resolvedBlockIds = parseLocatedBlockIds(locateContent, validIds)
+            if (resolvedBlockIds.length > 0) {
+              locateSource = 'llm'
+            }
+          } catch (locateError) {
+            console.warn('[ChatInterface] Block locate step failed, falling back to heuristic:', locateError)
+          }
+
+          if (resolvedBlockIds.length === 0) {
+            const heuristicId = chooseBlockByHeuristic(currentDocBlocks, userMessage.content)
+            if (heuristicId) {
+              resolvedBlockIds = [heuristicId]
+              locateSource = 'heuristic'
+            }
+          }
+
+          if (resolvedBlockIds.length > 0) {
+            const blockSections: string[] = []
+            for (let i = 0; i < resolvedBlockIds.length; i++) {
+              const blockId = resolvedBlockIds[i]
+              const blockIndex = currentDocBlocks.findIndex(b => b.id === blockId)
+              const block = blockIndex >= 0 ? currentDocBlocks[blockIndex] : null
+              if (!block) continue
+              const headContext = currentDocBlocks[Math.max(0, blockIndex - 1)]?.text || ''
+              const tailContext = currentDocBlocks[Math.min(currentDocBlocks.length - 1, blockIndex + 1)]?.text || ''
+              blockSections.push(`Block ${i + 1}:
+- targetBlockId: ${block.id}
+- targetBlockType: ${block.type}
+- targetBlockText:
+${block.text}
+- previousBlockText:
+${headContext}
+- nextBlockText:
+${tailContext}`)
+            }
+
+            targetBlockInstruction = `\n\nTARGET_BLOCKS (Step 1 result — ${resolvedBlockIds.length} block${resolvedBlockIds.length > 1 ? 's' : ''}):
+
+${blockSections.join('\n\n')}
+
+Step 2 requirement:
+- For EACH target block above, output one "edit_block" action with "oldContent" copied verbatim from that block's targetBlockText, and "newContent" as the replacement.
+- If ${resolvedBlockIds.length} blocks are listed, output ${resolvedBlockIds.length} edit_block actions in the actions array.
+- Do NOT use "edit_file" or rewrite the full document.
+- Do NOT merge multiple blocks into one action.
+- If the entire block needs replacing, oldContent = the full targetBlockText.
+- "newContent" MUST preserve the same writing style and format as the original targetBlockText. If the original is prose paragraphs, write prose. Do NOT introduce markdown (bullets, headings, bold) unless the original already uses it. Write as a document author, not a chatbot.`
+            logAgent('locate_resolved', {
+              source: locateSource,
+              blockIds: resolvedBlockIds,
+              blockCount: resolvedBlockIds.length,
+            })
+          } else {
+            logAgent('locate_unresolved', { blockCount: currentDocBlocks.length })
+          }
+        }
+      }
+      const contentForModel = chatMode === 'agent'
+        ? `${AGENT_PROMPT_PREFIX}\n\n${buildAgentAvailableFilesContext(projectScopedDocs)}${targetBlockInstruction}\n\nUser request:\n${userMessage.content}`
+        : userMessage.content
+      const response = await aiApi.streamChat(contentForModel, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined, selectedStyle, projectId, googleApiKey, openaiApiKey)
       const reader = response.body?.getReader()
       
       // Store reader reference for cancellation
@@ -1830,6 +2746,180 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             // Re-throw to be caught by outer catch block for proper error display
             throw readError
           }
+        }
+      }
+
+      // Parse and prepare agent-mode file actions before final save
+      if (!isStreamCancelledRef.current && chatMode === 'agent' && assistantMessage.content.trim()) {
+        try {
+          const { cleanedContent, actions } = parseAgentActions(assistantMessage.content)
+          if (actions && actions.length > 0) {
+            assistantMessage.content = cleanedContent || 'Prepared file update proposal.'
+            logAgent('actions_parsed', {
+              actionCount: actions.length,
+              actionTypes: actions.slice(0, 6).map(action => action.type),
+            })
+
+            if (projectScopedDocs.length === 0) {
+              const docs = await documentApi.list()
+              projectScopedDocs = docs.filter((doc: Document) => {
+                const sameProject = projectId ? doc.projectId === projectId : true
+                return sameProject && doc.folder !== 'worldlab'
+              })
+            }
+            const proposals: AgentFileProposal[] = actions.map((action) => {
+              const proposalId = `proposal_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+              // --- create_file ---
+              if (action.type === 'create_file') {
+                const createFileName = typeof action.fileName === 'string' && action.fileName.trim()
+                  ? action.fileName
+                  : 'Untitled'
+                return {
+                  id: proposalId,
+                  messageId: assistantMessage.id,
+                  type: action.type,
+                  fileName: createFileName,
+                  content: action.content || '',
+                  oldText: '',
+                  status: 'pending',
+                } as AgentFileProposal
+              }
+
+              // --- resolve target document ---
+              const requestedId = (action.targetDocumentId || '').trim()
+              const requestedFileName = (action.fileName || '').trim()
+              let targetDoc: Document | undefined
+
+              if (requestedId) {
+                targetDoc = projectScopedDocs.find((doc: Document) => doc.id === requestedId)
+              }
+              if (!targetDoc && requestedFileName) {
+                const resolved = resolveAgentFileTargets(requestedFileName, projectScopedDocs, userMessage.content || '')
+                if (resolved.targetDocumentId) {
+                  targetDoc = projectScopedDocs.find((doc: Document) => doc.id === resolved.targetDocumentId)
+                }
+                if (!targetDoc && resolved.candidateTargets && resolved.candidateTargets.length > 0) {
+                  return {
+                    id: proposalId,
+                    messageId: assistantMessage.id,
+                    type: action.type,
+                    fileName: requestedFileName || 'Ambiguous file',
+                    content: action.content || '',
+                    oldText: '',
+                    candidateTargets: resolved.candidateTargets,
+                    status: 'needs_target',
+                    error: `Multiple possible files matched "${requestedFileName}". Select one.`,
+                  } as AgentFileProposal
+                }
+              }
+
+              if (!targetDoc) {
+                return {
+                  id: proposalId,
+                  messageId: assistantMessage.id,
+                  type: action.type,
+                  fileName: requestedFileName || requestedId || 'Unknown file',
+                  content: action.content || '',
+                  oldText: '',
+                  status: 'error',
+                  error: `File not found: ${requestedFileName || requestedId}`,
+                } as AgentFileProposal
+              }
+
+              const targetOldText = extractTextFromTipTap(targetDoc.content)
+              const displayName = requestedFileName || (action.fileName && action.fileName.trim()) || targetDoc.title
+
+              // --- edit_block: surgical patch (preferred) ---
+              if (action.type === 'edit_block' && action.oldContent && action.newContent) {
+                logAgent('edit_block_proposal', {
+                  proposalId,
+                  targetDocumentId: targetDoc.id,
+                  oldChars: action.oldContent.length,
+                  newChars: action.newContent.length,
+                })
+                return {
+                  id: proposalId,
+                  messageId: assistantMessage.id,
+                  type: 'edit_block',
+                  fileName: displayName,
+                  content: action.newContent,
+                  patchOldText: action.oldContent,
+                  patchNewText: action.newContent,
+                  patchOccurrenceIndex: 0,
+                  patchPrefixAnchor: '',
+                  patchSuffixAnchor: '',
+                  targetDocumentId: targetDoc.id,
+                  oldText: targetOldText,
+                  status: 'pending',
+                } as AgentFileProposal
+              }
+
+              // --- edit_file fallback (full content) ---
+              const patch = extractPatchSegment(targetOldText, action.content || '')
+              return {
+                id: proposalId,
+                messageId: assistantMessage.id,
+                type: action.type,
+                fileName: displayName,
+                content: action.content || '',
+                patchOldText: patch.oldSegment,
+                patchNewText: patch.newSegment,
+                patchOccurrenceIndex: patch.occurrenceIndex,
+                patchPrefixAnchor: patch.prefixAnchor,
+                patchSuffixAnchor: patch.suffixAnchor,
+                targetDocumentId: targetDoc.id,
+                oldText: targetOldText,
+                status: 'pending',
+              } as AgentFileProposal
+            })
+
+            setAgentProposals(prev => [...prev, ...proposals])
+
+            // Collect ALL edit_block patches for the current document to show at once
+            const currentDocPatches = proposals.filter(
+              p => p.status === 'pending' && p.targetDocumentId === documentId &&
+                   p.type === 'edit_block' && p.patchOldText && p.patchNewText
+            )
+            if (currentDocPatches.length > 0) {
+              window.dispatchEvent(new CustomEvent('lemona:agent-diff-preview', {
+                detail: {
+                  proposalId: currentDocPatches[0].id,
+                  documentId: documentId,
+                  fileName: currentDocPatches[0].fileName,
+                  oldText: currentDocPatches[0].patchOldText,
+                  newText: currentDocPatches[0].patchNewText,
+                  isPatch: true,
+                  patches: currentDocPatches.map(p => ({
+                    proposalId: p.id,
+                    oldText: p.patchOldText!,
+                    newText: p.patchNewText!,
+                  })),
+                }
+              }))
+            } else {
+              // Fallback for edit_file or other types
+              const firstEditable = proposals.find(p => p.status === 'pending' && p.targetDocumentId)
+              if (firstEditable) {
+                window.dispatchEvent(new CustomEvent('lemona:agent-diff-preview', {
+                  detail: {
+                    proposalId: firstEditable.id,
+                    documentId: firstEditable.targetDocumentId,
+                    fileName: firstEditable.fileName,
+                    oldText: firstEditable.oldText,
+                    newText: firstEditable.content,
+                  }
+                }))
+              }
+            }
+            setMessages(prev => {
+              const updated = [...prev]
+              updated[updated.length - 1] = { ...assistantMessage }
+              return updated
+            })
+          }
+        } catch (proposalError) {
+          console.warn('[ChatInterface] Failed to parse agent actions:', proposalError)
         }
       }
 
@@ -1960,7 +3050,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           style={{
             flex: 1,
             overflowY: 'auto',
-            padding: 0,
+            padding: '0 0 20px 0',
             display: 'flex',
             flexDirection: 'column',
             backgroundColor: brighterBg,
@@ -1975,6 +3065,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             message.reasoningMetadata.actions &&
             Object.keys(message.reasoningMetadata.actions).length > 0
           )
+          const messageProposals = agentProposals.filter(proposal => proposal.messageId === message.id)
+          const prevIsAssistant = index > 0 && messages[index - 1].role === 'assistant'
           return (
           <div
             key={`${message.id}-${index}`}
@@ -1984,6 +3076,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               flexDirection: 'column',
               padding: message.role === 'assistant' ? '8px 16px' : '6px 16px',
               backgroundColor: brighterBg,
+              marginTop: prevIsAssistant && message.role === 'user' ? '14px' : undefined,
             }}
           >
             {message.role === 'user' && (
@@ -2676,6 +3769,164 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   {message.content}
                 </ReactMarkdown>
                 )}
+                {chatMode === 'agent' && messageProposals.length > 0 && (
+                  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {messageProposals.map((proposal) => {
+                      const isClickable = proposal.status === 'pending' && !!proposal.targetDocumentId
+                      return (
+                      <div
+                        key={proposal.id}
+                        onClick={() => isClickable && openAndFocusProposalDiff(proposal)}
+                        style={{
+                          border: `1px solid ${theme === 'dark' ? '#2d2d2d' : '#dadce0'}`,
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          backgroundColor: theme === 'dark' ? '#171717' : '#fff',
+                          cursor: isClickable ? 'pointer' : 'default',
+                          opacity: proposal.status === 'pending' ? 1 : 0.65,
+                        }}
+                      >
+                        <div style={{
+                          padding: '8px 10px',
+                          fontSize: '12px',
+                          color: secondaryTextColor,
+                          borderBottom: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#eceff1'}`,
+                          position: 'relative',
+                          paddingRight: '78px'
+                        }}>
+                          {proposal.type === 'create_file' ? `Create ${proposal.fileName}` : `Edit ${proposal.fileName}`}
+                          {proposal.status === 'pending' ? (
+                            <div style={{
+                              position: 'absolute',
+                              top: '10px',
+                              right: '14px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '10px'
+                            }}>
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  rejectAgentProposal(proposal.id)
+                                }}
+                                style={{
+                                  border: 'none',
+                                  background: 'transparent',
+                                  color: theme === 'dark' ? '#fca5a5' : '#b91c1c',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  cursor: 'pointer',
+                                  padding: 0
+                                }}
+                                title="Refuse"
+                              >
+                                <CloseIcon style={{ fontSize: '14px' }} />
+                              </button>
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  void applyAgentProposal(proposal.id)
+                                }}
+                                style={{
+                                  border: 'none',
+                                  background: 'transparent',
+                                  color: theme === 'dark' ? '#86efac' : '#166534',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  cursor: 'pointer',
+                                  padding: 0
+                                }}
+                                title="Accept"
+                              >
+                                <CheckIcon style={{ fontSize: '14px' }} />
+                              </button>
+                            </div>
+                          ) : (
+                            <span style={{
+                              position: 'absolute',
+                              top: '8px',
+                              right: '10px',
+                              fontSize: '10px',
+                              lineHeight: 1.2,
+                              color: proposal.status === 'error'
+                                ? (theme === 'dark' ? '#fca5a5' : '#b91c1c')
+                                : secondaryTextColor,
+                              textTransform: 'capitalize'
+                            }}>
+                              {proposal.status === 'error' ? (proposal.error || 'error') : proposal.status}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ maxHeight: '180px', overflow: 'auto', fontSize: '12px', lineHeight: 1.5 }}>
+                          {(() => {
+                            const showOld = proposal.patchOldText || proposal.oldText
+                            const showNew = proposal.patchNewText || proposal.content
+                            return (
+                              <>
+                                {showOld && (
+                                  <pre style={{
+                                    margin: 0,
+                                    padding: '8px 10px',
+                                    backgroundColor: theme === 'dark' ? 'rgba(239,68,68,0.14)' : 'rgba(254,226,226,0.9)',
+                                    color: theme === 'dark' ? '#fca5a5' : '#991b1b',
+                                    whiteSpace: 'pre-wrap',
+                                    borderBottom: `1px solid ${theme === 'dark' ? '#3a1f1f' : '#fecaca'}`
+                                  }}>
+                                    {showOld}
+                                  </pre>
+                                )}
+                                <pre style={{
+                                  margin: 0,
+                                  padding: '8px 10px',
+                                  backgroundColor: theme === 'dark' ? 'rgba(34,197,94,0.14)' : 'rgba(220,252,231,0.9)',
+                                  color: theme === 'dark' ? '#86efac' : '#166534',
+                                  whiteSpace: 'pre-wrap'
+                                }}>
+                                  {showNew}
+                                </pre>
+                              </>
+                            )
+                          })()}
+                        </div>
+                        {proposal.status === 'needs_target' && proposal.candidateTargets && proposal.candidateTargets.length > 0 && (
+                          <div style={{
+                            padding: '8px 10px',
+                            borderTop: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#eceff1'}`,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '6px'
+                          }}>
+                            <span style={{ fontSize: '11px', color: secondaryTextColor }}>Select target file:</span>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                              {proposal.candidateTargets.map((candidate) => (
+                                <button
+                                  key={candidate.documentId}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    void selectAgentProposalTarget(proposal.id, candidate.documentId)
+                                  }}
+                                  style={{
+                                    border: `1px solid ${borderColor}`,
+                                    borderRadius: '6px',
+                                    padding: '4px 8px',
+                                    background: 'transparent',
+                                    color: textColor,
+                                    fontSize: '11px',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  {candidate.title}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )})}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2691,6 +3942,49 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           padding: '6px 14px 12px 14px',
           backgroundColor: brighterBg
         }}>
+        {chatMode === 'agent' && agentProposals.some(p => p.status === 'pending' || p.status === 'needs_target') && (
+          <div style={{
+            marginBottom: '8px',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            gap: '6px',
+            marginRight: '16px'
+          }}>
+            <button
+              onClick={handleUndoAllProposals}
+              style={{
+                borderRadius: '4px',
+                border: 'none',
+                background: 'transparent',
+                color: secondaryTextColor,
+                padding: '2px 6px',
+                fontSize: '11px',
+                fontWeight: 500,
+                cursor: 'pointer'
+              }}
+            >
+              Undo All
+            </button>
+            <button
+              onClick={() => void handleKeepAllProposals()}
+              disabled={!agentProposals.some(p => p.status === 'pending')}
+              style={{
+                borderRadius: '4px',
+                border: 'none',
+                background: 'transparent',
+                color: secondaryTextColor,
+                padding: '2px 6px',
+                fontSize: '11px',
+                fontWeight: 500,
+                cursor: agentProposals.some(p => p.status === 'pending') ? 'pointer' : 'not-allowed',
+                opacity: agentProposals.some(p => p.status === 'pending') ? 1 : 0.55
+              }}
+            >
+              Keep All
+            </button>
+          </div>
+        )}
         {/* Attachments Preview */}
         {attachments.length > 0 && (
           <div style={{
@@ -2883,6 +4177,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     const mentionRegex = /@\s*(Library|[^\s@]+)/g
                     let match
                     mentionRegex.lastIndex = 0
+                    const projectFolderMentions = getFilteredMentions()
+                      .filter(item => item.type === 'folder')
+                      .map(item => item.name)
                     
                     while ((match = mentionRegex.exec(text)) !== null) {
                       const mentionName = match[1]
@@ -2896,7 +4193,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         // Find documents that start with the mention name (case-insensitive)
                         // Search in both workspace files and library files (if indexed)
                         const allMentionableDocs = isLibraryIndexed 
-                          ? [...libraryDocuments, ...allDocuments.filter(doc => doc.folder === 'library' && doc.projectId === projectId)]
+                          ? [...libraryDocuments, ...allDocuments.filter(doc => isUploadedFile(doc) && doc.projectId === projectId)]
                           : libraryDocuments
                         const potentialDocs = allMentionableDocs.filter(doc => {
                           const docTitle = doc.title
@@ -2911,6 +4208,17 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                           if (remainingTitle && textAfterMention.startsWith(remainingTitle)) {
                             mentionEnd = mentionStart + 1 + doc.title.length // +1 for @
                             break
+                          }
+                        }
+
+                        if (mentionEnd === match.index + match[0].length) {
+                          for (const folderName of projectFolderMentions) {
+                            if (!folderName.toLowerCase().startsWith(mentionName.toLowerCase())) continue
+                            const remainingFolder = folderName.slice(mentionName.length)
+                            if (remainingFolder && textAfterMention.startsWith(remainingFolder)) {
+                              mentionEnd = mentionStart + 1 + folderName.length
+                              break
+                            }
                           }
                         }
                       }
@@ -2988,8 +4296,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           {/* Persistent Mention Highlighting Overlay - Backgrounds only */}
           {input && (() => {
             const mentionRegex = /@\s*(Library|[^\s@]+)/g
-            const highlights: Array<{ start: number, end: number, text: string, isLibrary: boolean, isFile: boolean }> = []
+            const highlights: Array<{ start: number, end: number, text: string, isLibrary: boolean, isFile: boolean, isFolder: boolean }> = []
             let match
+            const projectFolderMentions = getFilteredMentions()
+              .filter(item => item.type === 'folder')
+              .map(item => item.name)
             
             mentionRegex.lastIndex = 0
             while ((match = mentionRegex.exec(input)) !== null) {
@@ -3001,6 +4312,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 ? [...libraryDocuments, ...allDocuments.filter(doc => doc.folder === 'library' && doc.projectId === projectId)]
                 : libraryDocuments
               let matchedDoc = allMentionableDocs.find(doc => doc.title === mentionName || doc.id === mentionName)
+              let matchedFolder = projectFolderMentions.find(folder => folder === mentionName)
               let highlightEnd = match.index + match[0].length
               let highlightText = match[0]
               
@@ -3028,9 +4340,23 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                     break
                   }
                 }
+
+                if (!matchedDoc && !matchedFolder) {
+                  for (const folderName of projectFolderMentions) {
+                    if (!folderName.toLowerCase().startsWith(mentionName.toLowerCase())) continue
+                    const remainingFolder = folderName.slice(mentionName.length)
+                    if (remainingFolder && textAfterMention.startsWith(remainingFolder)) {
+                      matchedFolder = folderName
+                      highlightEnd = mentionStart + 1 + folderName.length
+                      highlightText = '@' + folderName
+                      break
+                    }
+                  }
+                }
               }
               
               const isFile = !!matchedDoc || (!isLibrary && allMentionableDocs.some(doc => doc.title === mentionName || doc.id === mentionName))
+              const isFolder = !!matchedFolder
               
               // Only highlight if the mention is complete (followed by space or at end) AND matches a valid document
               // A mention is complete/confirmed when:
@@ -3038,7 +4364,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               // 2. AND it matches a valid document (Library or a matched file)
               const textAfterHighlight = input.slice(highlightEnd)
               const isFollowedBySpaceOrEnd = textAfterHighlight.length === 0 || textAfterHighlight.startsWith(' ')
-              const matchesValidDocument = isLibrary || !!matchedDoc // Must have an exact match (Library or matchedDoc)
+              const matchesValidDocument = isLibrary || !!matchedDoc || !!matchedFolder // Must have an exact match (Library, folder, or matchedDoc)
               const isComplete = isFollowedBySpaceOrEnd && matchesValidDocument
               
               // Only add highlight if mention is complete/confirmed
@@ -3048,7 +4374,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   end: highlightEnd,
                   text: highlightText,
                   isLibrary,
-                  isFile
+                  isFile,
+                  isFolder
                 })
               }
             }
@@ -3066,7 +4393,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   right: 0,
                   bottom: 0,
                   padding: '4px 6px',
-                  fontSize: '12px',
+                  fontSize: '13px',
                   fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                   lineHeight: '1.6',
                   whiteSpace: 'pre-wrap',
@@ -3094,8 +4421,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         key={`hl-${highlight.start}`}
                         style={{
                           backgroundColor: theme === 'dark' 
-                            ? (highlight.isLibrary ? '#2d4a5c' : highlight.isFile ? '#3d2d4a' : '#3d3d3d')
-                            : (highlight.isLibrary ? '#e8f0fe' : highlight.isFile ? '#e3f2fd' : '#f1f3f4'), // Pale blue for confirmed file mentions in light theme
+                            ? (highlight.isLibrary ? '#2d4a5c' : highlight.isFolder ? '#2f3f2f' : highlight.isFile ? '#3d2d4a' : '#3d3d3d')
+                            : (highlight.isLibrary ? '#e8f0fe' : highlight.isFolder ? '#e8f5e9' : highlight.isFile ? '#e3f2fd' : '#f1f3f4'),
                           color: theme === 'dark' ? '#ffffff' : textColor, // Normal text color
                           borderRadius: '3px',
                           fontWeight: 'normal', // Same weight as regular text
@@ -3235,7 +4562,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   
                   return (
                     <div
-                      key={mention.id || mention.name}
+                      key={`${mention.type}:${mention.id || mention.name}`}
                       data-mention-index={index}
                       onClick={() => {
                         insertMention(mention)
@@ -3274,7 +4601,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                         justifyContent: 'center',
                         flexShrink: 0
                       }}>
-                        {mention.type === 'library' ? (
+                        {mention.type === 'library' || mention.type === 'folder' ? (
                           <FolderIcon style={{ fontSize: '14px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
                         ) : mention.fileType === 'pdf' ? (
                           <PictureAsPdfIcon style={{ fontSize: '14px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
@@ -3673,6 +5000,44 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                   }}
                 >
                   language
+                </span>
+              </button>
+
+              {/* Ask/Agent mode button */}
+              <button
+                onClick={() => setChatMode(chatMode === 'ask' ? 'agent' : 'ask')}
+                disabled={isLoading}
+                style={{
+                  padding: '2px 10px',
+                  backgroundColor: theme === 'dark' ? '#282828' : '#e6e8ea',
+                  color: theme === 'dark' ? '#aaaaaf' : '#43464b',
+                  border: `1px solid ${borderColor}`,
+                  borderRadius: '999px',
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
+                  fontSize: '11px',
+                  fontWeight: '400',
+                  fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  height: '24px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s',
+                  opacity: isLoading ? 0.5 : 1
+                }}
+                onMouseEnter={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#d8dbde'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isLoading) {
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#282828' : '#e6e8ea'
+                  }
+                }}
+                title={chatMode === 'ask' ? 'Ask mode: no file actions (click for Agent)' : 'Agent mode: propose file edits (click for Ask)'}
+              >
+                <span style={{paddingRight: '1px'}}>
+                  {chatMode === 'ask' ? 'Ask' : 'Agent'}
                 </span>
               </button>
             </div>
@@ -4356,131 +5721,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
                 e.target.style.borderColor = theme === 'dark' ? '#333' : '#dadce0'
               }}
             />
-          </div>
-
-          {/* Library Indexing Option */}
-          <div style={{ marginBottom: '20px' }}>
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                cursor: 'pointer',
-                fontSize: '13px',
-                color: theme === 'dark' ? '#e0e0e0' : '#202124',
-                userSelect: 'none',
-                gap: '10px',
-              }}
-            >
-              <div
-                style={{
-                  position: 'relative',
-                  width: '16px',
-                  height: '16px',
-                  flexShrink: 0,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={smartIndexing}
-                  onChange={async (e) => {
-                    const newValue = e.target.checked
-                    setSmartIndexing(newValue)
-                    try {
-                      localStorage.setItem('smartIndexing', String(newValue))
-                      await settingsApi.saveSmartIndexing(newValue)
-                      
-                      // If toggle is turned ON and we have projectId and API keys, start indexing
-                      if (newValue && projectId) {
-                        const hasApiKey = (googleApiKey && googleApiKey.trim().length > 0) ||
-                                         (openaiApiKey && openaiApiKey.trim().length > 0)
-                        
-                        if (hasApiKey) {
-                          console.log(`[Auto-Indexing] Library indexing toggle enabled, starting library file indexing for project ${projectId}...`)
-                          indexingApi.indexProjectLibraryFiles(
-                            projectId,
-                            googleApiKey || undefined,
-                            openaiApiKey || undefined,
-                            true // onlyUnindexed = true
-                          ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
-                            const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
-                            const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
-                            if (successCount > 0 || errorCount > 0) {
-                              console.log(`[Auto-Indexing] Completed indexing for project ${projectId}: ${successCount} succeeded, ${errorCount} errors`)
-                            }
-                          }).catch((error) => {
-                            // Don't show error to user - indexing failures shouldn't interrupt workflow
-                            console.warn(`[Auto-Indexing] Failed to index project ${projectId}:`, error)
-                          })
-                        }
-                      }
-                    } catch (error) {
-                      console.error('Failed to save Smart indexing setting:', error)
-                    }
-                  }}
-                  style={{
-                    position: 'absolute',
-                    width: '16px',
-                    height: '16px',
-                    margin: 0,
-                    cursor: 'pointer',
-                    opacity: 0,
-                    zIndex: 1,
-                  }}
-                />
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '16px',
-                    height: '16px',
-                    border: `2px solid ${smartIndexing 
-                      ? (theme === 'dark' ? '#4a9eff' : '#1a73e8')
-                      : (theme === 'dark' ? '#444' : '#dadce0')}`,
-                    borderRadius: '5px',
-                    backgroundColor: smartIndexing
-                      ? (theme === 'dark' ? '#4a9eff' : '#1a73e8')
-                      : (theme === 'dark' ? '#252525' : '#ffffff'),
-                    transition: 'all 0.2s ease',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {smartIndexing && (
-                    <svg
-                      width="10"
-                      height="10"
-                      viewBox="0 0 12 12"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      style={{
-                        transition: 'opacity 0.2s ease',
-                      }}
-                    >
-                      <path
-                        d="M2 6L5 9L10 2"
-                        stroke={theme === 'dark' ? '#141414' : '#ffffff'}
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  )}
-                </div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div
-                  style={{
-                    fontSize: '13px',
-                    fontWeight: '400',
-                    color: theme === 'dark' ? '#999' : '#666',
-                  }}
-                >
-                  Library indexing
-                </div>
-              </div>
-            </label>
           </div>
 
           {/* Tip: Use single API key */}

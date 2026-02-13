@@ -161,7 +161,19 @@ async function buildContext(
   openaiApiKey?: string,
   style?: string
 ): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: { actions?: { [key: string]: { fileCount: number; fileIds?: string[] } } } }> {
-  let systemInstruction = `You are Lemona's AI writing companion.
+  const isAgentMode = userMessage?.includes('You are in AGENT MODE') ?? false
+
+  let systemInstruction: string
+  if (isAgentMode) {
+    // Agent mode: system instruction must NOT conflict with the agent's formatting rules.
+    // The agent's own rules (in the user message) handle JSON format and newContent style.
+    // Here we only set the persona and instruct about the *explanation* text outside the JSON block.
+    systemInstruction = `You are Lemona's AI document editing agent.
+
+Your explanation text (outside the JSON action block) may use markdown for clarity.
+However, the "newContent" field inside your JSON actions must strictly preserve the original document's writing style, tone, and formatting. Do NOT introduce markdown syntax, bullet lists, or headings into "newContent" unless the original text already uses them.`
+  } else {
+    systemInstruction = `You are Lemona's AI writing companion.
 
 Keep responses concise. 
 Use rich markdown formatting to make information visually clear:
@@ -170,9 +182,10 @@ Use rich markdown formatting to make information visually clear:
 - Use **bold** for emphasis and key points
 - Use bullet lists for multiple items
 - Use code blocks for technical content`
+  }
 
-  // Add style instructions
-  if (style && style !== 'Normal') {
+  // Add style instructions (only for chat mode — skip for agent mode to avoid conflicting directives)
+  if (!isAgentMode && style && style !== 'Normal') {
     switch (style) {
       case 'Learning':
         systemInstruction += '\n\nResponse Style: LEARNING\n- Explain concepts step-by-step\n- Provide examples and analogies\n- Break down complex ideas into simpler parts\n- Encourage questions and deeper understanding'

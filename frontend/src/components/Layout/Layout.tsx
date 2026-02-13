@@ -61,7 +61,7 @@ import WidgetsOutlinedIcon from '@mui/icons-material/WidgetsOutlined'
 import TopBar from './TopBar'
 import { useNavigate, useParams } from 'react-router-dom'
 import WordCountModal from './WordCountModal'
-import CommitHistoryModal from './CommitHistoryModal'
+import VersionControlPanel from './VersionControlPanel'
 
 const AI_PANEL_STORAGE_KEY = 'aiPanelState'
 const FILE_EXPLORER_SIZE_STORAGE_KEY = 'fileExplorerSize'
@@ -600,9 +600,10 @@ export default function Layout(): JSX.Element {
   const [showExportModal, setShowExportModal] = useState(false)
   const [showLibraryPanel, setShowLibraryPanel] = useState(false)
   const exportButtonRef = useRef<HTMLButtonElement>(null)
-  const [showCommitHistoryModal, setShowCommitHistoryModal] = useState(false)
-  const commitHistoryButtonRef = useRef<HTMLButtonElement>(null)
   const [isProjectHeaderHovered, setIsProjectHeaderHovered] = useState(false)
+  const [isRenamingProjectName, setIsRenamingProjectName] = useState(false)
+  const [projectNameRenameValue, setProjectNameRenameValue] = useState('')
+  const projectNameInputRef = useRef<HTMLInputElement>(null)
   const [showCommitSuccessNotification, setShowCommitSuccessNotification] = useState<{ fileCount: number; isIndexing?: boolean } | null>(null) // Track commit success notification
   const commitNotificationTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Track notification auto-hide timeout
   const initialIgnoredUpdateVersion = null
@@ -1220,15 +1221,7 @@ export default function Layout(): JSX.Element {
       // Auto-index library files for this project when project changes
       // This happens asynchronously and doesn't block UI
       if (currentProjectId) {
-        // Check if Smart indexing is enabled
-        settingsApi.getSmartIndexing().then((smartIndexingEnabled) => {
-          if (!smartIndexingEnabled) {
-            console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for project ${currentProjectId}`)
-            return
-          }
-          
-          // Get API keys and trigger indexing
-          settingsApi.getApiKeys().then((keys) => {
+        settingsApi.getApiKeys().then((keys) => {
             const hasApiKey = (keys.geminiApiKey && keys.geminiApiKey.trim().length > 0) ||
                              (keys.openaiApiKey && keys.openaiApiKey.trim().length > 0)
             
@@ -1253,11 +1246,6 @@ export default function Layout(): JSX.Element {
           }).catch((error) => {
             console.warn('[Auto-Indexing] Failed to get API keys:', error)
           })
-        }).catch((error) => {
-          console.warn('[Auto-Indexing] Failed to get Smart indexing setting:', error)
-          // If we can't get the setting, skip indexing (default is disabled)
-          console.log(`[Auto-Indexing] Smart indexing setting unavailable, skipping automatic indexing for project ${currentProjectId}`)
-        })
       }
     } else {
       // Even if projectId didn't change, reload project name to catch any updates
@@ -1541,12 +1529,17 @@ export default function Layout(): JSX.Element {
             // Clear restored commit parent after successful commit
             setRestoredCommitParentId(null)
             
-            // Trigger incremental indexing for workspace documents (async, non-blocking)
-            // Only index documents that were included in the commit (filteredSnapshots)
+            // Trigger incremental indexing for written/created docs (TipTap) - exclude uploaded files (PDF/DOCX)
+            // Uploaded files are indexed on upload; written docs indexed on Ctrl+S commit
+            // Exclude PDF (indexed on upload, not editable) and binary types. DOCX is editable TipTap, index on Ctrl+S.
+            const UPLOADED_EXTENSIONS = ['pdf', 'xlsx', 'png', 'jpg', 'jpeg', 'gif', 'webp']
             const workspaceDocumentIds = filteredSnapshots
               .map(snapshot => {
                 const doc = documents.find(d => d.id === snapshot.documentId)
-                return doc && doc.folder === 'project' ? doc.id : null
+                if (!doc) return null
+                const ext = (doc.title || '').toLowerCase().split('.').pop() || ''
+                if (UPLOADED_EXTENSIONS.includes(ext)) return null // Skip - indexed on upload
+                return doc.id
               })
               .filter((id): id is string => id !== null)
 
@@ -1767,6 +1760,53 @@ export default function Layout(): JSX.Element {
       setIsLoadingDocuments(false)
     }
   }
+
+  useEffect(() => {
+    const handleDocumentsRefreshRequest = (event: Event) => {
+      const customEvent = event as CustomEvent<{ projectId?: string }>
+      const requestedProjectId = customEvent.detail?.projectId
+      const fallbackProjectId = document?.projectId
+      void loadDocuments(requestedProjectId || fallbackProjectId)
+    }
+
+    window.addEventListener('lemona:documents-refresh-request', handleDocumentsRefreshRequest as EventListener)
+    return () => {
+      window.removeEventListener('lemona:documents-refresh-request', handleDocumentsRefreshRequest as EventListener)
+    }
+  }, [document?.projectId])
+
+  useEffect(() => {
+    const handleOpenDocumentFromAIDiff = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        proposalId?: string
+        documentId?: string
+        fileName?: string
+        oldText?: string
+        newText?: string
+      }>
+      const targetDocumentId = customEvent.detail?.documentId
+      if (!targetDocumentId) return
+
+      handleDocumentClick(targetDocumentId)
+
+      const focusDetail = {
+        documentId: targetDocumentId,
+        oldText: customEvent.detail?.oldText || '',
+        newText: customEvent.detail?.newText || '',
+      }
+
+      ;[220, 520, 950].forEach(delayMs => {
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('lemona:agent-focus-diff', { detail: focusDetail }))
+        }, delayMs)
+      })
+    }
+
+    window.addEventListener('lemona:open-document-from-ai-diff', handleOpenDocumentFromAIDiff as EventListener)
+    return () => {
+      window.removeEventListener('lemona:open-document-from-ai-diff', handleOpenDocumentFromAIDiff as EventListener)
+    }
+  }, [])
 
   const handleDocumentClick = (docId: string, searchQueryParam?: string, matchPosition?: number) => {
     try {
@@ -2536,6 +2576,58 @@ export default function Layout(): JSX.Element {
     }
   }
 
+  const handleProjectNameRenameStart = () => {
+    const currentProjectId = document?.projectId || documents[0]?.projectId
+    if (!currentProjectId) return
+    setIsRenamingProjectName(true)
+    setProjectNameRenameValue(projectName)
+  }
+
+  const handleProjectNameRenameSubmit = async () => {
+    const currentProjectId = document?.projectId || documents[0]?.projectId
+    if (!currentProjectId || !projectNameRenameValue.trim()) {
+      setIsRenamingProjectName(false)
+      setProjectNameRenameValue('')
+      return
+    }
+    const newName = projectNameRenameValue.trim()
+    if (newName === projectName) {
+      setIsRenamingProjectName(false)
+      setProjectNameRenameValue('')
+      return
+    }
+    try {
+      await projectApi.update(currentProjectId, { title: newName })
+      setProjectName(newName)
+    } catch (error) {
+      console.error('Failed to rename project:', error)
+      alert('Failed to rename project. Please try again.')
+    }
+    setIsRenamingProjectName(false)
+    setProjectNameRenameValue('')
+  }
+
+  const handleProjectNameRenameCancel = () => {
+    setIsRenamingProjectName(false)
+    setProjectNameRenameValue('')
+  }
+
+  // Cancel project name rename when switching to Library/Search/Source Control
+  useEffect(() => {
+    if (isSearchMode || isGitMode || showLibraryPanel) {
+      setIsRenamingProjectName(false)
+      setProjectNameRenameValue('')
+    }
+  }, [isSearchMode, isGitMode, showLibraryPanel])
+
+  // Focus and select project name input when entering rename mode
+  useEffect(() => {
+    if (isRenamingProjectName && projectNameInputRef.current) {
+      projectNameInputRef.current.focus()
+      projectNameInputRef.current.select()
+    }
+  }, [isRenamingProjectName])
+
   const handleDocumentDelete = async (docId: string) => {
     try {
       // Get the document before deleting to check if it belongs to a project
@@ -2985,13 +3077,6 @@ export default function Layout(): JSX.Element {
         }
       }
     }
-    const existingNames = projectFolders.map(folder => folder.name.toLowerCase())
-    let number = 1
-    let newName = `new folder ${number}`
-    while (existingNames.includes(newName.toLowerCase())) {
-      number += 1
-      newName = `new folder ${number}`
-    }
     const parentId =
       selectedProjectFolderId ||
       (selectedFolder === 'library' ? 'library' :
@@ -3001,7 +3086,7 @@ export default function Layout(): JSX.Element {
       .filter(folder => (folder.parentId ?? null) === parentId)
       .map(folder => folder.order ?? 0)
     const nextOrder = siblingOrders.length > 0 ? Math.max(...siblingOrders) + 1 : 0
-    const newFolder: ProjectFolder = { id: `folder-${Date.now()}`, name: newName, parentId, order: nextOrder }
+    const newFolder: ProjectFolder = { id: `folder-${Date.now()}`, name: '', parentId, order: nextOrder }
     setProjectFolders((prev) => {
       const next = [...prev, newFolder]
       saveProjectFolders(next)
@@ -6322,7 +6407,7 @@ export default function Layout(): JSX.Element {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: secondaryTextColor,
+                    color: (theme === 'dark' && !isSearchMode && !isGitMode && !showLibraryPanel) ? '#d6d6d6' : secondaryTextColor,
                     opacity: 0.9,
                     boxSizing: 'border-box'
                   }}
@@ -6377,7 +6462,7 @@ export default function Layout(): JSX.Element {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: secondaryTextColor,
+                    color: (theme === 'dark' && isSearchMode) ? '#d6d6d6' : secondaryTextColor,
                     opacity: 0.9,
                     boxSizing: 'border-box'
                   }}
@@ -6444,11 +6529,11 @@ export default function Layout(): JSX.Element {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: secondaryTextColor,
+                    color: (theme === 'dark' && isGitMode) ? '#d6d6d6' : secondaryTextColor,
                     opacity: 0.9,
                     boxSizing: 'border-box'
                   }}
-                  title="Source Control (coming soon)"
+                  title="Version Control"
                   onClick={() => {
                     if (isSearchMode) {
                       setIsSearchMode(false)
@@ -6499,7 +6584,7 @@ export default function Layout(): JSX.Element {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: secondaryTextColor,
+                    color: (theme === 'dark' && showLibraryPanel) ? '#d6d6d6' : secondaryTextColor,
                     opacity: 0.9,
                     boxSizing: 'border-box'
                   }}
@@ -6559,15 +6644,57 @@ export default function Layout(): JSX.Element {
                 minHeight: '28px'
               }}
             >
-              <span>
-                {(showLibraryPanel
-                  ? 'LIBRARY'
-                  : isGitMode
-                    ? 'SOURCE CONTROL'
-                    : isSearchMode
-                      ? 'SEARCH'
-                      : 'FILES')}
-              </span>
+              {(!isSearchMode && !isGitMode && !showLibraryPanel) && isRenamingProjectName ? (
+                <input
+                  ref={projectNameInputRef}
+                  type="text"
+                  value={projectNameRenameValue}
+                  onChange={(e) => setProjectNameRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleProjectNameRenameSubmit()
+                    } else if (e.key === 'Escape') {
+                      handleProjectNameRenameCancel()
+                    }
+                  }}
+                  onBlur={handleProjectNameRenameSubmit}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    border: `1px solid ${borderColor}`,
+                    borderRadius: '3px',
+                    padding: '2px 6px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    fontFamily: 'inherit',
+                    backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff',
+                    color: secondaryTextColor,
+                    outline: 'none',
+                    textTransform: 'none'
+                  }}
+                  autoFocus
+                />
+              ) : (
+                <span
+                  onDoubleClick={() => {
+                    if (!isSearchMode && !isGitMode && !showLibraryPanel) {
+                      handleProjectNameRenameStart()
+                    }
+                  }}
+                  title={(!isSearchMode && !isGitMode && !showLibraryPanel) ? 'Double-click to rename' : undefined}
+                  style={{
+                    cursor: (!isSearchMode && !isGitMode && !showLibraryPanel) ? 'text' : 'default'
+                  }}
+                >
+                  {(showLibraryPanel
+                    ? 'LIBRARY'
+                    : isGitMode
+                      ? 'VERSION CONTROL'
+                      : isSearchMode
+                        ? 'SEARCH'
+                        : projectName)}
+                </span>
+              )}
               <div
                 style={{
                   display: 'flex',
@@ -6640,98 +6767,64 @@ export default function Layout(): JSX.Element {
             {/* File Explorer Content */}
             <div style={{ flex: 1, overflow: 'hidden', backgroundColor: bgColor, padding: 0, margin: 0 }}>
               {isGitMode ? (
-                <div style={{
-                  width: '100%',
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '10px',
-                  color: secondaryTextColor,
-                  fontSize: '12px',
-                  backgroundColor: bgColor
-                }}>
-                  <div>Source Control (coming soon)</div>
-                  {(() => {
-                    const docWithProject = documents.find(doc => doc.projectId && typeof doc.projectId === 'string' && doc.projectId.trim() !== '')
-                    const projectId = docWithProject?.projectId || null
-                    if (!projectId || projectId.trim() === '') return null
+                (() => {
+                  const docWithProject = documents.find(doc => doc.projectId && typeof doc.projectId === 'string' && doc.projectId.trim() !== '')
+                  const projectId = docWithProject?.projectId || null
+                  if (!projectId || projectId.trim() === '') {
                     return (
-                      <>
-                        <button
-                          ref={commitHistoryButtonRef}
-                          onClick={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setShowCommitHistoryModal(true)
-                          }}
-                          style={{
-                            border: `1px solid ${borderColor}`,
-                            backgroundColor: theme === 'dark' ? '#1a1a1a' : '#ffffff',
-                            color: secondaryTextColor,
-                            padding: '6px 10px',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontSize: '12px'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#232323' : '#f1f3f4'
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#1a1a1a' : '#ffffff'
-                          }}
-                        >
-                          Version History
-                        </button>
-                        <CommitHistoryModal
-                          projectId={projectId}
-                          isOpen={showCommitHistoryModal}
-                          onClose={() => setShowCommitHistoryModal(false)}
-                          triggerRef={commitHistoryButtonRef}
-                          onRestore={setRestoredCommitParentId}
-                          onDocumentsReload={async () => {
-                            const currentProjectId = document?.projectId
-                            const currentDocId = document?.id
-                            
-                            await loadDocuments(currentProjectId)
-                            
-                            if (currentDocId) {
-                              try {
-                                const updatedDoc = await documentApi.get(currentDocId)
-                                if (!updatedDoc) {
-                                  return
-                                }
-                                let parsedContent: any = ''
-                                try {
-                                  if (updatedDoc.content) {
-                                    parsedContent = JSON.parse(updatedDoc.content)
-                                  }
-                                } catch (parseError: any) {
-                                  return
-                                }
-                                setDocument(updatedDoc)
-                                setDocuments(prevDocs => {
-                                  return prevDocs.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc)
-                                })
-                                setOpenTabs(prevTabs => {
-                                  return prevTabs.map(tab => tab.id === updatedDoc.id ? updatedDoc : tab)
-                                })
-                                const editor = getEditor(currentDocId)
-                                if (!editor || editor.isDestroyed) {
-                                  return
-                                }
-                                editor.commands.setContent(parsedContent, { emitUpdate: false })
-                              } catch (error: any) {
-                                // Silent error handling
-                              }
-                            }
-                          }}
-                        />
-                      </>
+                      <div style={{
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: secondaryTextColor,
+                        fontSize: '12px',
+                        backgroundColor: bgColor
+                      }}>
+                        Open a project to view version history.
+                      </div>
                     )
-                  })()}
-                </div>
+                  }
+                  return (
+                    <VersionControlPanel
+                      projectId={projectId}
+                      onRestore={setRestoredCommitParentId}
+                      onDocumentsReload={async () => {
+                        const currentProjectId = document?.projectId
+                        const currentDocId = document?.id
+                        await loadDocuments(currentProjectId)
+                        if (currentDocId) {
+                          try {
+                            const updatedDoc = await documentApi.get(currentDocId)
+                            if (!updatedDoc) return
+                            let parsedContent: any = ''
+                            try {
+                              if (updatedDoc.content) {
+                                parsedContent = JSON.parse(updatedDoc.content)
+                              }
+                            } catch {
+                              return
+                            }
+                            setDocument(updatedDoc)
+                            setDocuments(prevDocs =>
+                              prevDocs.map(doc => doc.id === updatedDoc.id ? updatedDoc : doc)
+                            )
+                            setOpenTabs(prevTabs =>
+                              prevTabs.map(tab => tab.id === updatedDoc.id ? updatedDoc : tab)
+                            )
+                            const editor = getEditor(currentDocId)
+                            if (editor && !editor.isDestroyed) {
+                              editor.commands.setContent(parsedContent, { emitUpdate: false })
+                            }
+                          } catch {
+                            // Silent
+                          }
+                        }
+                      }}
+                    />
+                  )
+                })()
               ) : showLibraryPanel ? (
                 <div style={{
                   width: '100%',
@@ -6742,9 +6835,16 @@ export default function Layout(): JSX.Element {
                 }}>
                 </div>
               ) : (
+                (() => {
+                  const activeProjectId =
+                    document?.projectId ||
+                    documents.find(doc => doc.projectId && doc.projectId.trim() !== '')?.projectId ||
+                    null
+                  return (
                 <FileExplorer
                     documents={documents}
                     currentDocumentId={document?.id || null}
+                    currentProjectId={activeProjectId}
                     onDocumentClick={handleDocumentClick}
                     onDocumentRename={handleDocumentRename}
                     onDocumentDelete={handleDocumentDelete}
@@ -6802,8 +6902,12 @@ export default function Layout(): JSX.Element {
                       return [...prevDocs, newDoc]
                     })
                     
-                    // If current document has projectId, add new doc to same project
-                    if (document?.projectId) {
+                    // Add uploaded document to the active project mapping
+                    const activeProjectId =
+                      document?.projectId ||
+                      documents.find(doc => doc.projectId && doc.projectId.trim() !== '')?.projectId ||
+                      newDoc.projectId
+                    if (activeProjectId) {
                       // Calculate order based on documents in the same folder
                       const folder = newDoc.folder || 'project'
                       const folderDocs = documents.filter(doc => 
@@ -6816,21 +6920,19 @@ export default function Layout(): JSX.Element {
                         : 0
                       
                       // Add to project in background (don't wait for it)
-                      projectApi.addDocument(document.projectId, newDoc.id, maxOrder).catch(err => {
+                      projectApi.addDocument(activeProjectId, newDoc.id, maxOrder).catch(err => {
                         console.error('Failed to add document to project:', err)
                         // Update optimistically instead of reloading to prevent deleted files from reappearing
                         // Only reload if absolutely necessary (e.g., order conflict)
                         if (err.message?.includes('order') || err.message?.includes('duplicate')) {
-                          loadDocuments(document.projectId)
+                          loadDocuments(activeProjectId)
                         }
                       })
                     }
                     
-                    // Monitor indexing status for library files
-                    if (newDoc.folder === 'library') {
-                      // Check if file type supports indexing (PDF or DOCX)
-                      const fileExt = newDoc.title.toLowerCase().split('.').pop() || ''
-                      if (fileExt === 'pdf' || fileExt === 'docx') {
+                    // Monitor indexing status for uploaded PDFs (indexed on upload)
+                    const fileExt = newDoc.title.toLowerCase().split('.').pop() || ''
+                    if (fileExt === 'pdf') {
                         // Start monitoring indexing status
                         const checkIndexingStatus = async () => {
                           try {
@@ -6879,9 +6981,8 @@ export default function Layout(): JSX.Element {
                           }
                         }
                         
-                        // Start monitoring in background (don't await)
-                        checkIndexingStatus()
-                      }
+                      // Start monitoring in background (don't await)
+                      checkIndexingStatus()
                     }
                     
                     // Only navigate to the newly uploaded file if it's a single file upload
@@ -6915,6 +7016,8 @@ export default function Layout(): JSX.Element {
                     }
                   }}
                 />
+                  )
+                })()
               )}
             </div>
           </div>

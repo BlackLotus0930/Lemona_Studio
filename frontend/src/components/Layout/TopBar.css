@@ -97,6 +97,7 @@
   gap: 2px;
   -webkit-app-region: no-drag;
   flex-shrink: 0; /* Don't shrink, only take necessary space */
+  margin-right: 16px; /* Move settings/export buttons slightly left */
 }
 
 .window-controls {

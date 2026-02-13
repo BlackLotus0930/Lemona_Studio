@@ -19,6 +19,23 @@ interface DocumentEditorProps {
   aiPanelWidth?: number // Percentage width of AI panel
 }
 
+interface AgentDiffPatch {
+  proposalId: string
+  oldText: string
+  newText: string
+}
+
+interface AgentDiffPreview {
+  proposalId: string
+  documentId: string
+  fileName: string
+  oldText: string
+  newText: string
+  isPatch?: boolean
+  patches?: AgentDiffPatch[]
+}
+
+
 export interface DocumentEditorSearchHandle {
   openSearch: () => void
   closeSearch: () => void
@@ -116,6 +133,170 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   const isRephrasePopupInputFocusedRef = useRef(false)
   const editorRef = useRef<Editor | null>(null) // Store editor in ref for reliable access in event handlers
   const [rightOffset, setRightOffset] = useState(20)
+  const [agentDiffPreview, setAgentDiffPreview] = useState<AgentDiffPreview | null>(null)
+  const [agentDiffButtonPos, setAgentDiffButtonPos] = useState<{ top: number; right: number } | null>(null)
+  const previewOriginalDocRef = useRef<any | null>(null)
+  const previewActiveProposalIdRef = useRef<string | null>(null)
+  const previewAppliedRef = useRef(false)
+
+  const linesToParagraphNodes = (
+    lines: string[],
+    mode: 'equal' | 'delete' | 'insert'
+  ): any[] => {
+    return lines.map((line) => {
+      if (line.length === 0) {
+        return { type: 'paragraph' }
+      }
+      if (mode === 'equal') {
+        return {
+          type: 'paragraph',
+          content: [{ type: 'text', text: line }],
+        }
+      }
+      if (mode === 'delete') {
+        return {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: line,
+              marks: [
+                { type: 'highlight', attrs: { color: theme === 'dark' ? 'rgba(239,68,68,0.22)' : 'rgba(254,226,226,0.9)' } },
+              ],
+            },
+          ],
+        }
+      }
+      return {
+        type: 'paragraph',
+        content: [
+          {
+            type: 'text',
+            text: line,
+            marks: [
+              { type: 'highlight', attrs: { color: theme === 'dark' ? 'rgba(34,197,94,0.22)' : 'rgba(220,252,231,0.95)' } },
+            ],
+          },
+        ],
+      }
+    })
+  }
+
+  const buildInlineDiffPreviewDoc = (oldText: string, newText: string): any => {
+    const oldLines = (oldText || '').replace(/\r\n/g, '\n').split('\n')
+    const newLines = (newText || '').replace(/\r\n/g, '\n').split('\n')
+
+    let prefix = 0
+    const minLen = Math.min(oldLines.length, newLines.length)
+    while (prefix < minLen && oldLines[prefix] === newLines[prefix]) {
+      prefix += 1
+    }
+
+    let suffix = 0
+    const oldRemain = oldLines.length - prefix
+    const newRemain = newLines.length - prefix
+    const maxSuffix = Math.min(oldRemain, newRemain)
+    while (
+      suffix < maxSuffix &&
+      oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
+    ) {
+      suffix += 1
+    }
+
+    const prefixOld = oldLines.slice(0, prefix)
+    const deleted = oldLines.slice(prefix, oldLines.length - suffix)
+    const inserted = newLines.slice(prefix, newLines.length - suffix)
+    const suffixOld = oldLines.slice(oldLines.length - suffix)
+
+    const content = [
+      ...linesToParagraphNodes(prefixOld, 'equal'),
+      ...linesToParagraphNodes(deleted, 'delete'),
+      ...linesToParagraphNodes(inserted, 'insert'),
+      ...linesToParagraphNodes(suffixOld, 'equal'),
+    ]
+
+    return { type: 'doc', content }
+  }
+
+  const restorePreviewOriginal = () => {
+    if (!editor || editor.isDestroyed) return
+    if (!previewOriginalDocRef.current) return
+    editor.commands.setContent(previewOriginalDocRef.current, { emitUpdate: false })
+    editor.setEditable(true)
+    previewOriginalDocRef.current = null
+    previewActiveProposalIdRef.current = null
+    previewAppliedRef.current = false
+  }
+
+  const applyAgentTextPatch = (
+    oldSegment: string,
+    newSegment: string,
+    occurrenceIndex: number = 0,
+    prefixAnchor: string = '',
+    suffixAnchor: string = ''
+  ): boolean => {
+    if (!editor || editor.isDestroyed) return false
+    if (typeof oldSegment !== 'string' || typeof newSegment !== 'string') return false
+    if (oldSegment === newSegment) return true
+
+    const needle = oldSegment
+    let foundRange: { from: number; to: number } | null = null
+
+    if (needle.length === 0) {
+      const { from } = editor.state.selection
+      foundRange = { from, to: from }
+    } else {
+      const candidates: Array<{ from: number; to: number; score: number }> = []
+      editor.state.doc.descendants((node, pos) => {
+        if (!node.isTextblock) return true
+        const blockText = node.textBetween(0, node.content.size, '\n')
+        let startAt = 0
+        while (true) {
+          const index = blockText.indexOf(needle, startAt)
+          if (index < 0) break
+          const from = pos + 1 + index
+          const maxTo = pos + node.nodeSize - 1
+          const to = Math.min(from + needle.length, maxTo)
+          const leftContext = blockText.slice(Math.max(0, index - 120), index)
+          const rightContext = blockText.slice(index + needle.length, Math.min(blockText.length, index + needle.length + 120))
+          let score = 0
+          if (prefixAnchor && leftContext.endsWith(prefixAnchor.slice(-Math.min(40, prefixAnchor.length)))) {
+            score += 2
+          }
+          if (suffixAnchor && rightContext.startsWith(suffixAnchor.slice(0, Math.min(40, suffixAnchor.length)))) {
+            score += 2
+          }
+          candidates.push({ from, to, score })
+          startAt = index + Math.max(1, needle.length)
+        }
+        return true
+      })
+
+      if (candidates.length > 0) {
+        const bestScore = Math.max(...candidates.map(c => c.score))
+        if (bestScore > 0) {
+          const anchored = candidates.filter(c => c.score === bestScore)
+          const idx = Math.max(0, Math.min(occurrenceIndex, anchored.length - 1))
+          foundRange = { from: anchored[idx].from, to: anchored[idx].to }
+        } else {
+          const idx = Math.max(0, Math.min(occurrenceIndex, candidates.length - 1))
+          foundRange = { from: candidates[idx].from, to: candidates[idx].to }
+        }
+      }
+    }
+
+    if (!foundRange) {
+      return false
+    }
+
+    editor
+      .chain()
+      .focus()
+      .insertContentAt(foundRange, newSegment)
+      .run()
+
+    return true
+  }
   
   // Slash command menu state
   const [showSlashMenu, setShowSlashMenu] = useState(false)
@@ -127,6 +308,358 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   useEffect(() => {
     editorRef.current = editor
   }, [editor])
+
+  const focusDiffInEditor = (oldText: string, newText: string) => {
+    if (!editor || editor.isDestroyed) return
+
+    const candidates = [...oldText.split('\n'), ...newText.split('\n')]
+      .map(line => line.trim())
+      .filter(line => line.length >= 6)
+      .slice(0, 8)
+
+    if (candidates.length === 0) return
+
+    let foundRange: { from: number; to: number } | null = null
+    editor.state.doc.descendants((node, pos) => {
+      if (foundRange || !node.isTextblock) return false
+      const blockText = node.textBetween(0, node.content.size, '\n')
+      for (const candidate of candidates) {
+        const index = blockText.toLowerCase().indexOf(candidate.toLowerCase())
+        if (index >= 0) {
+          const from = pos + 1 + index
+          const maxTo = pos + node.nodeSize - 1
+          const to = Math.min(from + candidate.length, maxTo)
+          foundRange = { from, to }
+          return false
+        }
+      }
+      return true
+    })
+
+    if (foundRange) {
+      editor.chain().focus().setTextSelection(foundRange).scrollIntoView().run()
+    }
+  }
+
+  // Position the Undo/Keep buttons near the first green highlighted paragraph
+  const positionDiffButtons = (editorInstance: Editor) => {
+    if (!editorInstance?.view?.dom) { setAgentDiffButtonPos(null); return }
+    const editorDom = editorInstance.view.dom as HTMLElement
+    // Find first <mark> with green background
+    const allMarks = editorDom.querySelectorAll('mark[data-color]')
+    let greenMark: HTMLElement | null = null
+    for (const m of allMarks) {
+      const c = (m as HTMLElement).dataset.color || ''
+      if (c.includes('34,197,94') || c.includes('34, 197, 94') ||
+          c.includes('220,252,231') || c.includes('220, 252, 231')) {
+        greenMark = m as HTMLElement
+        break
+      }
+    }
+    if (!greenMark) { setAgentDiffButtonPos(null); return }
+    // The buttons are inside the position:relative div (the parent of EditorContent's wrapper)
+    // Compute mark position relative to that div using getBoundingClientRect
+    const relativeContainer = editorDom.parentElement?.parentElement?.parentElement
+    if (!relativeContainer) { setAgentDiffButtonPos(null); return }
+    const containerRect = relativeContainer.getBoundingClientRect()
+    const markRect = greenMark.getBoundingClientRect()
+    setAgentDiffButtonPos({
+      top: markRect.top - containerRect.top,
+      right: 12,
+    })
+  }
+
+  useEffect(() => {
+    const onPreview = (event: Event) => {
+      const customEvent = event as CustomEvent<AgentDiffPreview>
+      const detail = customEvent.detail
+      if (!detail || !document?.id) return
+      console.info('[AgentFlow] onPreview_received', {
+        docMatch: detail.documentId === document.id,
+        patchCount: detail.patches?.length ?? (detail.isPatch ? 1 : 0),
+        proposalId: detail.proposalId,
+      })
+      if (detail.documentId === document.id) {
+        if (editor && !editor.isDestroyed) {
+          // Save clean original (only once per preview cycle)
+          if (!previewOriginalDocRef.current) {
+            previewOriginalDocRef.current = editor.getJSON()
+          }
+          previewActiveProposalIdRef.current = detail.proposalId
+          previewAppliedRef.current = false
+
+          // --- Helpers for JSON-based diff preview ---
+          const getNodeText = (node: any): string => {
+            if (node.type === 'text') return node.text || ''
+            if (!node.content) return ''
+            return node.content.map((c: any) => getNodeText(c)).join('')
+          }
+
+          const stripAllHighlights = (nodes: any[]) => {
+            if (!nodes) return
+            for (const n of nodes) {
+              if (n.marks && Array.isArray(n.marks)) {
+                n.marks = n.marks.filter((m: any) => m.type !== 'highlight')
+                if (n.marks.length === 0) delete n.marks
+              }
+              if (n.content && Array.isArray(n.content)) stripAllHighlights(n.content)
+            }
+          }
+
+          const spliceHighlight = (content: any[], startIdx: number, length: number, mark: any): any[] => {
+            const result: any[] = []
+            let charPos = 0
+            const endIdx = startIdx + length
+            for (const item of content) {
+              if (item.type !== 'text' || !item.text) { result.push(item); continue }
+              const iStart = charPos
+              const iEnd = charPos + item.text.length
+              charPos = iEnd
+              if (iEnd <= startIdx || iStart >= endIdx) {
+                result.push(item)
+              } else {
+                const hlStart = Math.max(0, startIdx - iStart)
+                const hlEnd = Math.min(item.text.length, endIdx - iStart)
+                if (hlStart > 0) {
+                  result.push({ ...item, text: item.text.slice(0, hlStart) })
+                }
+                const existingMarks = item.marks ? [...item.marks] : []
+                result.push({
+                  type: 'text',
+                  text: item.text.slice(hlStart, hlEnd),
+                  marks: [...existingMarks, mark],
+                })
+                if (hlEnd < item.text.length) {
+                  result.push({ ...item, text: item.text.slice(hlEnd) })
+                }
+              }
+            }
+            return result
+          }
+
+          // Build patches list (multiple or single)
+          const patches: AgentDiffPatch[] = detail.patches && detail.patches.length > 0
+            ? detail.patches
+            : (detail.isPatch && detail.oldText)
+              ? [{ proposalId: detail.proposalId, oldText: detail.oldText, newText: detail.newText }]
+              : []
+
+          if (patches.length > 0) {
+            // JSON-based patch preview: modify a clean clone of the original doc
+            const previewJSON = JSON.parse(JSON.stringify(previewOriginalDocRef.current))
+            // CRITICAL: strip ALL existing highlight marks to prevent "all red" from stale state
+            if (previewJSON.content) stripAllHighlights(previewJSON.content)
+
+            let anyFound = false
+            const redMark = {
+              type: 'highlight',
+              attrs: { color: theme === 'dark' ? 'rgba(239,68,68,0.22)' : 'rgba(254,226,226,0.9)' }
+            }
+            const greenMark = {
+              type: 'highlight',
+              attrs: { color: theme === 'dark' ? 'rgba(34,197,94,0.22)' : 'rgba(220,252,231,0.95)' }
+            }
+
+            // Process patches from bottom to top so spliced green nodes don't shift indices
+            const patchTargets: Array<{ nodeIndex: number; charIdx: number; patch: AgentDiffPatch }> = []
+            if (previewJSON.content && Array.isArray(previewJSON.content)) {
+              for (const patch of patches) {
+                const oldSnippet = (patch.oldText || '').replace(/\r\n/g, '\n')
+                for (let i = 0; i < previewJSON.content.length; i++) {
+                  const nodeText = getNodeText(previewJSON.content[i])
+                  const idx = nodeText.indexOf(oldSnippet)
+                  if (idx >= 0) {
+                    patchTargets.push({ nodeIndex: i, charIdx: idx, patch })
+                    break
+                  }
+                }
+              }
+              // Sort by nodeIndex descending so we insert from bottom to top
+              patchTargets.sort((a, b) => b.nodeIndex - a.nodeIndex)
+
+              for (const target of patchTargets) {
+                const node = previewJSON.content[target.nodeIndex]
+                const oldSnippet = (target.patch.oldText || '').replace(/\r\n/g, '\n')
+                const newSnippet = (target.patch.newText || '').replace(/\r\n/g, '\n')
+
+                // Add red highlight to matched text
+                if (node.content && Array.isArray(node.content)) {
+                  node.content = spliceHighlight(node.content, target.charIdx, oldSnippet.length, redMark)
+                }
+                // Insert green paragraphs right after this node
+                if (newSnippet.length > 0) {
+                  const greenParas = newSnippet.split('\n').map((line: string) => {
+                    if (!line) return { type: 'paragraph' }
+                    return {
+                      type: 'paragraph',
+                      content: [{ type: 'text', text: line, marks: [greenMark] }],
+                    }
+                  })
+                  previewJSON.content.splice(target.nodeIndex + 1, 0, ...greenParas)
+                }
+                anyFound = true
+                console.info('[AgentFlow] patch_preview_applied', {
+                  proposalId: target.patch.proposalId,
+                  nodeIndex: target.nodeIndex,
+                  charIdx: target.charIdx,
+                  oldLen: oldSnippet.length,
+                })
+              }
+            }
+
+            if (anyFound) {
+              editor.commands.setContent(previewJSON, { emitUpdate: false })
+            } else {
+              console.warn('[AgentFlow] patch_preview: no patches found in JSON, falling back to full diff')
+              const previewDoc = buildInlineDiffPreviewDoc(detail.oldText || '', detail.newText || '')
+              editor.commands.setContent(previewDoc, { emitUpdate: false })
+            }
+            editor.setEditable(false)
+            // Position Undo/Accept buttons near the first green block
+            requestAnimationFrame(() => {
+              positionDiffButtons(editor)
+            })
+          } else {
+            // Full-file diff mode
+            const previewDoc = buildInlineDiffPreviewDoc(detail.oldText || '', detail.newText || '')
+            editor.commands.setContent(previewDoc, { emitUpdate: false })
+            editor.setEditable(false)
+            requestAnimationFrame(() => {
+              positionDiffButtons(editor)
+            })
+          }
+        }
+        setAgentDiffPreview(detail)
+      }
+    }
+
+    const onClear = (event: Event) => {
+      const customEvent = event as CustomEvent<{ proposalId?: string }>
+      const proposalId = customEvent.detail?.proposalId
+      const isCurrentPreview =
+        !proposalId ||
+        (previewActiveProposalIdRef.current && previewActiveProposalIdRef.current === proposalId) ||
+        (agentDiffPreview && agentDiffPreview.proposalId === proposalId)
+      if (isCurrentPreview) {
+        if (!previewAppliedRef.current) {
+          restorePreviewOriginal()
+        } else {
+          previewOriginalDocRef.current = null
+          previewActiveProposalIdRef.current = null
+          previewAppliedRef.current = false
+          if (editor && !editor.isDestroyed) {
+            editor.setEditable(true)
+          }
+        }
+        setAgentDiffPreview(null)
+        setAgentDiffButtonPos(null)
+      }
+    }
+
+    const onApplyEditorContent = (event: Event) => {
+      const customEvent = event as CustomEvent<{ documentId?: string; content?: string }>
+      if (!editor || !document?.id) return
+      if (customEvent.detail?.documentId !== document.id || !customEvent.detail.content) return
+      try {
+        previewAppliedRef.current = true
+        const parsed = JSON.parse(customEvent.detail.content)
+        editor.commands.setContent(parsed, { emitUpdate: false })
+        editor.setEditable(true)
+        previewOriginalDocRef.current = null
+        previewActiveProposalIdRef.current = null
+      } catch (error) {
+        console.error('[DocumentEditor] Failed to apply agent content:', error)
+      }
+    }
+
+    const onApplyEditorPatch = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        proposalId?: string
+        documentId?: string
+        oldText?: string
+        newText?: string
+        occurrenceIndex?: number
+        prefixAnchor?: string
+        suffixAnchor?: string
+      }>
+      if (!editor || !document?.id) return
+      if (customEvent.detail?.documentId !== document.id) return
+
+      try {
+        if (previewOriginalDocRef.current) {
+          editor.commands.setContent(previewOriginalDocRef.current, { emitUpdate: false })
+          previewOriginalDocRef.current = null
+          previewActiveProposalIdRef.current = null
+          previewAppliedRef.current = false
+        }
+        editor.setEditable(true)
+
+        const oldSegment = customEvent.detail?.oldText || ''
+        const newSegment = customEvent.detail?.newText || ''
+        const applied = applyAgentTextPatch(
+          oldSegment,
+          newSegment,
+          customEvent.detail?.occurrenceIndex ?? 0,
+          customEvent.detail?.prefixAnchor || '',
+          customEvent.detail?.suffixAnchor || ''
+        )
+
+        if (!applied) {
+          console.warn('[AgentFlow] editor_patch_apply_failed', {
+            documentId: document?.id || null,
+            proposalId: customEvent.detail?.proposalId,
+            oldChars: oldSegment.length,
+            newChars: newSegment.length,
+          })
+          window.dispatchEvent(new CustomEvent('lemona:agent-patch-failed', {
+            detail: {
+              proposalId: customEvent.detail?.proposalId,
+              message: 'Patch could not be applied safely. Please narrow the edit target and try again.',
+            }
+          }))
+          return
+        }
+
+        window.dispatchEvent(new CustomEvent('lemona:agent-patch-applied', {
+          detail: { proposalId: customEvent.detail?.proposalId }
+        }))
+        console.info('[AgentFlow] editor_patch_applied', {
+          documentId: document?.id || null,
+          proposalId: customEvent.detail?.proposalId,
+          oldChars: oldSegment.length,
+          newChars: newSegment.length,
+        })
+      } catch (error) {
+        console.error('[DocumentEditor] Failed to apply agent patch:', error)
+        window.dispatchEvent(new CustomEvent('lemona:agent-patch-failed', {
+          detail: {
+            proposalId: customEvent.detail?.proposalId,
+            message: error instanceof Error ? error.message : 'Patch apply failed',
+          }
+        }))
+      }
+    }
+
+    const onFocusDiff = (event: Event) => {
+      const customEvent = event as CustomEvent<{ documentId?: string; oldText?: string; newText?: string }>
+      if (!document?.id) return
+      if (customEvent.detail?.documentId !== document.id) return
+      focusDiffInEditor(customEvent.detail?.oldText || '', customEvent.detail?.newText || '')
+    }
+
+    window.addEventListener('lemona:agent-diff-preview', onPreview as EventListener)
+    window.addEventListener('lemona:agent-diff-clear', onClear as EventListener)
+    window.addEventListener('lemona:agent-apply-editor-content', onApplyEditorContent as EventListener)
+    window.addEventListener('lemona:agent-apply-editor-patch', onApplyEditorPatch as EventListener)
+    window.addEventListener('lemona:agent-focus-diff', onFocusDiff as EventListener)
+    return () => {
+      window.removeEventListener('lemona:agent-diff-preview', onPreview as EventListener)
+      window.removeEventListener('lemona:agent-diff-clear', onClear as EventListener)
+      window.removeEventListener('lemona:agent-apply-editor-content', onApplyEditorContent as EventListener)
+      window.removeEventListener('lemona:agent-apply-editor-patch', onApplyEditorPatch as EventListener)
+      window.removeEventListener('lemona:agent-focus-diff', onFocusDiff as EventListener)
+    }
+  }, [document?.id, editor, agentDiffPreview, theme])
 
   // Handle slash command menu
   useEffect(() => {
@@ -2346,6 +2879,60 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           minHeight: '100%',
           position: 'relative'
         }}>
+          {agentDiffPreview && agentDiffButtonPos && (
+            <div style={{
+              position: 'absolute',
+              top: `${agentDiffButtonPos.top}px`,
+              right: `${agentDiffButtonPos.right}px`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              zIndex: 20,
+              pointerEvents: 'auto',
+            }}>
+              <button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('lemona:agent-diff-reject', { detail: { proposalId: agentDiffPreview.proposalId } }))
+                  setAgentDiffPreview(null)
+                  setAgentDiffButtonPos(null)
+                }}
+                style={{
+                  borderRadius: '4px',
+                  border: `1px solid ${theme === 'dark' ? '#3a3a3a' : '#d0d7de'}`,
+                  background: theme === 'dark' ? '#1a1a1a' : '#fff',
+                  color: textColor,
+                  padding: '2px 8px',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  lineHeight: 1.4,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.15)'
+                }}
+              >
+                Undo
+              </button>
+              <button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('lemona:agent-diff-accept', { detail: { proposalId: agentDiffPreview.proposalId } }))
+                  setAgentDiffPreview(null)
+                  setAgentDiffButtonPos(null)
+                }}
+                style={{
+                  borderRadius: '4px',
+                  border: `1px solid ${theme === 'dark' ? '#2e6a46' : '#86d0a0'}`,
+                  background: theme === 'dark' ? 'rgba(34,197,94,0.15)' : 'rgba(220,252,231,0.95)',
+                  color: theme === 'dark' ? '#86efac' : '#166534',
+                  padding: '2px 8px',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  fontWeight: 500,
+                  lineHeight: 1.4,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.15)'
+                }}
+              >
+                Keep
+              </button>
+            </div>
+          )}
           <EditorContent key={document?.id} editor={editor} />
           <Autocomplete editor={editor} documentContent={document?.content} documentId={document?.id} />
           

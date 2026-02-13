@@ -181,9 +181,10 @@ export async function indexLibraryFile(
     throw new Error(`Document ${documentId} not found`)
   }
 
-  // Only index library files
-  if (document.folder !== 'library') {
-    throw new Error(`Document ${documentId} is not in library folder`)
+  // Only index PDF (DOCX becomes editable TipTap - use incremental indexing on Ctrl+S instead)
+  const fileExt = document.title.toLowerCase().split('.').pop() || ''
+  if (fileExt !== 'pdf') {
+    throw new Error(`Document ${documentId} is not a PDF. Use incremental indexing for TipTap documents (including editable DOCX).`)
   }
 
   // Update status to indexing
@@ -199,25 +200,22 @@ export async function indexLibraryFile(
 
   try {
     // Get vector store for the correct project
-    // CRITICAL: Library files index to project-specific library index
-    // Architecture:
-    //   - Library folder files → vectorIndex/{projectId}/library/ (project-isolated)
+    // CRITICAL: Uploaded files (PDF/DOCX) index to project-specific "library" index
+    // Architecture: vectorIndex/{projectId}/library/ (project-isolated)
     
-    // Library files MUST have projectId set
-    if (document.folder === 'library') {
-      if (!document.projectId) {
-        const errorMsg = `Cannot index library file ${documentId}: document.projectId is not set. Library files must belong to a project.`
-        console.error(`[Indexing] ${errorMsg}`)
-        throw new Error(errorMsg)
-      }
-      const projectId = document.projectId
-      console.log(`[Indexing] Indexing library document ${documentId} with projectId: ${projectId}`)
-      console.log(`[Indexing] Index strategy: PROJECT-ISOLATED library index (${projectId}/library)`)
+    // Uploaded files MUST have projectId set
+    if (!document.projectId) {
+      const errorMsg = `Cannot index uploaded file ${documentId}: document.projectId is not set. Files must belong to a project.`
+      console.error(`[Indexing] ${errorMsg}`)
+      throw new Error(errorMsg)
+    }
+    const projectId = document.projectId
+    console.log(`[Indexing] Indexing uploaded file ${documentId} (${document.title}) with projectId: ${projectId}`)
       
       // 📌 Check if document was deleted before indexing
       // If deleted, skip indexing (cleanup will handle it)
       const currentDocument = await documentService.getById(documentId)
-      if (!currentDocument || currentDocument.deleted === true) {
+      if (currentDocument?.deleted === true) {
         console.log(`[Indexing] Skipping indexing for deleted document: ${documentId}`)
         const skippedStatus: IndexingStatus = {
           documentId,
@@ -236,7 +234,7 @@ export async function indexLibraryFile(
       try {
         // Double-check document wasn't deleted while waiting for lock
         const documentAfterLock = await documentService.getById(documentId)
-        if (!documentAfterLock || documentAfterLock.deleted === true) {
+        if (documentAfterLock?.deleted === true) {
           console.log(`[Indexing] Document ${documentId} was deleted while waiting for lock, skipping indexing`)
           const skippedStatus: IndexingStatus = {
             documentId,
@@ -245,6 +243,15 @@ export async function indexLibraryFile(
           }
           await saveIndexingStatus(skippedStatus)
           return skippedStatus
+        }
+        if (!documentAfterLock) {
+          const missingStatus: IndexingStatus = {
+            documentId,
+            status: 'error',
+            error: 'Document not found while indexing',
+          }
+          await saveIndexingStatus(missingStatus)
+          return missingStatus
         }
         
         const vectorStore = getVectorStore(projectId, 'library')
@@ -445,10 +452,6 @@ export async function indexLibraryFile(
       // Release write lock
       releaseLock()
     }
-    } else {
-      // Non-library files are not supported for indexing yet
-      throw new Error(`Cannot index non-library file ${documentId}: Project vector index is not supported yet`)
-    }
   } catch (error: any) {
     console.error(`[Indexing] Failed to index ${documentId}:`, error)
     
@@ -595,9 +598,9 @@ export async function shouldReindexFile(documentId: string): Promise<boolean> {
 }
 
 /**
- * Index library files for a specific project only
- * This is the preferred method to avoid indexing all projects at once
- * @param projectId - The project ID to index library files for
+ * Index uploaded files (PDF, DOCX) for a specific project
+ * Used when project changes or API key is added - indexes unindexed uploaded files
+ * @param projectId - The project ID to index uploaded files for
  * @param geminiApiKey - Optional Gemini API key
  * @param openaiApiKey - Optional OpenAI API key
  * @param onlyUnindexed - If true, only index files that need indexing (default: true)
@@ -609,23 +612,19 @@ export async function indexProjectLibraryFiles(
   onlyUnindexed: boolean = true
 ): Promise<Array<{ documentId: string; status: IndexingStatus }>> {
   if (!projectId) {
-    throw new Error('Project ID is required for indexing library files')
+    throw new Error('Project ID is required for indexing uploaded files')
   }
 
   const allDocuments = await documentService.getAll()
-  // Filter to only library files belonging to this project
-  const projectLibraryDocuments = allDocuments.filter(
-    doc => doc.folder === 'library' && doc.projectId === projectId
-  )
-
-  // Filter to only PDF and DOCX files
-  const indexableDocuments = projectLibraryDocuments.filter(doc => {
+  // Filter to PDF files (DOCX is editable TipTap, indexed on Ctrl+S)
+  const indexableDocuments = allDocuments.filter(doc => {
+    if (doc.projectId !== projectId || doc.folder === 'worldlab') return false
     const fileExt = doc.title.toLowerCase().split('.').pop() || ''
-    return fileExt === 'pdf' || fileExt === 'docx'
+    return fileExt === 'pdf'
   })
 
   if (indexableDocuments.length === 0) {
-    console.log(`[Indexing] No indexable library files found for project ${projectId}`)
+    console.log(`[Indexing] No indexable PDF files found for project ${projectId}`)
     return []
   }
 
@@ -1167,7 +1166,7 @@ export async function incrementalIndexProjectFile(
     try {
       // Double-check document wasn't deleted while waiting for lock
       const documentAfterLock = await documentService.getById(documentId)
-      if (!documentAfterLock || documentAfterLock.deleted === true) {
+      if (documentAfterLock?.deleted === true) {
         console.log(`[Indexing] Document ${documentId} was deleted while waiting for lock, skipping indexing`)
         const skippedStatus: IndexingStatus = {
           documentId,
@@ -1176,6 +1175,15 @@ export async function incrementalIndexProjectFile(
         }
         await saveIndexingStatus(skippedStatus)
         return skippedStatus
+      }
+      if (!documentAfterLock) {
+        const missingStatus: IndexingStatus = {
+          documentId,
+          status: 'error',
+          error: 'Document not found while indexing',
+        }
+        await saveIndexingStatus(missingStatus)
+        return missingStatus
       }
       
       const vectorStore = getVectorStore(projectId, 'project')

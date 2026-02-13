@@ -17,7 +17,6 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import logoImage from '../assets/lemonalogo.png'
 
 const FIRST_PROJECT_DOC_TITLE = 'Lemona'
-const FIRST_PROJECT_WORLDLAB_TITLE = 'New world 1.lab'
 const FIRST_PROJECT_WELCOME_CONTENT = {
   type: 'doc',
   content: [
@@ -321,8 +320,6 @@ export default function DocumentList() {
 
       if (isFirstProject) {
         await documentApi.update(workspaceDoc.id, JSON.stringify(FIRST_PROJECT_WELCOME_CONTENT))
-        const worldLabDoc = await documentApi.create(FIRST_PROJECT_WORLDLAB_TITLE, 'worldlab')
-        await projectApi.addDocument(project.id, worldLabDoc.id, 1)
       }
       
       // Add workspace file to project
@@ -349,15 +346,8 @@ export default function DocumentList() {
         console.warn('Failed to update project timestamp:', updateError)
       }
       
-      // Trigger indexing for this project's library files (async, non-blocking)
-      // This happens in the background and doesn't block project opening
-      settingsApi.getSmartIndexing().then((smartIndexingEnabled) => {
-        if (!smartIndexingEnabled) {
-          console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for project ${projectId}`)
-          return
-        }
-        
-        settingsApi.getApiKeys().then((keys) => {
+      // Trigger indexing for this project's PDF files (async, non-blocking)
+      settingsApi.getApiKeys().then((keys) => {
           const hasApiKey = (keys.geminiApiKey && keys.geminiApiKey.trim().length > 0) ||
                            (keys.openaiApiKey && keys.openaiApiKey.trim().length > 0)
           
@@ -382,11 +372,6 @@ export default function DocumentList() {
         }).catch((error) => {
           console.warn('[Auto-Indexing] Failed to get API keys:', error)
         })
-      }).catch((error) => {
-        console.warn('[Auto-Indexing] Failed to get Smart indexing setting:', error)
-        // If we can't get the setting, skip indexing (default is disabled)
-        console.log(`[Auto-Indexing] Smart indexing setting unavailable, skipping automatic indexing for project ${projectId}`)
-      })
       
       // Get documents in project
       const documents = await projectApi.getDocuments(projectId)
@@ -436,8 +421,6 @@ export default function DocumentList() {
         const document = await documentApi.create(newFileName, 'project')
         if (isFirstProject) {
           await documentApi.update(document.id, JSON.stringify(FIRST_PROJECT_WELCOME_CONTENT))
-          const worldLabDoc = await documentApi.create(FIRST_PROJECT_WORLDLAB_TITLE, 'worldlab')
-          await projectApi.addDocument(projectId, worldLabDoc.id, 1)
         }
         await projectApi.addDocument(projectId, document.id, 0)
         navigate(`/document/${document.id}`)

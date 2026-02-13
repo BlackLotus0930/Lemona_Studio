@@ -2,7 +2,6 @@
 // Keys are saved via IPC from the frontend and can be retrieved by services
 
 let storedApiKeys: { geminiApiKey?: string; openaiApiKey?: string } = {}
-let smartIndexingEnabled: boolean = false // Default to false
 
 export function saveApiKeys(geminiApiKey?: string, openaiApiKey?: string): boolean {
   let changed = false
@@ -32,11 +31,11 @@ export function getApiKeys(): { geminiApiKey?: string; openaiApiKey?: string } {
   }
 }
 
-export function saveSmartIndexing(enabled: boolean): void {
-  smartIndexingEnabled = enabled
+export function saveSmartIndexing(_enabled: boolean): void {
+  // No-op: indexing is always enabled
 }
 
 export function getSmartIndexing(): boolean {
-  return smartIndexingEnabled
+  return true // Always enabled
 }
 

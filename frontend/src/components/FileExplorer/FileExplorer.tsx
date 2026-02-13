@@ -42,6 +42,7 @@ interface FileExplorerProps {
   onDocumentsUpdated?: () => void // Callback when documents are updated (e.g., after replace all)
   onDocumentChange?: (doc: Document | null) => void // Callback to update current document in editor
   onDocumentFolderChange?: (documentId: string, folder: 'library' | 'project' | 'worldlab') => void // Callback for optimistic folder updates
+  currentProjectId?: string | null
 }
 
 interface FileItem {
@@ -87,6 +88,7 @@ function FileExplorer({
   onDocumentsUpdated,
   onDocumentChange,
   onDocumentFolderChange,
+  currentProjectId,
 }: FileExplorerProps) {
   const { theme } = useTheme()
   
@@ -545,10 +547,10 @@ function FileExplorer({
   const indicatorColor = theme === 'dark' ? '#999999' : '#c0c0c0' // Light grey color for drop indicator
   const borderColor = theme === 'dark' ? '#232323' : '#ecedee' // Same as separator color
   
-  // Dropdown menu colors (matching Toolbar.tsx)
+  // Dropdown menu colors (matching Version Control commit name style: less black, smaller)
   const dropdownBg = theme === 'dark' ? '#141414' : '#ffffff'
   const dropdownBorder = theme === 'dark' ? '#202020' : '#dadce0'
-  const dropdownTextColor = theme === 'dark' ? '#D6D6DD' : '#202124'
+  const dropdownTextColor = theme === 'dark' ? '#b8b8bd' : '#505356' // Commit-name style: softer than #D6D6DD / #202124
   const dropdownHoverBg = theme === 'dark' ? '#3e3e42' : '#f8f9fa'
 
   // Build folder structure: Library and ProjectName folders
@@ -718,15 +720,23 @@ function FileExplorer({
   // For now, we'll support it through the onDocumentRename prop
 
   const handleRenameSubmit = (item: FileItem) => {
-    if (renamingId === item.id && renameValue.trim()) {
+    if (renamingId !== item.id) return
+    const trimmed = renameValue.trim()
+    if (item.type === 'folder' && item.id.startsWith('folder-')) {
+      if (trimmed && onFolderRename) {
+        onFolderRename(item.id, trimmed)
+      }
+      setRenamingId(null)
+      setRenameValue('')
+      return
+    }
+    if (trimmed) {
       if (item.type === 'file' && item.document && onDocumentRename) {
-        onDocumentRename(item.document.id, renameValue.trim())
-      } else if (item.type === 'folder' && item.id.startsWith('folder-') && onFolderRename) {
-        onFolderRename(item.id, renameValue.trim())
+        onDocumentRename(item.document.id, trimmed)
       } else if (item.type === 'folder' &&
         (item.id === 'library' || item.id === 'worldlab' || item.id === 'project') &&
         onRootFolderRename) {
-        onRootFolderRename(item.id as 'worldlab' | 'library' | 'project', renameValue.trim())
+        onRootFolderRename(item.id as 'worldlab' | 'library' | 'project', trimmed)
       }
       setRenamingId(null)
       setRenameValue('')
@@ -734,6 +744,9 @@ function FileExplorer({
   }
 
   const handleRenameCancel = () => {
+    if (renamingId && renamingId.startsWith('folder-') && !renameValue.trim() && onFolderDelete) {
+      onFolderDelete(renamingId)
+    }
     setRenamingId(null)
     setRenameValue('')
   }
@@ -803,13 +816,19 @@ function FileExplorer({
             }
 
             // Upload file normally (including DOCX files)
-            // CRITICAL: Pass current projectId for BOTH library and project folders
-            // Library files are scoped per project, not shared across all projects
-            // This ensures the document is immediately associated with the project
-            // and will be indexed to the correct project index with correct metadata
-            const currentProjectId = documents.find(d => d.id === currentDocumentId)?.projectId
-            // Pass projectId for both library and project files
-            const document = await documentApi.uploadFile(finalFilePath, file.name, folderId as 'library' | 'project' | 'worldlab', currentProjectId)
+            // Resolve project ID from explicit prop first, then current/open documents.
+            const uploadProjectId =
+              currentProjectId ||
+              documents.find(d => d.id === currentDocumentId)?.projectId ||
+              documents.find(d => d.projectId && d.projectId.trim() !== '')?.projectId
+
+            // Pass projectId for both library and project files.
+            const document = await documentApi.uploadFile(
+              finalFilePath,
+              file.name,
+              folderId as 'library' | 'project' | 'worldlab',
+              uploadProjectId
+            )
             if (document && onFileUploaded) {
               const isBatchUpload = totalFiles > 1
               onFileUploaded(document, isBatchUpload)
@@ -863,7 +882,7 @@ function FileExplorer({
 
     processUploads()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploadQueueTrigger, onFileUploaded])
+  }, [uploadQueueTrigger, onFileUploaded, currentProjectId, documents, currentDocumentId])
 
   // Handle file drop on folder
   const handleFolderDrop = async (e: React.DragEvent, folderId: 'library' | 'project' | 'worldlab') => {
@@ -2029,7 +2048,8 @@ function FileExplorer({
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              fontSize: '13px',
+              fontSize: '12px',
+              fontWeight: 500,
               fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
               color: dropdownTextColor,
               textAlign: 'left',
@@ -2075,7 +2095,8 @@ function FileExplorer({
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                fontSize: '13px',
+                fontSize: '12px',
+                fontWeight: 500,
                 fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                 color: dropdownTextColor,
                 textAlign: 'left',
@@ -2090,7 +2111,7 @@ function FileExplorer({
               }}
             >
               Delete
-            </button>
+          </button>
           )}
           {(contextMenuPos.item.document || contextMenuPos.item.type === 'file') && onDocumentDelete && (
             <button
@@ -2107,24 +2128,25 @@ function FileExplorer({
                 padding: '8px 16px',
                 border: 'none',
                 background: 'transparent',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
                 gap: '8px',
-                fontSize: '13px',
+                fontSize: '12px',
+                fontWeight: 500,
                 fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                 color: dropdownTextColor,
                 textAlign: 'left',
                 transition: 'background-color 0.15s',
                 outline: 'none',
-            }}
-            onMouseEnter={(e) => {
+              }}
+              onMouseEnter={(e) => {
                 e.currentTarget.style.backgroundColor = dropdownHoverBg
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent'
-            }}
-          >
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }}
+            >
               Delete
           </button>
           )}

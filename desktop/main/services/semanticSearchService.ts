@@ -3,7 +3,6 @@ import { generateEmbedding } from './embeddingService.js'
 import { getVectorStore, SearchResult, getProjectLockManager } from './vectorStore.js'
 import { documentService } from './documentService.js'
 import { indexProjectLibraryFiles, indexProjectWorkspaceFiles } from './indexingService.js'
-import { getSmartIndexing } from './apiKeyStore.js'
 
 /**
  * Parsed mention information
@@ -84,7 +83,7 @@ function getRecoveryKey(projectId: string, folder: 'library' | 'project'): strin
 
 function isIndexableLibraryDocument(doc: { title?: string }): boolean {
   const fileExt = (doc.title || '').toLowerCase().split('.').pop() || ''
-  return fileExt === 'pdf' || fileExt === 'docx'
+  return fileExt === 'pdf' // PDF indexed on upload; DOCX is editable TipTap, indexed on Ctrl+S
 }
 
 async function shouldAttemptIndexRecovery(
@@ -100,11 +99,15 @@ async function shouldAttemptIndexRecovery(
   if (metadataCount === 0 && indexCount === 0) {
     const allDocuments = await documentService.getAll()
     if (folder === 'project') {
-      return allDocuments.some(doc => doc.projectId === projectId && doc.folder === 'project')
+      return allDocuments.some(doc =>
+        doc.projectId === projectId &&
+        (doc.folder === 'project' || doc.folder == null) &&
+        !isIndexableLibraryDocument(doc)
+      )
     }
 
     return allDocuments.some(
-      doc => doc.projectId === projectId && doc.folder === 'library' && isIndexableLibraryDocument(doc)
+      doc => doc.projectId === projectId && doc.folder !== 'worldlab' && isIndexableLibraryDocument(doc)
     )
   }
 
@@ -140,12 +143,6 @@ async function recoverIndexIfNeeded(
       if (folder === 'project') {
         console.warn(`[SemanticSearch] Rebuilding workspace index for project ${projectId}`)
         await indexProjectWorkspaceFiles(projectId, geminiApiKey, openaiApiKey, true)
-        return
-      }
-
-      const smartIndexingEnabled = getSmartIndexing()
-      if (!smartIndexingEnabled) {
-        console.warn(`[SemanticSearch] Smart indexing disabled, skipping library index recovery for project ${projectId}`)
         return
       }
 
@@ -508,13 +505,13 @@ export async function searchLibraryWithMentions(
 }
 
 /**
- * Get all library file names and IDs (for autocomplete)
+ * Get all uploaded files (PDF, DOCX) for autocomplete - indexed in library index
  */
 export async function getLibraryFiles(): Promise<Array<{ id: string; name: string }>> {
   const allDocuments = await documentService.getAll()
-  const libraryDocuments = allDocuments.filter(doc => doc.folder === 'library')
+  const uploadedDocs = allDocuments.filter(doc => isIndexableLibraryDocument(doc))
   
-  return libraryDocuments.map(doc => ({
+  return uploadedDocs.map(doc => ({
     id: doc.id,
     name: doc.title,
   }))
@@ -554,7 +551,7 @@ export async function resolveFileMentionsAll(
 
   const allDocuments = await documentService.getAll()
   const projectDocuments = allDocuments.filter(
-    doc => doc.projectId === projectId && (doc.folder === 'project' || doc.folder === 'library')
+    doc => doc.projectId === projectId && doc.folder !== 'worldlab'
   )
   
   const workspaceIds: string[] = []
@@ -566,10 +563,10 @@ export async function resolveFileMentionsAll(
     )
 
     if (exactMatch) {
-      if (exactMatch.folder === 'project') {
-        workspaceIds.push(exactMatch.id)
-      } else if (exactMatch.folder === 'library') {
+      if (isIndexableLibraryDocument(exactMatch)) {
         libraryIds.push(exactMatch.id)
+      } else {
+        workspaceIds.push(exactMatch.id)
       }
       continue
     }
@@ -583,10 +580,10 @@ export async function resolveFileMentionsAll(
     })
 
     if (partialMatch) {
-      if (partialMatch.folder === 'project') {
-        workspaceIds.push(partialMatch.id)
-      } else if (partialMatch.folder === 'library') {
+      if (isIndexableLibraryDocument(partialMatch)) {
         libraryIds.push(partialMatch.id)
+      } else {
+        workspaceIds.push(partialMatch.id)
       }
     }
   }

@@ -8,7 +8,7 @@ import { extractPDFTextAsync } from './pdfTextExtractor.js'
 import { parseDocx, convertHtmlToTipTap } from './docxParser.js'
 import { indexLibraryFile, reindexFile } from './indexingService.js'
 import { getVectorStore, cleanupVectorIndex, getProjectLockManager } from './vectorStore.js'
-import { getApiKeys, getSmartIndexing } from './apiKeyStore.js'
+import { getApiKeys } from './apiKeyStore.js'
 
 // Use Electron's userData directory for documents
 const DOCUMENTS_DIR = path.join(app.getPath('userData'), 'documents')
@@ -840,43 +840,19 @@ export const documentService = {
       })
     }
     
-    // Auto-index library files asynchronously (don't block upload)
-    // Only index new files that need indexing (use shouldReindexFile for strict checking)
-    if (folder === 'library') {
-      // Check if Smart indexing is enabled
-      const smartIndexingEnabled = getSmartIndexing()
-      if (!smartIndexingEnabled) {
-        console.log(`[Auto-Indexing] Smart indexing is disabled, skipping automatic indexing for ${finalFileName}`)
-        return document
-      }
-      
-      // Check if file type is supported for indexing (PDF or DOCX)
-      const fileExt = finalFileName.toLowerCase().split('.').pop() || ''
-      if (fileExt === 'pdf' || fileExt === 'docx') {
-        // Use shouldReindexFile to check if file needs indexing
-        // This ensures we only index new files or files that have changed
-        const { shouldReindexFile } = await import('./indexingService.js')
-        const needsIndexing = await shouldReindexFile(id)
-        
-        if (needsIndexing) {
-          console.log(`[Auto-Indexing] Starting indexing for library file: ${finalFileName} (${id})`)
-          
-          // Get API keys from store for auto-indexing
-          const { geminiApiKey, openaiApiKey } = getApiKeys()
-          
-          // Trigger indexing asynchronously (non-blocking) with API keys
-          indexLibraryFile(id, geminiApiKey, openaiApiKey).then((status) => {
-            console.log(`[Auto-Indexing] Completed indexing for ${id}: ${status.status}, ${status.chunksCount || 0} chunks`)
-          }).catch((error) => {
-            console.error(`[Auto-Indexing] Failed to index ${id}:`, error)
-            // Don't throw - indexing failure shouldn't break upload
-            // The indexing service will handle API key errors gracefully
-          })
-        } else {
-          console.log(`[Auto-Indexing] Skipping indexing for ${finalFileName}: file already correctly indexed`)
-        }
-      } else {
-        console.log(`[Auto-Indexing] Skipping indexing for ${finalFileName}: unsupported file type (${fileExt})`)
+    // Auto-index PDF on upload (DOCX becomes editable TipTap, indexed on Ctrl+S instead)
+    const fileExtForIndex = finalFileName.toLowerCase().split('.').pop() || ''
+    if (fileExtForIndex === 'pdf') {
+      const { shouldReindexFile } = await import('./indexingService.js')
+      const needsIndexing = await shouldReindexFile(id)
+
+      if (needsIndexing) {
+        const { geminiApiKey, openaiApiKey } = getApiKeys()
+        indexLibraryFile(id, geminiApiKey, openaiApiKey).then((status) => {
+          console.log(`[Auto-Indexing] Completed indexing for ${id}: ${status.status}, ${status.chunksCount || 0} chunks`)
+        }).catch((error) => {
+          console.error(`[Auto-Indexing] Failed to index ${id}:`, error)
+        })
       }
     }
     
