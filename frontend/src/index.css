@@ -836,48 +836,14 @@ input[type="number"] {
   appearance: textfield;
 }
 
-/* Chat tabs horizontal scrollbar styling */
+/* Chat tabs horizontal scrollbar - hidden to avoid pushing tabs upward */
 .chat-tabs-scrollable {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+  scrollbar-width: none; /* Firefox - no scrollbar, no layout impact */
+  -ms-overflow-style: none; /* IE/Edge */
 }
 
 .chat-tabs-scrollable::-webkit-scrollbar {
-  height: 4px;
-}
-
-.chat-tabs-scrollable::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.chat-tabs-scrollable::-webkit-scrollbar-thumb {
-  background-color: transparent;
-  border-radius: 6px;
-  transition: background-color 0.4s ease, opacity 0.4s ease;
-  opacity: 0;
-}
-
-.dark-theme .chat-tabs-scrollable::-webkit-scrollbar-thumb {
-  background-color: transparent;
-}
-
-/* Show scrollbar when scrolling */
-.chat-tabs-scrollable.scrolling::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-color-thumb);
-  opacity: 1;
-}
-
-.dark-theme .chat-tabs-scrollable.scrolling::-webkit-scrollbar-thumb {
-  background-color: #3e3e42;
-}
-
-/* Firefox - show scrollbar when scrolling */
-.chat-tabs-scrollable.scrolling {
-  scrollbar-color: var(--scrollbar-color-thumb) transparent;
-}
-
-.dark-theme .chat-tabs-scrollable.scrolling {
-  scrollbar-color: #3e3e42 transparent;
+  display: none; /* Chrome, Safari, Edge - hide scrollbar, no layout impact */
 }
 
 .terminal-tabs-scrollable {

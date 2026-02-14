@@ -449,6 +449,7 @@ Rewritten text:`;
             return null;
         }
     });
+    ipcMain.handle('app:getVersion', () => app.getVersion());
     // Auto-update controls
     ipcMain.handle('update:download', async () => {
         try {

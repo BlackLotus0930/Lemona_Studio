@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { AIChatMessage, ChatAttachment, Document, IndexingStatus } from '@shared/types'
 import { aiApi, chatApi, documentApi, projectApi, settingsApi } from '../../services/api'
+import { track } from '../../services/telemetry'
 import { indexingApi } from '../../services/desktop-api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -691,6 +692,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       } else if (proposal.type === 'create_file') {
         logAgent('apply_create_file', { proposalId, fileName: proposal.fileName })
         const created = await documentApi.create(proposal.fileName, 'project')
+        track('document_created', { source: 'agent' })
         await documentApi.update(created.id, plainTextToTipTap(proposal.content))
         if (projectId) {
           await projectApi.addDocument(projectId, created.id)
@@ -2530,6 +2532,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     // Save user message immediately
     await saveMessage(userMessage, false)
 
+    track('ai_chat_sent', { mode: chatMode === 'agent' ? 'agent' : 'chat' })
+
     try {
       // Reset cancellation flag
       isStreamCancelledRef.current = false
@@ -3050,7 +3054,7 @@ Step 2 requirement:
           style={{
             flex: 1,
             overflowY: 'auto',
-            padding: '0 0 20px 0',
+            padding: '0 0 14px 0',
             display: 'flex',
             flexDirection: 'column',
             backgroundColor: brighterBg,
@@ -3066,7 +3070,13 @@ Step 2 requirement:
             Object.keys(message.reasoningMetadata.actions).length > 0
           )
           const messageProposals = agentProposals.filter(proposal => proposal.messageId === message.id)
-          const prevIsAssistant = index > 0 && messages[index - 1].role === 'assistant'
+          const previousMessage = index > 0 ? messages[index - 1] : null
+          const prevIsAssistant = previousMessage?.role === 'assistant'
+          const prevAssistantHasDiffCard = Boolean(
+            previousMessage &&
+            previousMessage.role === 'assistant' &&
+            agentProposals.some(proposal => proposal.messageId === previousMessage.id)
+          )
           return (
           <div
             key={`${message.id}-${index}`}
@@ -3076,7 +3086,9 @@ Step 2 requirement:
               flexDirection: 'column',
               padding: message.role === 'assistant' ? '8px 16px' : '6px 16px',
               backgroundColor: brighterBg,
-              marginTop: prevIsAssistant && message.role === 'user' ? '14px' : undefined,
+              marginTop: prevIsAssistant && message.role === 'user'
+                ? (prevAssistantHasDiffCard ? '14px' : '10px')
+                : undefined,
             }}
           >
             {message.role === 'user' && (
@@ -3932,7 +3944,20 @@ Step 2 requirement:
           </div>
           )
         })}
-        <div ref={messagesEndRef} />
+        <div
+          ref={messagesEndRef}
+          style={{
+            marginBottom: (() => {
+              const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
+              const lastAssistantHasDiffCard = Boolean(
+                lastMessage &&
+                lastMessage.role === 'assistant' &&
+                agentProposals.some(proposal => proposal.messageId === lastMessage.id)
+              )
+              return lastAssistantHasDiffCard ? '6px' : '0'
+            })()
+          }}
+        />
       </div>
       
       {/* Input Container - Unified Container */}
@@ -5008,10 +5033,10 @@ Step 2 requirement:
                 onClick={() => setChatMode(chatMode === 'ask' ? 'agent' : 'ask')}
                 disabled={isLoading}
                 style={{
-                  padding: '2px 10px',
-                  backgroundColor: theme === 'dark' ? '#282828' : '#e6e8ea',
-                  color: theme === 'dark' ? '#aaaaaf' : '#43464b',
-                  border: `1px solid ${borderColor}`,
+                  padding: '0px 11px',
+                  backgroundColor: theme === 'dark' ? '#282828' : '#f1f3f5',
+                  color: theme === 'dark' ? '#aaaaaf' : '#4b5057',
+                  border: 'none',
                   borderRadius: '999px',
                   cursor: isLoading ? 'not-allowed' : 'pointer',
                   fontSize: '11px',
@@ -5026,12 +5051,12 @@ Step 2 requirement:
                 }}
                 onMouseEnter={(e) => {
                   if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#d8dbde'
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2d2d2d' : '#eaedf1'
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!isLoading) {
-                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#282828' : '#e6e8ea'
+                    e.currentTarget.style.backgroundColor = theme === 'dark' ? '#282828' : '#f1f3f5'
                   }
                 }}
                 title={chatMode === 'ask' ? 'Ask mode: no file actions (click for Agent)' : 'Agent mode: propose file edits (click for Ask)'}

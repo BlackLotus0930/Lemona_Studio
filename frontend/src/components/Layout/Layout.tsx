@@ -23,6 +23,7 @@ import FullScreenPDFViewer, { PDFViewerSearchHandle } from '../PDFViewer/FullScr
 import { Document, IndexingStatus, DocumentSnapshot, WorldLab } from '@shared/types'
 import { documentApi, exportApi, projectApi } from '../../services/api'
 import { indexingApi, versionApi, worldLabApi } from '../../services/desktop-api'
+import { endSession, track } from '../../services/telemetry'
 import { settingsApi } from '../../services/desktop-api'
 import WorldLabCanvas from '../WorldLab/WorldLabCanvas'
 import WorldLabTerminal from '../WorldLab/WorldLabTerminal'
@@ -1594,7 +1595,7 @@ export default function Layout(): JSX.Element {
                 ).then((results: Array<{ documentId: string; status: IndexingStatus }>) => {
                   const successCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'completed').length
                   const errorCount = results.filter((r: { documentId: string; status: IndexingStatus }) => r.status.status === 'error').length
-                  
+                  results.filter((r) => r.status.status === 'completed').forEach(() => track('file_indexed', { scope: 'workspace' }))
                   // Clear any existing timeout before updating notification
                   if (commitNotificationTimeoutRef.current) {
                     clearTimeout(commitNotificationTimeoutRef.current)
@@ -2981,6 +2982,7 @@ export default function Layout(): JSX.Element {
       
       console.log(`[WorldLab] Creating new document: folder=${folder}, title=${newTitle}`)
       const newDoc = await documentApi.create(newTitle, folder)
+      track('document_created', { source: 'layout' })
       if (folder === 'project') {
         handleProjectFileFolderChange(newDoc.id, selectedProjectFolderId)
       }
@@ -4263,7 +4265,8 @@ export default function Layout(): JSX.Element {
   // Handle app close: restore documents to last saved state
   useEffect(() => {
     const handleWindowWillClose = async () => {
-      
+      endSession()
+
       // Save current document ID for restoration on next app launch
       if (document?.id) {
         try {
@@ -4306,6 +4309,8 @@ export default function Layout(): JSX.Element {
     
     // Fallback to beforeunload for non-Electron environments (e.g., web)
     const handleBeforeUnload = async () => {
+      endSession()
+
       // Save current document ID for restoration on next app launch
       if (document?.id) {
         try {
@@ -4727,7 +4732,8 @@ export default function Layout(): JSX.Element {
   // Handle app close: restore documents to last saved state
   useEffect(() => {
     const handleWindowWillClose = async () => {
-      
+      endSession()
+
       // Save current document ID for restoration on next app launch
       if (document?.id) {
         try {
@@ -4765,6 +4771,8 @@ export default function Layout(): JSX.Element {
     
     // Fallback to beforeunload for non-Electron environments (e.g., web)
     const handleBeforeUnload = async () => {
+      endSession()
+
       // Save current document ID for restoration on next app launch
       if (document?.id) {
         try {
@@ -5209,6 +5217,8 @@ export default function Layout(): JSX.Element {
     
     // Fallback to beforeunload for non-Electron environments (e.g., web)
     const handleBeforeUnload = async () => {
+      endSession()
+
       // Save current document ID for restoration on next app launch
       if (document?.id) {
         try {
@@ -5624,7 +5634,8 @@ export default function Layout(): JSX.Element {
   // Handle app close: restore documents to last saved state
   useEffect(() => {
     const handleWindowWillClose = async () => {
-      
+      endSession()
+
       // Save current document ID for restoration on next app launch
       if (document?.id) {
         try {
@@ -5662,6 +5673,8 @@ export default function Layout(): JSX.Element {
     
     // Fallback to beforeunload for non-Electron environments (e.g., web)
     const handleBeforeUnload = async () => {
+      endSession()
+
       // Save current document ID for restoration on next app launch
       if (document?.id) {
         try {
@@ -6946,6 +6959,7 @@ export default function Layout(): JSX.Element {
                             // Poll until indexing completes or times out
                             while (checkCount < maxChecks) {
                               if (status?.status === 'completed') {
+                                track('file_indexed', { scope: 'library', file_type: 'pdf' })
                                 // Show notification when indexing completes
                                 setIndexingCompletionNotifications(prev => {
                                   const newMap = new Map(prev)

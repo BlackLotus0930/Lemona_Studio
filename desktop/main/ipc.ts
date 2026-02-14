@@ -460,6 +460,8 @@ Rewritten text:`
     }
   })
 
+  ipcMain.handle('app:getVersion', () => app.getVersion())
+
   // Auto-update controls
   ipcMain.handle('update:download', async () => {
     try {

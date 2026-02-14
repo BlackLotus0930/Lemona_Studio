@@ -443,36 +443,6 @@ function AIPanel({ document, onClose }: AIPanelProps) {
     }
   }, [])
 
-  // Add scroll detection for chat tabs to hide scrollbar when not scrolling
-  const chatTabsScrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => {
-    const container = chatTabsScrollRef.current
-    if (!container) return
-
-    const handleScroll = () => {
-      if (container) {
-        container.classList.add('scrolling')
-        if (chatTabsScrollTimeoutRef.current) {
-          clearTimeout(chatTabsScrollTimeoutRef.current)
-        }
-        chatTabsScrollTimeoutRef.current = setTimeout(() => {
-          if (container) {
-            container.classList.remove('scrolling')
-          }
-        }, 600) // Hide scrollbar after 600ms of no scrolling
-      }
-    }
-
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    
-    return () => {
-      container.removeEventListener('scroll', handleScroll)
-      if (chatTabsScrollTimeoutRef.current) {
-        clearTimeout(chatTabsScrollTimeoutRef.current)
-      }
-    }
-  }, [])
-
   // Generate chat name from first user message
   const generateChatName = (firstMessage: string): string => {
     if (!firstMessage || !firstMessage.trim()) return 'New Chat'
@@ -735,10 +705,8 @@ function AIPanel({ document, onClose }: AIPanelProps) {
             minWidth: 0,
             overflowX: 'auto',
             overflowY: 'hidden',
-            scrollbarWidth: 'thin', // Firefox - thin scrollbar
-            msOverflowStyle: 'auto', // IE/Edge
           } as React.CSSProperties}
-          className="chat-tabs-scrollable scrollable-container"
+          className="chat-tabs-scrollable"
         >
           {chats.map((chat) => {
             const isDragging = draggedChatId === chat.id

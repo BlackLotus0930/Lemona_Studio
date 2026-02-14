@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { Project, Document, IndexingStatus } from '@shared/types'
 import { documentApi, projectApi } from '../services/api'
 import { indexingApi, settingsApi } from '../services/desktop-api'
+import { endSession, track } from '../services/telemetry'
 import { useTheme } from '../contexts/ThemeContext'
 // @ts-ignore
 import SearchIcon from '@mui/icons-material/Search'
@@ -206,6 +207,7 @@ export default function DocumentList() {
   // This ensures that if user quits from home page, app won't auto-open project on next launch
   useEffect(() => {
     const handleWindowWillClose = () => {
+      endSession()
       // Clear last opened document so app starts at home page next time
       try {
         localStorage.removeItem('lastOpenedDocument')
@@ -224,6 +226,7 @@ export default function DocumentList() {
     
     // Fallback to beforeunload for non-Electron environments (e.g., web)
     const handleBeforeUnload = () => {
+      endSession()
       try {
         localStorage.removeItem('lastOpenedDocument')
       } catch (error) {
@@ -317,6 +320,7 @@ export default function DocumentList() {
       
       const newFileName = isFirstProject ? FIRST_PROJECT_DOC_TITLE : `Chapter ${chapterNumber}`
       const workspaceDoc = await documentApi.create(newFileName, 'project')
+      track('document_created', { source: 'list' })
 
       if (isFirstProject) {
         await documentApi.update(workspaceDoc.id, JSON.stringify(FIRST_PROJECT_WELCOME_CONTENT))
@@ -419,6 +423,7 @@ export default function DocumentList() {
         const isFirstProject = projects.length === 1 && projects[0]?.id === projectId
         const newFileName = isFirstProject ? FIRST_PROJECT_DOC_TITLE : `Chapter ${chapterNumber}`
         const document = await documentApi.create(newFileName, 'project')
+        track('document_created', { source: 'list' })
         if (isFirstProject) {
           await documentApi.update(document.id, JSON.stringify(FIRST_PROJECT_WELCOME_CONTENT))
         }

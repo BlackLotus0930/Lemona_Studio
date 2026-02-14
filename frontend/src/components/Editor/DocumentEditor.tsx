@@ -7,6 +7,7 @@ import Autocomplete from '../Autocomplete/Autocomplete'
 import TextRephrasePopup from './TextRephrasePopup'
 import SlashCommandMenu from './SlashCommandMenu'
 import { documentApi } from '../../services/api'
+import { track } from '../../services/telemetry'
 import { useTheme } from '../../contexts/ThemeContext'
 import './EditorStyles.css'
 
@@ -561,6 +562,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       if (!editor || !document?.id) return
       if (customEvent.detail?.documentId !== document.id || !customEvent.detail.content) return
       try {
+        track('agent_edit_applied', { edit_type: 'full_content' })
         previewAppliedRef.current = true
         const parsed = JSON.parse(customEvent.detail.content)
         editor.commands.setContent(parsed, { emitUpdate: false })
@@ -620,6 +622,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           return
         }
 
+        track('agent_edit_applied', { edit_type: 'patch' })
         window.dispatchEvent(new CustomEvent('lemona:agent-patch-applied', {
           detail: { proposalId: customEvent.detail?.proposalId }
         }))
@@ -962,6 +965,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   const handleNewDocument = async () => {
     try {
       const newDoc = await documentApi.create('Untitled Document')
+      track('document_created', { source: 'editor' })
       navigate(`/document/${newDoc.data.id}`)
     } catch (error) {
       console.error('Failed to create document:', error)
@@ -1427,7 +1431,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       setActiveSearchQuery('')
       return
     }
-    
+    track('search_performed', { surface: 'editor' })
     // For non-PDF documents, clear previous highlights
     if (!isPDF && editor) {
       clearInlineSearchHighlights()

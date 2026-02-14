@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Document } from '@shared/types'
 import { useTheme } from '../../contexts/ThemeContext'
 import { documentApi } from '../../services/api'
+import { track } from '../../services/telemetry'
 // @ts-ignore
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 // @ts-ignore
@@ -215,6 +216,7 @@ function FileExplorer({
     }
     
     const performSearch = async () => {
+      track('search_performed', { surface: 'file_explorer' })
       const results: Array<{
         documentId: string
         documentTitle: string
@@ -829,6 +831,12 @@ function FileExplorer({
               folderId as 'library' | 'project' | 'worldlab',
               uploadProjectId
             )
+            const isPdf = file.name.toLowerCase().endsWith('.pdf')
+            if (isPdf) {
+              const sizeBytes = file.size
+              const sizeBucket = sizeBytes < 1_000_000 ? '<1mb' : sizeBytes < 10_000_000 ? '1_10mb' : 'gt10mb'
+              track('pdf_imported', { size_bucket: sizeBucket })
+            }
             if (document && onFileUploaded) {
               const isBatchUpload = totalFiles > 1
               onFileUploaded(document, isBatchUpload)

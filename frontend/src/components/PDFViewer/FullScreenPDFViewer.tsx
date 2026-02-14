@@ -8,6 +8,7 @@ import 'pdfjs-dist/web/pdf_viewer.css'
 // This is the recommended way for Vite and ensures proper worker initialization
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { documentApi } from '../../services/desktop-api'
+import { track } from '../../services/telemetry'
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore'
 
 // Polyfill for URL.parse if it doesn't exist (PDF.js may try to use it)
@@ -752,7 +753,7 @@ const FullScreenPDFViewer = forwardRef<PDFViewerSearchHandle, FullScreenPDFViewe
         setActiveSearchQuery('')
         return
       }
-      
+      track('search_performed', { surface: 'pdf' })
       const foundMatches = findMatches(searchQuery)
       setMatches(foundMatches)
       setActiveSearchQuery(searchQuery)

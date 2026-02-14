@@ -66,7 +66,7 @@ function setupCSP() {
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' https://fonts.gstatic.com data:",
         "img-src 'self' data: blob: https:",
-        "connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com" + (isDev ? " http://localhost:5173 ws://localhost:5173" : ""),
+        "connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com https://us.i.posthog.com https://us-assets.i.posthog.com" + (isDev ? " http://localhost:5173 ws://localhost:5173" : ""),
         // Allow blob: and data: for PDF viewing in iframe
         "frame-src 'self' blob: data:",
         // Allow blob: for object-src to support PDF rendering in some browsers
