@@ -24,6 +24,18 @@ interface Chat {
   messages: any[]
 }
 
+type AddToChatReference = {
+  mentionToken: string
+  fileName: string
+  lineRange?: string
+  selectedText: string
+}
+
+type AddToChatPayload = {
+  text: string
+  references?: AddToChatReference[]
+}
+
 // Helper functions to persist active chat ID per project/document
 function getActiveChatIdKey(document: Document | null): string | null {
   if (!document) return null
@@ -104,6 +116,8 @@ function AIPanel({ document, onClose }: AIPanelProps) {
   const [showHistoryDropdown, setShowHistoryDropdown] = useState(false)
   const [hoveredChatId, setHoveredChatId] = useState<string | null>(null)
   const [chatInputText, setChatInputText] = useState<string>('')
+  const [chatInputReferences, setChatInputReferences] = useState<AddToChatReference[]>([])
+  const [chatInputVersion, setChatInputVersion] = useState(0)
   const [draggedChatId, setDraggedChatId] = useState<string | null>(null)
   const [dropTargetChatId, setDropTargetChatId] = useState<string | null>(null)
   const [dropPosition, setDropPosition] = useState<'left' | 'right' | null>(null)
@@ -116,8 +130,17 @@ function AIPanel({ document, onClose }: AIPanelProps) {
   
   // Listen for "Add to Chat" events from editor
   useEffect(() => {
-    const handleAddToChat = (event: CustomEvent<string>) => {
-      setChatInputText(event.detail)
+    const handleAddToChat = (event: CustomEvent<string | AddToChatPayload>) => {
+      const detail = event.detail
+      if (!detail) return
+      if (typeof detail === 'string') {
+        setChatInputText(detail)
+        setChatInputReferences([])
+      } else {
+        setChatInputText(detail.text || '')
+        setChatInputReferences(detail.references || [])
+      }
+      setChatInputVersion(prev => prev + 1)
     }
     
     window.addEventListener('addToChat' as any, handleAddToChat as EventListener)
@@ -1087,7 +1110,12 @@ function AIPanel({ document, onClose }: AIPanelProps) {
           setIsStreaming={setIsStreaming}
           onFirstMessage={(message) => handleChatNameUpdate(activeChatId, message)}
           initialInput={chatInputText}
-          onInputSet={() => setChatInputText('')}
+          initialInputReferences={chatInputReferences}
+          initialInputVersion={chatInputVersion}
+          onInputSet={() => {
+            setChatInputText('')
+            setChatInputReferences([])
+          }}
         />
       </div>
 

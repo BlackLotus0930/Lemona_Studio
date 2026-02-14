@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { AIChatMessage, ChatAttachment, Document, IndexingStatus } from '@shared/types'
 import { aiApi, chatApi, documentApi, projectApi, settingsApi } from '../../services/api'
-import { track } from '../../services/telemetry'
 import { indexingApi } from '../../services/desktop-api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -85,6 +84,13 @@ type ProjectFolderMention = {
   fullPath: string
 }
 
+type AddToChatReference = {
+  mentionToken: string
+  fileName: string
+  lineRange?: string
+  selectedText: string
+}
+
 const AGENT_ACTION_BLOCK_NAME = 'lemona-actions'
 const AGENT_LOCATE_BLOCK_NAME = 'lemona-block-locate'
 const AGENT_PROMPT_PREFIX = `You are in AGENT MODE.
@@ -113,6 +119,9 @@ Rules:
   - Match the writing style, tone, and format of "oldContent"
   - If the original text is prose paragraphs, write prose paragraphs — do NOT convert to bullet lists
   - Do NOT add markdown syntax (-, *, #, **) unless the original text already uses it
+  - For create_file: match style/tone of CURRENT EDITING CONTEXT and WORKSPACE REFERENCES when available
+- If REFERENCED_SNIPPETS is present in the prompt:
+  - Treat each snippet's selectedText as authoritative quoted context for its mentionToken
 - Keep a normal explanation outside the block
 - Do not include any extra keys`
 
@@ -140,22 +149,35 @@ interface ChatInterfaceProps {
   setIsStreaming: (streaming: boolean) => void
   onFirstMessage?: (message: string) => void
   initialInput?: string
+  initialInputReferences?: AddToChatReference[]
+  initialInputVersion?: number
   onInputSet?: () => void
 }
 
-export default function ChatInterface({ documentId, projectId, chatId, documentContent, isStreaming, setIsStreaming, onFirstMessage, initialInput, onInputSet }: ChatInterfaceProps) {
+export default function ChatInterface({ documentId, projectId, chatId, documentContent, isStreaming, setIsStreaming, onFirstMessage, initialInput, initialInputReferences, initialInputVersion, onInputSet }: ChatInterfaceProps) {
   const { theme } = useTheme()
   const [messages, setMessages] = useState<AIChatMessage[]>([])
   const [expandedActions, setExpandedActions] = useState<Set<string>>(new Set()) // Track expanded actions by messageId:action
   const [input, setInput] = useState(initialInput || '')
+  const [pendingAddToChatReferences, setPendingAddToChatReferences] = useState<AddToChatReference[]>([])
+  const lastAppliedInitialInputVersionRef = useRef(0)
   const [isLoading, setIsLoading] = useState(false)
   
   // Handle initial input from external source (e.g., "Add to Chat" from editor)
   useEffect(() => {
-    if (initialInput && initialInput !== input) {
-      setInput(initialInput)
+    const version = initialInputVersion ?? 0
+    if (initialInput && version > lastAppliedInitialInputVersionRef.current) {
+      lastAppliedInitialInputVersionRef.current = version
+      const currentValue = textareaRef.current?.value ?? input
+      const appendedInput = currentValue.trim().length > 0
+        ? `${currentValue} ${initialInput}`
+        : initialInput
+      setInput(appendedInput)
+      if (initialInputReferences && initialInputReferences.length > 0) {
+        setPendingAddToChatReferences(prev => [...prev, ...initialInputReferences])
+      }
       if (textareaRef.current) {
-        textareaRef.current.value = initialInput
+        textareaRef.current.value = appendedInput
         textareaRef.current.style.height = 'auto'
         textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
         textareaRef.current.focus()
@@ -164,7 +186,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         onInputSet()
       }
     }
-  }, [initialInput, input, onInputSet])
+  }, [initialInput, initialInputReferences, initialInputVersion, input, onInputSet])
   const [isInputFocused, setIsInputFocused] = useState(false)
   const [useWebSearch, setUseWebSearch] = useState(false)
   // Load saved model from localStorage, or use default
@@ -303,8 +325,65 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   }
 
   const extractMentionFileNames = (text: string): string[] => {
-    const matches = text.match(/@([^\s,;:!?()[\]{}]+)/g) || []
-    return matches.map(token => token.slice(1))
+    const names: string[] = []
+
+    // Supports Add-to-Chat references like: @File Name.md (12-20)
+    const rangedRegex = /@([^\n@]+?) \(\d+-\d+\)(?=\s|$)/g
+    let rangedMatch
+    while ((rangedMatch = rangedRegex.exec(text)) !== null) {
+      const value = rangedMatch[1]?.trim()
+      if (value) names.push(value)
+    }
+
+    // Supports quoted mentions like: @"File Name.md"
+    const quotedRegex = /@["']([^"']+)["']/g
+    let quotedMatch
+    while ((quotedMatch = quotedRegex.exec(text)) !== null) {
+      const value = quotedMatch[1]?.trim()
+      if (value) names.push(value)
+    }
+
+    // Supports simple mentions like: @file.md
+    const simpleMatches = text.match(/@([^\s,;:!?()[\]{}]+)/g) || []
+    names.push(...simpleMatches.map(token => token.slice(1)))
+
+    return Array.from(new Set(names))
+  }
+
+  const buildInlineRangeReferencesFromInput = (userInput: string): AddToChatReference[] => {
+    if (!userInput || !documentContent) return []
+    const currentTitle = (allDocuments.find(doc => doc.id === documentId)?.title || '').trim()
+    if (!currentTitle) return []
+
+    const plainText = extractTextFromTipTap(documentContent)
+    if (!plainText) return []
+    const lines = plainText.replace(/\r\n/g, '\n').split('\n')
+
+    const references: AddToChatReference[] = []
+    const inlineRangeRegex = /@([^\n@]+?) \((\d+)-(\d+)\)(?=\s|$)/g
+    let match
+    while ((match = inlineRangeRegex.exec(userInput)) !== null) {
+      const fileName = String(match[1] || '').trim()
+      const start = Number(match[2])
+      const end = Number(match[3])
+      if (!fileName || !Number.isFinite(start) || !Number.isFinite(end)) continue
+      if (start <= 0 || end < start) continue
+
+      const normalizedRef = normalizeFileName(fileName)
+      const normalizedCurrent = normalizeFileName(currentTitle)
+      if (normalizedRef.full !== normalizedCurrent.full && normalizedRef.base !== normalizedCurrent.base) continue
+
+      const selectedText = lines.slice(start - 1, end).join('\n').trim()
+      if (!selectedText) continue
+
+      references.push({
+        mentionToken: `@${fileName} (${start}-${end})`,
+        fileName,
+        lineRange: `${start}-${end}`,
+        selectedText,
+      })
+    }
+    return references
   }
 
   const resolveAgentFileTargets = (
@@ -692,7 +771,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       } else if (proposal.type === 'create_file') {
         logAgent('apply_create_file', { proposalId, fileName: proposal.fileName })
         const created = await documentApi.create(proposal.fileName, 'project')
-        track('document_created', { source: 'agent' })
         await documentApi.update(created.id, plainTextToTipTap(proposal.content))
         if (projectId) {
           await projectApi.addDocument(projectId, created.id)
@@ -1556,9 +1634,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   useEffect(() => {
     if (!documentId || !chatId) {
       setMessages([])
+      setPendingAddToChatReferences([])
       hasNotifiedFirstMessage.current = false
       return
     }
+    setPendingAddToChatReferences([])
 
     // Capture previous values at the start to avoid race conditions with other effects
     const prevChatId = previousChatIdRef.current
@@ -1967,7 +2047,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             padding: '2px 6px',
             borderRadius: '3px', // Less rounded corners
             fontWeight: 'normal', // Same weight as regular text
-            fontSize: '13px'
+            fontSize: '13px',
+            maxWidth: '100%',
+            overflowWrap: 'anywhere',
+            wordBreak: 'break-word'
           }}
         >
           {mentionText}
@@ -2504,6 +2587,21 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
 
     // Store the input value before clearing it (for onFirstMessage callback)
     const messageContent = input.trim()
+    const inlineRangeReferences = buildInlineRangeReferencesFromInput(input)
+    const referencedSnippetsForSend = [...pendingAddToChatReferences, ...inlineRangeReferences]
+      .filter(ref => ref.mentionToken && ref.selectedText)
+      .filter((ref, index, arr) =>
+        arr.findIndex(candidate =>
+          candidate.mentionToken === ref.mentionToken &&
+          candidate.selectedText === ref.selectedText
+        ) === index
+      )
+    const referencedSnippetsInstruction = referencedSnippetsForSend.length > 0
+      ? `\n\nREFERENCED_SNIPPETS (hidden context from Add to Chat):\n${referencedSnippetsForSend.map((ref, index) => {
+          const rangePart = ref.lineRange ? ` (${ref.lineRange})` : ''
+          return `Snippet ${index + 1}:\n- mentionToken: ${ref.mentionToken}\n- fileName: ${ref.fileName}${rangePart}\n- selectedText:\n${ref.selectedText}`
+        }).join('\n\n')}\n\nWhen the user references these mentionToken values, use the matching selectedText as authoritative context.`
+      : ''
 
     const userMessage: AIChatMessage = {
       id: generateMessageId(),
@@ -2513,8 +2611,16 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       attachments: attachments.length > 0 ? [...attachments] : undefined,
     }
 
-    setMessages(prev => [...prev, userMessage])
+    const assistantMessage: AIChatMessage = {
+      id: generateMessageId(),
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+    }
+    currentAssistantMessageIdRef.current = assistantMessage.id
+    setMessages(prev => [...prev, userMessage, assistantMessage])
     setInput('')
+    setPendingAddToChatReferences([])
     setAttachments([]) // Clear attachments after sending
     // Reset textarea height
     if (textareaRef.current) {
@@ -2531,8 +2637,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
 
     // Save user message immediately
     await saveMessage(userMessage, false)
-
-    track('ai_chat_sent', { mode: chatMode === 'agent' ? 'agent' : 'chat' })
 
     try {
       // Reset cancellation flag
@@ -2654,8 +2758,8 @@ Step 2 requirement:
         }
       }
       const contentForModel = chatMode === 'agent'
-        ? `${AGENT_PROMPT_PREFIX}\n\n${buildAgentAvailableFilesContext(projectScopedDocs)}${targetBlockInstruction}\n\nUser request:\n${userMessage.content}`
-        : userMessage.content
+        ? `${AGENT_PROMPT_PREFIX}\n\n${buildAgentAvailableFilesContext(projectScopedDocs)}${targetBlockInstruction}${referencedSnippetsInstruction}\n\nUser request:\n${userMessage.content}`
+        : `${userMessage.content}${referencedSnippetsInstruction}`
       const response = await aiApi.streamChat(contentForModel, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined, selectedStyle, projectId, googleApiKey, openaiApiKey)
       const reader = response.body?.getReader()
       
@@ -2664,17 +2768,7 @@ Step 2 requirement:
       
       const decoder = new TextDecoder()
 
-      let assistantMessage: AIChatMessage = {
-        id: generateMessageId(),
-        role: 'assistant',
-        content: '',
-        timestamp: new Date().toISOString(),
-      }
-
-      currentAssistantMessageIdRef.current = assistantMessage.id
-      setMessages(prev => [...prev, assistantMessage])
-
-      // Scroll to bottom when assistant message starts
+      // Scroll to bottom when stream starts
       setTimeout(() => {
         scrollToBottom()
       }, 100)
@@ -2950,7 +3044,13 @@ Step 2 requirement:
         content: friendlyError, // formatErrorMessage already includes appropriate emoji
         timestamp: new Date().toISOString(),
       }
-      setMessages(prev => [...prev, errorMessage])
+      setMessages(prev => {
+        const last = prev[prev.length - 1]
+        if (last?.role === 'assistant' && !last.content?.trim()) {
+          return [...prev.slice(0, -1), { ...errorMessage, id: last.id }]
+        }
+        return [...prev, errorMessage]
+      })
       
       // Save error message
       if (documentId && chatId) {
@@ -3087,7 +3187,7 @@ Step 2 requirement:
               padding: message.role === 'assistant' ? '8px 16px' : '6px 16px',
               backgroundColor: brighterBg,
               marginTop: prevIsAssistant && message.role === 'user'
-                ? (prevAssistantHasDiffCard ? '14px' : '10px')
+                ? (prevAssistantHasDiffCard ? '8px' : '0px')
                 : undefined,
             }}
           >
@@ -3193,6 +3293,19 @@ Step 2 requirement:
                   textRendering: 'optimizeLegibility'
                 }}
               >
+                {/* Thinking state: show before metadata/content arrives (only when no actions are present)
+                  Only visible in agent mode
+                */}
+                {chatMode === 'agent' &&
+                  index === messages.length - 1 &&
+                  message.role === 'assistant' &&
+                  isStreaming &&
+                  !message.content.trim() &&
+                  !(message.reasoningMetadata?.actions && Object.keys(message.reasoningMetadata.actions).length > 0) && (
+                    <div style={{ fontSize: '12px', color: theme === 'dark' ? '#888888' : '#999999', marginBottom: '6px', opacity: 0.8 }}>
+                      Thinking…
+                    </div>
+                )}
                 {/* Show reasoning metadata if available */}
                 {message.reasoningMetadata && message.reasoningMetadata.actions && Object.keys(message.reasoningMetadata.actions).length > 0 && (
                   <div
@@ -4195,6 +4308,10 @@ Step 2 requirement:
                   
                   // Handle Backspace to delete entire mention at once
                   if (e.key === 'Backspace' && textareaRef.current) {
+                    // If user selected a range, let native deletion remove the whole selection.
+                    if (textareaRef.current.selectionStart !== textareaRef.current.selectionEnd) {
+                      return
+                    }
                     const cursorPosition = textareaRef.current.selectionStart
                     const text = textareaRef.current.value
                     
@@ -4248,6 +4365,12 @@ Step 2 requirement:
                         }
                       }
                       
+                      // Include trailing line range like " (12-24)" in mention boundaries.
+                      const trailingLineRange = text.slice(mentionEnd).match(/^ \(\d+-\d+\)/)
+                      if (trailingLineRange) {
+                        mentionEnd += trailingLineRange[0].length
+                      }
+
                       // Check if cursor is at the start, end, or within the mention
                       // Also check if cursor is right after the mention (to delete it)
                       if (cursorPosition >= mentionStart && cursorPosition <= mentionEnd + 1) {
@@ -4301,7 +4424,9 @@ Step 2 requirement:
                   lineHeight: '1.6',
                   minHeight: '24px',
                   maxHeight: '200px',
-                  caretColor: textColor // Keep caret visible
+                  caretColor: textColor, // Keep caret visible
+                  overflowWrap: 'anywhere',
+                  wordBreak: 'break-word'
                 }}
                 onInput={(e) => {
                   const target = e.target as HTMLTextAreaElement
@@ -4383,12 +4508,19 @@ Step 2 requirement:
               const isFile = !!matchedDoc || (!isLibrary && allMentionableDocs.some(doc => doc.title === mentionName || doc.id === mentionName))
               const isFolder = !!matchedFolder
               
-              // Only highlight if the mention is complete (followed by space or at end) AND matches a valid document
+              // Include trailing line range like " (12-24)" in highlighted mention.
+              const trailingLineRange = input.slice(highlightEnd).match(/^ \(\d+-\d+\)/)
+              if (trailingLineRange) {
+                highlightEnd += trailingLineRange[0].length
+                highlightText += trailingLineRange[0]
+              }
+
+              // Only highlight if the mention is complete (followed by whitespace or at end) AND matches a valid document
               // A mention is complete/confirmed when:
-              // 1. It's followed by a space or is at the end of the input
+              // 1. It's followed by whitespace (space/newline/tab) or is at the end of the input
               // 2. AND it matches a valid document (Library or a matched file)
               const textAfterHighlight = input.slice(highlightEnd)
-              const isFollowedBySpaceOrEnd = textAfterHighlight.length === 0 || textAfterHighlight.startsWith(' ')
+              const isFollowedBySpaceOrEnd = textAfterHighlight.length === 0 || /^\s/.test(textAfterHighlight)
               const matchesValidDocument = isLibrary || !!matchedDoc || !!matchedFolder // Must have an exact match (Library, folder, or matchedDoc)
               const isComplete = isFollowedBySpaceOrEnd && matchesValidDocument
               
@@ -4422,6 +4554,8 @@ Step 2 requirement:
                   fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
                   lineHeight: '1.6',
                   whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere',
+                  wordBreak: 'break-word',
                   wordWrap: 'break-word',
                   overflowY: 'hidden',
                   overflowX: 'hidden',
@@ -4453,6 +4587,9 @@ Step 2 requirement:
                           fontWeight: 'normal', // Same weight as regular text
                           padding: '2px 0', // Only vertical padding to avoid covering adjacent characters
                           display: 'inline',
+                          maxWidth: '100%',
+                          overflowWrap: 'anywhere',
+                          wordBreak: 'break-word',
                           boxDecorationBreak: 'clone' as any
                         }}
                       >

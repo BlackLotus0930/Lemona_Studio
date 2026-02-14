@@ -32,11 +32,19 @@ export function parseMentions(message: string): ParsedMentions {
     return result
   }
 
+  // Normalize Add-to-Chat references like:
+  // @File Name.md (12-20)  ->  @"File Name.md"
+  // This keeps line-range text user-visible while making mention parsing robust.
+  const normalizedMessage = message.replace(
+    /(^|\s)@([^\n@]+?) \(\d+-\d+\)(?=\s|$)/g,
+    (_full, prefix, fileName) => `${prefix}@"${String(fileName).trim()}"`
+  )
+
   // Pattern to match @mentions
   // Matches: @Library, @filename, @file-id, @"File Name.md", @'File Name.md'
   // Keep a leading whitespace group so we can preserve it in replacements.
   const mentionPattern = /(^|\s)@\s*("([^"]+)"|'([^']+)'|([^\s@]+))/g
-  const matches = Array.from(message.matchAll(mentionPattern))
+  const matches = Array.from(normalizedMessage.matchAll(mentionPattern))
 
   if (matches.length === 0) {
     return result
@@ -69,7 +77,7 @@ export function parseMentions(message: string): ParsedMentions {
 
   // Remove @mentions from message for embedding generation
   // Keep the text content but remove the @mention syntax
-  result.cleanedMessage = message.replace(mentionPattern, (_full, prefix) => prefix || '').trim()
+  result.cleanedMessage = normalizedMessage.replace(mentionPattern, (_full, prefix) => prefix || '').trim()
 
   return result
 }

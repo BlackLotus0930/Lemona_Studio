@@ -99,6 +99,7 @@ export default function KeyboardShortcutsModal({
       category: 'Text Selection',
       shortcuts: [
         { action: 'Improve', keys: ['Ctrl', 'K'] },
+        { action: 'Add selection to chat', keys: ['Ctrl', 'L'] },
         { action: 'Accept suggestion', keys: ['Ctrl', 'Enter'] },
       ]
     },

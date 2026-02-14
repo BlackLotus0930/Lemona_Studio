@@ -7,7 +7,6 @@ import Autocomplete from '../Autocomplete/Autocomplete'
 import TextRephrasePopup from './TextRephrasePopup'
 import SlashCommandMenu from './SlashCommandMenu'
 import { documentApi } from '../../services/api'
-import { track } from '../../services/telemetry'
 import { useTheme } from '../../contexts/ThemeContext'
 import './EditorStyles.css'
 
@@ -34,6 +33,18 @@ interface AgentDiffPreview {
   newText: string
   isPatch?: boolean
   patches?: AgentDiffPatch[]
+}
+
+type AddToChatReference = {
+  mentionToken: string
+  fileName: string
+  lineRange?: string
+  selectedText: string
+}
+
+type AddToChatPayload = {
+  text: string
+  references: AddToChatReference[]
 }
 
 
@@ -117,6 +128,39 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       contextBefore: beforeBlocks.map((b) => b.text).join('\n\n'),
       contextAfter: afterBlocks.map((b) => b.text).join('\n\n'),
       paragraphCount: selectedIndexes.length
+    }
+  }
+
+  const buildAddToChatPayload = (selection: {
+    text: string
+    range: { from: number; to: number } | null
+  }): AddToChatPayload | null => {
+    if (!editor || editor.isDestroyed) return null
+    const selectedText = selection.text?.trim()
+    if (!selectedText) return null
+
+    const title = (document?.title || 'Current document').trim()
+    let lineLabel = ''
+
+    if (selection.range) {
+      const { from, to } = selection.range
+      const beforeText = editor.state.doc.textBetween(1, Math.max(1, from), '\n', '\n')
+      const selectionText = editor.state.doc.textBetween(from, to, '\n', '\n')
+      const startLine = beforeText.length === 0 ? 1 : beforeText.split('\n').length
+      const lineSpan = Math.max(1, selectionText.split('\n').length)
+      const endLine = startLine + lineSpan - 1
+      lineLabel = ` (${startLine}-${endLine})`
+    }
+
+    const mentionToken = `@${title}${lineLabel}`
+    return {
+      text: `${mentionToken} `,
+      references: [{
+        mentionToken,
+        fileName: title,
+        lineRange: lineLabel ? lineLabel.trim().replace(/[()]/g, '') : undefined,
+        selectedText,
+      }],
     }
   }
   
@@ -562,7 +606,6 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       if (!editor || !document?.id) return
       if (customEvent.detail?.documentId !== document.id || !customEvent.detail.content) return
       try {
-        track('agent_edit_applied', { edit_type: 'full_content' })
         previewAppliedRef.current = true
         const parsed = JSON.parse(customEvent.detail.content)
         editor.commands.setContent(parsed, { emitUpdate: false })
@@ -622,7 +665,6 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
           return
         }
 
-        track('agent_edit_applied', { edit_type: 'patch' })
         window.dispatchEvent(new CustomEvent('lemona:agent-patch-applied', {
           detail: { proposalId: customEvent.detail?.proposalId }
         }))
@@ -965,7 +1007,6 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
   const handleNewDocument = async () => {
     try {
       const newDoc = await documentApi.create('Untitled Document')
-      track('document_created', { source: 'editor' })
       navigate(`/document/${newDoc.data.id}`)
     } catch (error) {
       console.error('Failed to create document:', error)
@@ -1431,7 +1472,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       setActiveSearchQuery('')
       return
     }
-    track('search_performed', { surface: 'editor' })
+    
     // For non-PDF documents, clear previous highlights
     if (!isPDF && editor) {
       clearInlineSearchHighlights()
@@ -3332,6 +3373,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
             setPopupPosition(null)
             setShowRephrasePopup(false)
             isRephrasePopupInputFocusedRef.current = false
+          }}
+          onAddToChat={(selection) => {
+            const payload = buildAddToChatPayload(selection)
+            if (!payload) return
+            window.dispatchEvent(new CustomEvent('addToChat', { detail: payload }))
           }}
           onReadSelection={() => {
             // Improve Button 点击时读取当前 selection（确保拿到最新拖选范围）

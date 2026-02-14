@@ -8,6 +8,13 @@ interface TextRephrasePopupProps {
   onReplace: (newText: string) => void
   onClose: () => void
   onInputFocus?: (isFocused: boolean) => void
+  onAddToChat?: (selection: {
+    text: string
+    range: { from: number; to: number } | null
+    contextBefore?: string
+    contextAfter?: string
+    paragraphCount?: number
+  }) => void
   onReadSelection?: () => { 
     text: string
     range: { from: number; to: number } | null
@@ -19,7 +26,7 @@ interface TextRephrasePopupProps {
 
 type ActionType = 'improve' | 'rephrase' | 'lengthen' | 'shorten' | 'custom'
 
-export default function TextRephrasePopup({ selectedText, position, onReplace, onClose, onInputFocus, onReadSelection }: TextRephrasePopupProps) {
+export default function TextRephrasePopup({ selectedText, position, onReplace, onClose, onInputFocus, onAddToChat, onReadSelection }: TextRephrasePopupProps) {
   const { theme } = useTheme()
   const [isExpanded, setIsExpanded] = useState(false)
   const [activeAction, setActiveAction] = useState<ActionType>('improve')
@@ -296,6 +303,24 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
     processText('improve')
   }, [processText])
 
+  const handleAddToChat = useCallback(() => {
+    if (!onAddToChat) return
+    const latest = onReadSelection?.()
+    const fallbackText = cachedSelectionRef.current?.text || selectedText || ''
+    const selection = latest && latest.text.trim().length > 0
+      ? latest
+      : {
+          text: fallbackText,
+          range: null,
+          contextBefore: cachedSelectionRef.current?.contextBefore,
+          contextAfter: cachedSelectionRef.current?.contextAfter,
+          paragraphCount: cachedSelectionRef.current?.paragraphCount,
+        }
+    if (!selection.text || selection.text.trim().length === 0) return
+    onAddToChat(selection)
+    onClose()
+  }, [onAddToChat, onReadSelection, selectedText, onClose])
+
   // Listen for popup open event to auto-expand when opened via Ctrl+K
   useEffect(() => {
     const handlePopupOpen = () => {
@@ -372,6 +397,9 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
             setActiveAction('improve')
             processText('improve')
           }
+        } else if (e.key === 'l' || e.key === 'L') {
+          e.preventDefault()
+          handleAddToChat()
         } else if ((e.key === 'Enter' || e.key === 'Return') && improvedText) {
           e.preventDefault()
           handleReplace()
@@ -384,7 +412,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isExpanded, improvedText, isLoading, handleReplace, onClose, handleExpandAndImprove, processText])
+  }, [isExpanded, improvedText, isLoading, handleReplace, onClose, handleExpandAndImprove, processText, handleAddToChat])
 
   // Handle Enter key in custom input
   const handleCustomInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -433,7 +461,7 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
           zIndex: 10000,
           fontFamily: 'system-ui, -apple-system, sans-serif',
-          padding: '3px 6px',
+          padding: '0px 8px',
           display: 'flex',
           gap: '12px',
           alignItems: 'center',
@@ -464,6 +492,31 @@ export default function TextRephrasePopup({ selectedText, position, onReplace, o
         >
           <span>Quick Edit</span>
           <span style={{ fontSize: '10px', opacity: 0.6 }}>Ctrl+K</span>
+        </button>
+        <button
+          onClick={handleAddToChat}
+          style={{
+            padding: '4px 0',
+            backgroundColor: 'transparent',
+            color: textColor,
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '12px',
+            fontWeight: '400',
+            transition: 'opacity 0.15s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.opacity = '0.7'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.opacity = '1'
+          }}
+        >
+          <span>Add to Chat</span>
+          <span style={{ fontSize: '10px', opacity: 0.6 }}>Ctrl+L</span>
         </button>
       </div>
     )
