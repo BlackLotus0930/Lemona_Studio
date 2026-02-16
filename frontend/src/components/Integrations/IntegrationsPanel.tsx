@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { integrationApi, IntegrationSource, OAuthConfigStatus, settingsApi } from '../../services/desktop-api'
 import { useTheme } from '../../contexts/ThemeContext'
+import { AVAILABLE_INTEGRATIONS, getIntegrationLabel, getIntegrationLogoSrc, IntegrationLogoImg, type AvailableIntegrationKind } from './availableIntegrations'
 import RssFeedIcon from '@mui/icons-material/RssFeed'
 import CodeIcon from '@mui/icons-material/Code'
 import SettingsIcon from '@mui/icons-material/Settings'
@@ -13,7 +14,7 @@ interface IntegrationsPanelProps {
 
 type TabItem =
   | { id: string; type: 'source'; source: IntegrationSource }
-  | { id: string; type: 'available'; kind: 'rss' | 'github' }
+  | { id: string; type: 'available'; kind: AvailableIntegrationKind }
 
 const SIDEBAR_WIDTH = 220
 
@@ -284,6 +285,7 @@ export default function IntegrationsPanel({ projectId }: IntegrationsPanelProps)
     <button
       onClick={onClick}
       disabled={disabled}
+      className={!primary ? 'integration-btn-secondary' : undefined}
       style={{
         padding: '6px 12px',
         fontSize: 12,
@@ -364,18 +366,17 @@ export default function IntegrationsPanel({ projectId }: IntegrationsPanelProps)
                 {listItem(
                   label,
                   getStatusInfo(source).label,
-                  source.sourceType === 'github' ? <CodeIcon style={{ fontSize: 18, color: subTextColor }} /> : <RssFeedIcon style={{ fontSize: 18, color: subTextColor }} />
+                  getIntegrationLogoSrc(source.sourceType) ? (
+                    <IntegrationLogoImg kind={source.sourceType} size={18} />
+                  ) : null
                 )}
               </div>
             )
           })}
           <div style={{ padding: '8px 12px', fontSize: 11, fontWeight: 600, color: subTextColor, textTransform: 'uppercase', marginTop: 8 }}>
-            AVAILABLE (2)
+            AVAILABLE ({AVAILABLE_INTEGRATIONS.length})
           </div>
-          {[
-            { kind: 'rss' as const, label: 'RSS Feed', sub: 'Blogs, news, podcasts', icon: <RssFeedIcon style={{ fontSize: 18, color: subTextColor }} /> },
-            { kind: 'github' as const, label: 'GitHub', sub: 'Repo files, Issues, PRs', icon: <CodeIcon style={{ fontSize: 18, color: subTextColor }} /> },
-          ].map(({ kind, label, sub, icon }) => {
+          {AVAILABLE_INTEGRATIONS.map(({ kind, label, sub, icon }) => {
             const tab = tabs[activeTabIndex]
             const sel = tab?.type === 'available' && tab.kind === kind
             return (
@@ -416,8 +417,13 @@ export default function IntegrationsPanel({ projectId }: IntegrationsPanelProps)
                   const cfg = t.type === 'source' ? (t.source.config as { url?: string; login?: string }) : null
                   const title = t.type === 'source'
                     ? (t.source.displayName || (t.source.sourceType === 'github' ? `GitHub${cfg?.login ? ` @${cfg.login}` : ''}` : cfg?.url) || t.source.sourceType)
-                    : t.kind === 'rss' ? 'RSS Feed' : 'GitHub'
-                  const icon = t.type === 'source' ? (t.source.sourceType === 'github' ? <CodeIcon style={{ fontSize: 16, color: subTextColor }} /> : <RssFeedIcon style={{ fontSize: 16, color: subTextColor }} />) : t.kind === 'rss' ? <RssFeedIcon style={{ fontSize: 16, color: subTextColor }} /> : <CodeIcon style={{ fontSize: 16, color: subTextColor }} />
+                    : getIntegrationLabel(t.kind)
+                  const logoSrc = t.type === 'source' ? getIntegrationLogoSrc(t.source.sourceType) : getIntegrationLogoSrc(t.kind)
+                  const icon = logoSrc ? (
+                    <IntegrationLogoImg kind={t.type === 'source' ? t.source.sourceType : t.kind} size={16} />
+                  ) : (
+                    t.type === 'source' ? (t.source.sourceType === 'github' ? <CodeIcon style={{ fontSize: 16, color: subTextColor }} /> : <RssFeedIcon style={{ fontSize: 16, color: subTextColor }} />) : <CodeIcon style={{ fontSize: 16, color: subTextColor }} />
+                  )
                   return (
                     <div
                       key={t.id}
@@ -467,6 +473,24 @@ export default function IntegrationsPanel({ projectId }: IntegrationsPanelProps)
                     />
                   )
                 }
+                if (tab.kind !== 'rss' && tab.kind !== 'github') {
+                  const logoSrc = getIntegrationLogoSrc(tab.kind)
+                  return (
+                    <div style={{ padding: 24 }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 20 }}>
+                        {logoSrc ? (
+                          <IntegrationLogoImg kind={tab.kind} size={48} />
+                        ) : null}
+                        <div>
+                          <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600 }}>{getIntegrationLabel(tab.kind)}</h2>
+                          <p style={{ margin: 0, fontSize: 13, color: subTextColor, lineHeight: 1.5 }}>
+                            Coming soon. This integration will connect your {getIntegrationLabel(tab.kind)} data to Lemona for AI context.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }
                 return tab.kind === 'rss' ? (
                   <AvailableDetail
                     title="RSS Feed"
@@ -492,7 +516,7 @@ export default function IntegrationsPanel({ projectId }: IntegrationsPanelProps)
                 ) : (
                   <AvailableDetail
                     title="GitHub"
-                    desc="Connect your repos to index issues, pull requests, and repo files (README, source code). Use @github in chat to filter by GitHub content."
+                    desc="Connect your repos to index issues, pull requests, and repo files (README, source code)."
                     setupSteps={[
                       'Go to GitHub → Settings → Developer settings → OAuth Apps → New OAuth App.',
                       'Application name: any name (e.g. Lemona). Homepage URL: use https://github.com or https://localhost — any valid URL works.',
@@ -578,7 +602,11 @@ function SourceDetail({
 
   const Icon = source.sourceType === 'github' ? CodeIcon : RssFeedIcon
   const manageSteps = source.sourceType === 'github'
-    ? ['Select repos and click Save and Index to sync issues, PRs, and repo files.', 'Use @github in chat to filter AI context by GitHub content.']
+    ? [
+        'Select repos and click Save and Index to sync issues, PRs, and repo files.',
+        'Click Sync to fetch new or removed content and update the index.',
+        'Use @github in chat to filter AI context by GitHub content.',
+      ]
     : ['Click Sync to refresh feed content.', 'Content is indexed for AI context.']
   return (
     <div style={{ padding: 16 }}>
@@ -599,7 +627,7 @@ function SourceDetail({
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           {needsReconnect && onReconnect && btn(isConnectingGithub ? 'Reconnecting...' : 'Reconnect', onReconnect, true, isConnectingGithub)}
-          {source.sourceType === 'github' && btn(isSyncing ? 'Refreshing...' : 'Refresh indexing', () => onSync(source.id), false, isSyncing)}
+          {source.sourceType === 'github' && btn(isSyncing ? 'Syncing...' : 'Sync', () => onSync(source.id), false, isSyncing)}
           {source.sourceType !== 'github' && btn(isSyncing ? 'Syncing...' : 'Sync', () => onSync(source.id), false, isSyncing)}
           {btn('Disconnect', () => onRemove(source.id))}
         </div>

@@ -889,3 +889,12 @@ input[type="number"] {
   scrollbar-color: #3e3e42 transparent;
 }
 
+/* Integration panel: Sync / Disconnect button hover */
+.integration-btn-secondary:hover:not(:disabled) {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.dark-theme .integration-btn-secondary:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+

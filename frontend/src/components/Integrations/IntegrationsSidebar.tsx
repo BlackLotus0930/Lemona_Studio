@@ -1,13 +1,13 @@
+import React from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useIntegrations } from './IntegrationsContext'
 import type { IntegrationTabItem } from './IntegrationsContext'
-import RssFeedIcon from '@mui/icons-material/RssFeed'
-import CodeIcon from '@mui/icons-material/Code'
+import { AVAILABLE_INTEGRATIONS, getIntegrationLabel, getIntegrationLogoSrc, IntegrationLogoImg, type AvailableIntegrationKind } from './availableIntegrations'
 
 const SIDEBAR_WIDTH = 220
 
 function toTabItem(
-  item: { type: 'source'; source: { id: string; sourceType: string; displayName?: string; config: Record<string, unknown> } } | { type: 'available'; kind: 'rss' | 'github' }
+  item: { type: 'source'; source: { id: string; sourceType: string; displayName?: string; config: Record<string, unknown> } } | { type: 'available'; kind: AvailableIntegrationKind }
 ): IntegrationTabItem {
   if (item.type === 'source') {
     const cfg = item.source.config as { url?: string; login?: string }
@@ -16,8 +16,7 @@ function toTabItem(
       item.source.sourceType
     return { id: `int-source-${item.source.id}`, title, type: 'source', source: item.source as any }
   }
-  const title = item.kind === 'rss' ? 'RSS Feed' : 'GitHub'
-  return { id: `int-available-${item.kind}`, title, type: 'available', kind: item.kind }
+  return { id: `int-available-${item.kind}`, title: getIntegrationLabel(item.kind), type: 'available', kind: item.kind }
 }
 
 interface IntegrationsSidebarProps {
@@ -87,18 +86,17 @@ export default function IntegrationsSidebar({ projectId, onOpenInEditor }: Integ
               {listItem(
                 label,
                 getStatusInfo(source).label,
-                source.sourceType === 'github' ? <CodeIcon style={{ fontSize: 18, color: subTextColor }} /> : <RssFeedIcon style={{ fontSize: 18, color: subTextColor }} />
+                getIntegrationLogoSrc(source.sourceType) ? (
+                  <IntegrationLogoImg kind={source.sourceType} size={18} />
+                ) : null
               )}
             </div>
           )
         })}
         <div style={{ padding: '8px 12px', fontSize: 11, fontWeight: 600, color: subTextColor, textTransform: 'uppercase', marginTop: 8 }}>
-          AVAILABLE (2)
+          AVAILABLE ({AVAILABLE_INTEGRATIONS.length})
         </div>
-        {[
-          { kind: 'rss' as const, label: 'RSS Feed', sub: 'Blogs, news, podcasts', icon: <RssFeedIcon style={{ fontSize: 18, color: subTextColor }} /> },
-          { kind: 'github' as const, label: 'GitHub', sub: 'Issues, PRs, repo files', icon: <CodeIcon style={{ fontSize: 18, color: subTextColor }} /> },
-        ].map(({ kind, label, sub, icon }) => (
+        {AVAILABLE_INTEGRATIONS.map(({ kind, label, sub, icon }) => (
           <div
             key={kind}
             onClick={() => onOpenInEditor(toTabItem({ type: 'available', kind }))}

@@ -1,8 +1,7 @@
 import { useTheme } from '../../contexts/ThemeContext'
 import { useIntegrations } from './IntegrationsContext'
 import type { IntegrationTabItem } from './IntegrationsContext'
-import RssFeedIcon from '@mui/icons-material/RssFeed'
-import CodeIcon from '@mui/icons-material/Code'
+import { getIntegrationLabel, getIntegrationLogoSrc, IntegrationLogoImg } from './availableIntegrations'
 
 export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem }) {
   const { theme } = useTheme()
@@ -48,6 +47,7 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
     <button
       onClick={onClick}
       disabled={disabled}
+      className={!primary ? 'integration-btn-secondary' : undefined}
       style={{
         padding: '6px 12px',
         fontSize: 12,
@@ -70,9 +70,13 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
     const status = getStatusInfo(source)
     const isSyncing = syncingSourceId === source.id
     const needsReconnect = source.sourceType === 'github' && (source.connectionStatus === 'expired' || source.connectionStatus === 'error')
-    const Icon = source.sourceType === 'github' ? CodeIcon : RssFeedIcon
+    const logoSrc = getIntegrationLogoSrc(source.sourceType)
     const manageSteps = source.sourceType === 'github'
-      ? ['Select repos and click Save and Index to sync issues, PRs, and repo files.', 'Use @github in chat to filter AI context by GitHub content.']
+      ? [
+          'Select repos and click Save and Index to sync issues, PRs, and repo files.',
+          'Click Sync to fetch new or removed content and update the index.',
+          'Use @github in chat to filter AI context by GitHub content.',
+        ]
       : ['Click Sync to refresh feed content.', 'Content is indexed for AI context.']
 
     return (
@@ -90,7 +94,11 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
         )}
       <div style={{ padding: 16, flex: 1, overflow: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 20 }}>
-          <Icon style={{ fontSize: 48, color: subTextColor, flexShrink: 0 }} />
+          {logoSrc ? (
+            <IntegrationLogoImg kind={source.sourceType} size={48} />
+          ) : (
+            <div style={{ width: 48, height: 48, flexShrink: 0, backgroundColor: subTextColor, opacity: 0.3, borderRadius: 8 }} />
+          )}
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
               <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{label}</h2>
@@ -106,7 +114,7 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             {needsReconnect && btn(isConnectingGithub ? 'Reconnecting...' : 'Reconnect', handleConnectGithub, true, isConnectingGithub)}
-            {source.sourceType === 'github' && btn(isSyncing ? 'Refreshing...' : 'Refresh indexing', () => handleSyncSource(source.id), false, isSyncing)}
+            {source.sourceType === 'github' && btn(isSyncing ? 'Syncing...' : 'Sync', () => handleSyncSource(source.id), false, isSyncing)}
             {source.sourceType !== 'github' && btn(isSyncing ? 'Syncing...' : 'Sync', () => handleSyncSource(source.id), false, isSyncing)}
             {btn('Disconnect', () => handleRemove(source.id))}
           </div>
@@ -144,6 +152,27 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
   }
 
   const isRss = tab.kind === 'rss'
+  const isGithub = tab.kind === 'github'
+  if (!isRss && !isGithub) {
+    const logoSrc = getIntegrationLogoSrc(tab.kind)
+    return (
+      <div style={{ padding: 24, flex: 1, overflow: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 20 }}>
+          {logoSrc ? (
+            <IntegrationLogoImg kind={tab.kind} size={48} />
+          ) : (
+            <div style={{ width: 48, height: 48, flexShrink: 0, backgroundColor: subTextColor, opacity: 0.3, borderRadius: 8 }} />
+          )}
+          <div>
+            <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600 }}>{getIntegrationLabel(tab.kind)}</h2>
+            <p style={{ margin: 0, fontSize: 13, color: subTextColor, lineHeight: 1.5 }}>
+              Coming soon. This integration will connect your {getIntegrationLabel(tab.kind)} data to Lemona for AI context.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
   const inputStyle = {
     width: '100%',
     padding: '8px 10px',
@@ -155,24 +184,24 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
     boxSizing: 'border-box' as const,
     marginBottom: 8,
   }
-  const Icon = isRss ? RssFeedIcon : CodeIcon
-  const setupSteps = isRss
+  const logoSrc = getIntegrationLogoSrc(tab.kind)
+  const setupSteps: string[] = isRss
     ? [
         'Enter a display name (optional) to identify this feed.',
         'Paste the feed URL (e.g. https://blog.example.com/feed.xml).',
         'Click Add — the feed will be synced and indexed for AI context.',
       ]
-    : [
+    : (isGithub ? [
         'Go to GitHub → Settings → Developer settings → OAuth Apps → New OAuth App.',
         'Application name: any name (e.g. Lemona). Homepage URL: use https://github.com or https://localhost — any valid URL works.',
         'Authorization callback URL: http://127.0.0.1/oauth/callback (Lemona uses a dynamic port; if Connect fails, check the error for the exact URL).',
         'If you see Webhook URL, you\'re on GitHub Apps — use OAuth Apps instead. Copy Client ID and Client Secret, paste below, then Save.',
         'Click Connect to authorize. Select repos and click Save and Index.',
-      ]
+      ] : [])
   const title = isRss ? 'RSS Feed' : 'GitHub'
   const desc = isRss
     ? 'Subscribe to blogs, news, or podcasts. Content is indexed for AI context.'
-    : 'Connect your repos to index issues, pull requests, and repo files (README, source code). Use @github in chat to filter by GitHub content.'
+    : 'Connect your repos to index issues, pull requests, and repo files (README, source code).'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -208,7 +237,11 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
       )}
     <div style={{ padding: 16, flex: 1, overflow: 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 20 }}>
-        <Icon style={{ fontSize: 48, color: subTextColor, flexShrink: 0 }} />
+        {logoSrc ? (
+          <IntegrationLogoImg kind={tab.kind} size={48} />
+        ) : (
+          <div style={{ width: 48, height: 48, flexShrink: 0, backgroundColor: subTextColor, opacity: 0.3, borderRadius: 8 }} />
+        )}
         <div>
           <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 600 }}>{title}</h2>
           <p style={{ margin: 0, fontSize: 13, color: subTextColor, lineHeight: 1.5 }}>{desc}</p>

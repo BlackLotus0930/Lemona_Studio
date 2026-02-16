@@ -1,9 +1,10 @@
 import { createContext, useContext, useCallback, useEffect, useMemo, useState, ReactNode } from 'react'
 import { integrationApi, IntegrationSource, OAuthConfigStatus, settingsApi } from '../../services/desktop-api'
+import type { AvailableIntegrationKind } from './availableIntegrations'
 
 export type IntegrationTabItem =
   | { id: string; title: string; type: 'source'; source: IntegrationSource }
-  | { id: string; title: string; type: 'available'; kind: 'rss' | 'github' }
+  | { id: string; title: string; type: 'available'; kind: AvailableIntegrationKind }
 
 interface IntegrationsContextValue {
   projectId: string | null
