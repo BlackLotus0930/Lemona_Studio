@@ -1541,6 +1541,52 @@ class VectorStore {
   }
 
   /**
+   * Get all unique fileIds whose fileId starts with the given prefix
+   * 📌 UNSAFE: Assumes caller already holds read or write lock
+   */
+  getFileIdsByPrefixUnsafe(filePrefix: string): Set<string> {
+    const fileIds = new Set<string>()
+    for (const metadata of this.metadata.values()) {
+      if (metadata && typeof metadata.fileId === 'string' && metadata.fileId.startsWith(filePrefix)) {
+        fileIds.add(metadata.fileId)
+      }
+    }
+    return fileIds
+  }
+
+  /**
+   * Remove all chunks whose fileId starts with a prefix
+   * 📌 UNSAFE: Assumes caller already holds write lock
+   */
+  async removeChunksByFilePrefixUnsafe(filePrefix: string, autoSave: boolean = true): Promise<number> {
+    if (!filePrefix || filePrefix.trim().length === 0) {
+      return 0
+    }
+
+    const chunksToRemove: string[] = []
+    for (const [chunkId, label] of this.idToLabel.entries()) {
+      const metadata = this.metadata.get(label)
+      if (metadata && typeof metadata.fileId === 'string' && metadata.fileId.startsWith(filePrefix)) {
+        chunksToRemove.push(chunkId)
+      }
+    }
+
+    if (chunksToRemove.length === 0) {
+      return 0
+    }
+
+    for (const chunkId of chunksToRemove) {
+      await this.removeChunk(chunkId)
+    }
+
+    if (autoSave) {
+      await this.saveIndexUnsafe()
+    }
+
+    return chunksToRemove.length
+  }
+
+  /**
    * Remove a chunk by paragraphId (for Workspace paragraph-level indexing)
    * 📌 UNSAFE: Assumes caller already holds write lock
    * 
@@ -1960,6 +2006,10 @@ export async function cleanupVectorIndex(projectId?: string): Promise<{
         // Find orphaned fileIds (fileIds in metadata but not in valid documents)
         const orphanedFileIds: string[] = []
         for (const fileId of fileIdsInMetadata) {
+          // Integration chunks use synthetic fileIds and should not be treated as orphaned
+          if (fileId.startsWith('integration:')) {
+            continue
+          }
           if (!validDocumentIds.has(fileId)) {
             orphanedFileIds.push(fileId)
           }

@@ -2072,7 +2072,7 @@ export default function Toolbar({
               padding: '8px',
               minWidth: '200px'
             }}>
-            <div style={{ padding: '4px 0', borderBottom: `1px solid ${dropdownBorder}`, marginBottom: '4px' }}>
+            <div style={{ padding: '4px 0' }}>
               <div style={{ fontSize: '12px', color: theme === 'dark' ? '#858585' : '#5f6368', padding: '4px 8px' }}>Align</div>
               <div style={{ display: 'flex', gap: '4px', padding: '4px' }}>
                 <button

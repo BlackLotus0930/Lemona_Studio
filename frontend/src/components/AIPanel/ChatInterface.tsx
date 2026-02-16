@@ -42,6 +42,29 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 
 type ChatMode = 'ask' | 'agent'
 
+/** Format integration fileIds for display (e.g. GitHub, Notion) instead of "integrat..." */
+function formatIntegrationFileIdForDisplay(fileId: string): string | null {
+  if (!fileId.startsWith('integration:')) return null
+  const parts = fileId.split(':')
+  if (parts.length < 4) return null
+  const sourceType = parts[1]?.toLowerCase()
+  const itemId = parts.slice(3).join(':')
+  const labels: Record<string, string> = { github: 'GitHub', notion: 'Notion', rss: 'RSS' }
+  const label = labels[sourceType || ''] || sourceType
+  if (!label || !itemId) return null
+  if (sourceType === 'github' && itemId.includes(':')) {
+    const idx = itemId.indexOf(':')
+    const repo = itemId.slice(0, idx)
+    const rest = itemId.slice(idx + 1)
+    const typeAndPath = rest.indexOf(':') >= 0 ? rest.split(':') : [rest]
+    const type = typeAndPath[0]
+    const pathOrNum = typeAndPath.slice(1).join(':') || typeAndPath[0]
+    if (repo && type === 'file') return `${label} (${repo}): ${pathOrNum}`
+    if (repo && (type === 'issue' || type === 'pr' || type === 'pull_request_issue')) return `${label} (${repo}): #${pathOrNum}`
+  }
+  return `${label}: ${itemId.length > 40 ? itemId.slice(0, 40) + '…' : itemId}`
+}
+
 interface AgentActionPayload {
   actions?: Array<{
     type: 'create_file' | 'edit_file' | 'edit_block'
@@ -1984,9 +2007,10 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
   }
 
-  // Highlight @mentions in message content
+  // Highlight @mentions in message content (including ranged refs like @file.md (3-5))
   const highlightMentions = (text: string): React.ReactNode => {
-    const mentionRegex = /@\s*(Library|[^\s@]+)/g
+    // Match ranged format @filename (3-5) first, then simple @Library or @file
+    const mentionRegex = /@([^\n@]+?) \((\d+-\d+)\)(?=\s|$)|@\s*(Library|[^\s@]+)(?!\s*\()/g
     const parts: React.ReactNode[] = []
     let lastIndex = 0
     let match
@@ -1997,10 +2021,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         parts.push(text.slice(lastIndex, match.index))
       }
       
-      const mentionName = match[1]
       const mentionStart = match.index
       let mentionEnd = match.index + match[0].length
       let mentionText = match[0]
+      const isRanged = !!match[1]
+      const mentionName = isRanged ? match[1].trim() : (match[3] || '')
       const isLibrary = mentionName === 'Library'
       
       // Check if this is a prefix of a document title (like "file" -> "file (2).pdf")
@@ -2010,7 +2035,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         : libraryDocuments
       let matchedDoc = allMentionableDocs.find(doc => doc.title === mentionName || doc.id === mentionName)
       
-      if (!matchedDoc && !isLibrary) {
+      if (!matchedDoc && !isLibrary && !isRanged) {
         const textAfterMention = text.slice(mentionEnd)
         
         // Find documents that start with the mention name (case-insensitive)
@@ -2033,7 +2058,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         }
       }
       
-      const isFile = !!matchedDoc || (!isLibrary && allMentionableDocs.some(doc => doc.title === mentionName || doc.id === mentionName))
+      const isFile = !!matchedDoc || isRanged || (!isLibrary && allMentionableDocs.some(doc => doc.title === mentionName || doc.id === mentionName))
       
       // Add highlighted mention
       parts.push(
@@ -3365,10 +3390,10 @@ Step 2 requirement:
                                 >
                                   {Array.from(new Set(data.fileIds)).map((fileId: string) => {
                                     const doc = allDocuments.find((d: Document) => d.id === fileId)
+                                    const isIntegration = fileId.startsWith('integration:')
                                     // Note: Backend already filters out non-existent files, so fileIds should only contain existing files.
-                                    // However, allDocuments may not be up-to-date (only loaded on specific triggers),
-                                    // so we asynchronously load missing documents for display.
-                                    if (!doc && !documentTitleCache.has(fileId)) {
+                                    // Integration fileIds are not documents - skip async load for them.
+                                    if (!doc && !documentTitleCache.has(fileId) && !isIntegration) {
                                       // Load document asynchronously to get its title
                                       documentApi.get(fileId).then((loadedDoc: Document | null) => {
                                         if (loadedDoc) {
@@ -3388,8 +3413,10 @@ Step 2 requirement:
                                         console.warn(`[ChatInterface] Failed to load document ${fileId}:`, error)
                                       })
                                     }
-                                    // Display title from allDocuments, cache, or fallback to fileId (should be rare)
-                                    const displayTitle = doc ? doc.title : (documentTitleCache.get(fileId) || fileId.substring(0, 8) + '...')
+                                    // Display title: doc, cache, integration format (e.g. "GitHub (owner/repo): path"), or fallback
+                                    const displayTitle = doc
+                                      ? doc.title
+                                      : (documentTitleCache.get(fileId) || formatIntegrationFileIdForDisplay(fileId) || fileId.substring(0, 30) + (fileId.length > 30 ? '…' : ''))
                                     return (
                                       <div key={fileId} style={{ marginTop: '2px' }}>
                                         {displayTitle}
@@ -3894,7 +3921,7 @@ Step 2 requirement:
                   {message.content}
                 </ReactMarkdown>
                 )}
-                {chatMode === 'agent' && messageProposals.length > 0 && (
+                {messageProposals.length > 0 && (
                   <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {messageProposals.map((proposal) => {
                       const isClickable = proposal.status === 'pending' && !!proposal.targetDocumentId
@@ -4080,7 +4107,7 @@ Step 2 requirement:
           padding: '6px 14px 12px 14px',
           backgroundColor: brighterBg
         }}>
-        {chatMode === 'agent' && agentProposals.some(p => p.status === 'pending' || p.status === 'needs_target') && (
+        {agentProposals.some(p => p.status === 'pending' || p.status === 'needs_target') && (
           <div style={{
             marginBottom: '8px',
             display: 'flex',

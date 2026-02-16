@@ -1,6 +1,32 @@
 // Desktop API - Uses Electron IPC instead of HTTP
 import { Project, AIChatMessage, DocumentSnapshot, WorldLab, WorldLabNode, WorldLabEdge, WorldLabMetadata } from '@shared/types'
 
+export interface IntegrationSource {
+  id: string
+  projectId: string
+  sourceType: 'rss' | 'github' | 'notion'
+  config: Record<string, unknown>
+  connectionStatus?: 'connected' | 'disconnected' | 'expired' | 'error'
+  displayName?: string
+  lastSyncedAt?: string
+  lastError?: string
+  createdAt?: string
+}
+
+export interface IntegrationSyncResult {
+  sourceId: string
+  sourceType: 'rss' | 'github' | 'notion'
+  itemCount: number
+  chunkCount: number
+  syncedAt: string
+}
+
+export interface OAuthConfigStatus {
+  sourceType: 'github'
+  configured: boolean
+  configSource: 'saved' | 'env' | 'missing'
+}
+
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electron !== undefined
 
@@ -288,6 +314,39 @@ export const settingsApi = {
       throw error
     }
   },
+}
+
+export const integrationApi = {
+  getSources: (projectId: string): Promise<IntegrationSource[]> =>
+    invokeOrFetch('integration:getSources', projectId),
+  addSource: (projectId: string, sourceType: 'rss' | 'github', config: Record<string, unknown>, displayName?: string): Promise<IntegrationSource> =>
+    invokeOrFetch('integration:addSource', projectId, sourceType, config, displayName),
+  startOAuth: (projectId: string, sourceType: 'github'): Promise<IntegrationSource> =>
+    invokeOrFetch('integration:startOAuth', projectId, sourceType),
+  getOAuthConfigStatus: (sourceType: 'github'): Promise<OAuthConfigStatus> =>
+    invokeOrFetch('integration:getOAuthConfigStatus', sourceType),
+  saveOAuthConfig: async (sourceType: 'github', config: { clientId: string; clientSecret: string }): Promise<OAuthConfigStatus> => {
+    try {
+      return await invokeOrFetch('integration:saveOAuthConfig', sourceType, config)
+    } catch (error: any) {
+      if (error?.message?.includes('No handler registered')) {
+        throw new Error('OAuth config could not be saved. Please fully quit Lemona, reopen it, and try again.')
+      }
+      throw error
+    }
+  },
+  removeSource: (projectId: string, sourceId: string): Promise<{ success: boolean; removedChunks: number }> =>
+    invokeOrFetch('integration:removeSource', projectId, sourceId),
+  syncSource: (projectId: string, sourceId: string, geminiApiKey?: string, openaiApiKey?: string): Promise<IntegrationSyncResult> =>
+    invokeOrFetch('integration:syncSource', projectId, sourceId, geminiApiKey, openaiApiKey),
+  syncAll: (projectId: string, geminiApiKey?: string, openaiApiKey?: string): Promise<IntegrationSyncResult[]> =>
+    invokeOrFetch('integration:syncAll', projectId, geminiApiKey, openaiApiKey),
+  listGithubRepos: (projectId: string, sourceId: string): Promise<string[]> =>
+    invokeOrFetch('integration:listGithubRepos', projectId, sourceId),
+  getIndexedGithubRepos: (projectId: string, sourceId: string): Promise<string[]> =>
+    invokeOrFetch('integration:getIndexedGithubRepos', projectId, sourceId),
+  updateGithubRepos: (projectId: string, sourceId: string, repos: string[]): Promise<IntegrationSource> =>
+    invokeOrFetch('integration:updateGithubRepos', projectId, sourceId, repos),
 }
 
 export const indexingApi = {

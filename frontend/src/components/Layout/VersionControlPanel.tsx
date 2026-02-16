@@ -7,6 +7,7 @@ interface VersionControlPanelProps {
   projectId: string
   onRestore?: (commitId: string) => void
   onDocumentsReload?: () => Promise<void>
+  refreshTrigger?: number
 }
 
 function formatTimestamp(timestamp: string): { time: string; date: string } {
@@ -30,7 +31,8 @@ function formatTimestamp(timestamp: string): { time: string; date: string } {
 export default function VersionControlPanel({
   projectId,
   onRestore,
-  onDocumentsReload
+  onDocumentsReload,
+  refreshTrigger
 }: VersionControlPanelProps) {
   const { theme } = useTheme()
   const [commits, setCommits] = useState<Commit[]>([])
@@ -102,7 +104,7 @@ export default function VersionControlPanel({
         if (!cancelled) setHeadCommitId(null)
       })
     return () => { cancelled = true }
-  }, [projectId])
+  }, [projectId, refreshTrigger])
 
   const handleRename = (commitId: string, value: string) => {
     if (value.trim()) {
@@ -194,7 +196,7 @@ export default function VersionControlPanel({
                 key={commit.id}
                 style={{
                   padding: '8px 10px',
-                  borderBottom: isLast ? 'none' : `1px solid ${borderColor}`,
+                  borderBottom: (isLast || isHead) ? 'none' : `1px solid ${borderColor}`,
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '6px',

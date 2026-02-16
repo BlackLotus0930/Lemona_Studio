@@ -3,12 +3,13 @@ import { Document } from '../../../shared/types.js'
 import { documentService } from './documentService.js'
 import { extractPDFText } from './pdfTextExtractor.js'
 import { parseDocx } from './docxParser.js'
-import { chunkPDF, chunkDocx, chunkTipTap, chunkTipTapToSemanticBlocks, Chunk, SemanticBlock, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, WORKSPACE_CHUNK_SIZE, WORKSPACE_CHUNK_OVERLAP } from './chunkingService.js'
+import { chunkText, chunkPDF, chunkDocx, chunkTipTap, chunkTipTapToSemanticBlocks, Chunk, SemanticBlock, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, WORKSPACE_CHUNK_SIZE, WORKSPACE_CHUNK_OVERLAP } from './chunkingService.js'
 import { generateEmbeddingsBatch, EMBEDDING_DIMENSION, isQuotaError } from './embeddingService.js'
 import { getVectorStore, ChunkMetadata, getProjectIndexDirectory, getProjectLockManager, IndexManifest } from './vectorStore.js'
 import { app } from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
+import { buildIntegrationFileId, buildIntegrationFilePrefix, IntegrationItem, IntegrationSourceType } from './integrationTypes.js'
 
 // Indexing status directory
 const INDEXING_STATUS_DIR = path.join(app.getPath('userData'), 'indexingStatus')
@@ -1408,6 +1409,102 @@ export async function incrementalIndexProjectFile(
   }
 }
 
+export async function indexIntegrationContent(
+  projectId: string,
+  sourceType: IntegrationSourceType,
+  sourceId: string,
+  items: IntegrationItem[],
+  geminiApiKey?: string,
+  openaiApiKey?: string
+): Promise<{ itemCount: number; chunkCount: number }> {
+  const hasGeminiKey = geminiApiKey && geminiApiKey.trim().length > 0
+  const hasOpenaiKey = openaiApiKey && openaiApiKey.trim().length > 0
+  if (!hasGeminiKey && !hasOpenaiKey) {
+    throw new Error('No embedding API key available. Please configure Gemini or OpenAI API key.')
+  }
+
+  const projectLockManager = getProjectLockManager()
+  const releaseLock = await projectLockManager.acquireWriteLock(projectId)
+
+  try {
+    const vectorStore = getVectorStore(projectId, 'library')
+    await vectorStore.loadIndexUnsafe()
+
+    const filePrefix = buildIntegrationFilePrefix(sourceType, sourceId)
+    const existingFileIds = vectorStore.getFileIdsByPrefixUnsafe(filePrefix)
+
+    const newItemFileIds = new Set<string>()
+    const toAddItems: IntegrationItem[] = []
+    for (const item of items) {
+      const itemId = item.id || item.externalId
+      if (!itemId) continue
+      const itemFileId = buildIntegrationFileId(sourceType, sourceId, itemId)
+      const title = (item.title || '').trim()
+      const content = (item.content || '').trim()
+      const text = title ? `${title}\n\n${content}` : content
+      if (!text) continue
+      newItemFileIds.add(itemFileId)
+      if (!existingFileIds.has(itemFileId)) {
+        toAddItems.push(item)
+      }
+    }
+
+    const toRemove = [...existingFileIds].filter(fid => !newItemFileIds.has(fid))
+    for (const fileId of toRemove) {
+      await vectorStore.removeChunksByFileUnsafe(fileId, false)
+    }
+
+    if (items.length === 0 && toRemove.length === 0) {
+      await vectorStore.saveIndexUnsafe()
+      return { itemCount: 0, chunkCount: 0 }
+    }
+
+    if (toAddItems.length === 0) {
+      await vectorStore.saveIndexUnsafe()
+      return {
+        itemCount: 0,
+        chunkCount: 0,
+      }
+    }
+
+    const chunks: Chunk[] = []
+    for (const item of toAddItems) {
+      const itemId = item.id || item.externalId
+      if (!itemId) continue
+      const itemFileId = buildIntegrationFileId(sourceType, sourceId, itemId)
+      const title = (item.title || '').trim()
+      const content = (item.content || '').trim()
+      const text = title ? `${title}\n\n${content}` : content
+      if (!text) continue
+      const itemChunks = chunkText(text, itemFileId, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP)
+      chunks.push(...itemChunks)
+    }
+
+    if (chunks.length === 0) {
+      await vectorStore.saveIndexUnsafe()
+      return { itemCount: items.length, chunkCount: 0 }
+    }
+
+    const embeddingResults = await generateEmbeddingsBatch(
+      chunks.map(chunk => chunk.text),
+      geminiApiKey,
+      openaiApiKey,
+      10
+    )
+    const embeddings = embeddingResults.map(result => result.embedding)
+
+    await vectorStore.addChunksUnsafe(chunks, embeddings, projectId)
+    await vectorStore.saveIndexUnsafe()
+
+    return {
+      itemCount: toAddItems.length,
+      chunkCount: chunks.length,
+    }
+  } finally {
+    releaseLock()
+  }
+}
+
 export const indexingService = {
   indexLibraryFile,
   reindexFile,
@@ -1420,5 +1517,6 @@ export const indexingService = {
   shouldReindexFile,
   migrateLibraryIndex,
   incrementalIndexProjectFile,
+  indexIntegrationContent,
 }
 

@@ -63,6 +63,10 @@ import TopBar from './TopBar'
 import { useNavigate, useParams } from 'react-router-dom'
 import WordCountModal from './WordCountModal'
 import VersionControlPanel from './VersionControlPanel'
+import IntegrationsSidebar from '../Integrations/IntegrationsSidebar'
+import IntegrationDetailView from '../Integrations/IntegrationDetailView'
+import { IntegrationsProvider } from '../Integrations/IntegrationsContext'
+import type { IntegrationTabItem } from '../Integrations/IntegrationsContext'
 
 const AI_PANEL_STORAGE_KEY = 'aiPanelState'
 const FILE_EXPLORER_SIZE_STORAGE_KEY = 'fileExplorerSize'
@@ -599,7 +603,8 @@ export default function Layout(): JSX.Element {
   const [isExporting, setIsExporting] = useState(false) // Track export loading state
   const [exportFormat, setExportFormat] = useState<'pdf' | 'docx' | null>(null) // Track export format
   const [showExportModal, setShowExportModal] = useState(false)
-  const [showLibraryPanel, setShowLibraryPanel] = useState(false)
+  const [showIntegrationsPanel, setShowIntegrationsPanel] = useState(false)
+  const [integrationTabs, setIntegrationTabs] = useState<IntegrationTabItem[]>([])
   const exportButtonRef = useRef<HTMLButtonElement>(null)
   const [isProjectHeaderHovered, setIsProjectHeaderHovered] = useState(false)
   const [isRenamingProjectName, setIsRenamingProjectName] = useState(false)
@@ -612,6 +617,7 @@ export default function Layout(): JSX.Element {
   const ignoredUpdateVersionRef = useRef<string | null>(initialIgnoredUpdateVersion)
   const installOnDownloadRef = useRef<boolean>(false)
   const [restoredCommitParentId, setRestoredCommitParentId] = useState<string | null>(null) // Track restored commit ID for branch creation
+  const [versionPanelRefreshTrigger, setVersionPanelRefreshTrigger] = useState(0) // Increment to refresh Version Control panel after Ctrl+S
   const [indexingCompletionNotifications, setIndexingCompletionNotifications] = useState<Map<string, { fileName: string; completedAt: number }>>(new Map()) // Track indexing completion notifications
   const [isSeparatorHovered, setIsSeparatorHovered] = useState(false) // Track AI panel separator hover state
   const [isFileExplorerSeparatorHovered, setIsFileExplorerSeparatorHovered] = useState(false) // Track file explorer separator hover state
@@ -1529,6 +1535,8 @@ export default function Layout(): JSX.Element {
             
             // Clear restored commit parent after successful commit
             setRestoredCommitParentId(null)
+            // Refresh version control panel so new version appears
+            setVersionPanelRefreshTrigger(prev => prev + 1)
             
             // Trigger incremental indexing for written/created docs (TipTap) - exclude uploaded files (PDF/DOCX)
             // Uploaded files are indexed on upload; written docs indexed on Ctrl+S commit
@@ -1919,57 +1927,86 @@ export default function Layout(): JSX.Element {
   }
 
   // Handle tab click (switch to tab)
-  const handleTabClick = (docId: string) => {
-    setActiveTabId(docId)
-    navigate(`/document/${docId}`)
+  const handleTabClick = (tabId: string) => {
+    setActiveTabId(tabId)
+    if (!tabId.startsWith('int-')) {
+      navigate(`/document/${tabId}`)
+    }
   }
 
+  const allTabsForDisplay = useMemo(() => {
+    const docTabs = openTabs.map(d => ({ id: d.id, title: d.title }))
+    const intTabs = integrationTabs.map(t => ({ id: t.id, title: t.title }))
+    return [...docTabs, ...intTabs]
+  }, [openTabs, integrationTabs])
+
+  const handleOpenIntegrationInEditor = useCallback((tab: IntegrationTabItem) => {
+    const existing = integrationTabs.find(t => t.id === tab.id)
+    if (existing) {
+      setActiveTabId(tab.id)
+      return
+    }
+    setIntegrationTabs(prev => [...prev, tab])
+    setActiveTabId(tab.id)
+  }, [integrationTabs])
+
   // Handle tab close
-  const handleTabClose = (e: React.MouseEvent, docId: string) => {
+  const handleTabClose = (e: React.MouseEvent, tabId: string) => {
     e.stopPropagation()
-    
+
+    if (tabId.startsWith('int-')) {
+      setIntegrationTabs(prev => {
+        const next = prev.filter(t => t.id !== tabId)
+        if (activeTabId === tabId) {
+          if (next.length > 0) {
+            setActiveTabId(next[next.length - 1].id)
+          } else if (openTabs.length > 0) {
+            setActiveTabId(openTabs[openTabs.length - 1].id)
+            navigate(`/document/${openTabs[openTabs.length - 1].id}`)
+          } else {
+            setActiveTabId(null)
+            navigate('/documents')
+          }
+        }
+        return next
+      })
+      return
+    }
+
     setOpenTabs(prevTabs => {
-      // Prevent closing if it's the only tab
-      if (prevTabs.length <= 1) {
-        return prevTabs
-      }
-      
-      const newTabs = prevTabs.filter(tab => tab.id !== docId)
-      
-      // Clear scroll position for the closed tab
-      // This ensures that when the file is reopened, it shows at the top instead of the previous position
+      const totalTabs = prevTabs.length + integrationTabs.length
+      if (totalTabs <= 1) return prevTabs
+
+      const newTabs = prevTabs.filter(tab => tab.id !== tabId)
       try {
-        localStorage.removeItem(`documentScroll_${docId}`)
-        localStorage.removeItem(`pdfPage_${docId}`)
+        localStorage.removeItem(`documentScroll_${tabId}`)
+        localStorage.removeItem(`pdfPage_${tabId}`)
       } catch (error) {
         console.error('Failed to clear scroll position:', error)
       }
-      
-      // Remove PDF Viewer ref when tab is closed
-      pdfViewerRefsMap.current.delete(docId)
-      
-      // If closing the active tab, switch to another tab or navigate away
-      if (activeTabId === docId) {
+      pdfViewerRefsMap.current.delete(tabId)
+
+      if (activeTabId === tabId) {
         if (newTabs.length > 0) {
-          // Switch to the last tab, or the one before if closing the last one
-          const closedIndex = prevTabs.findIndex(tab => tab.id === docId)
+          const closedIndex = prevTabs.findIndex(tab => tab.id === tabId)
           const targetIndex = closedIndex > 0 ? closedIndex - 1 : 0
           const targetTab = newTabs[targetIndex] || newTabs[0]
           setActiveTabId(targetTab.id)
           navigate(`/document/${targetTab.id}`)
+        } else if (integrationTabs.length > 0) {
+          setActiveTabId(integrationTabs[integrationTabs.length - 1].id)
         } else {
-          // No tabs left, navigate to document list
           setActiveTabId(null)
           navigate('/documents')
         }
       }
-      
       return newTabs
     })
   }
 
-  // Handle tab reorder (drag and drop)
+  // Handle tab reorder (drag and drop) - only for document tabs
   const handleTabReorder = (draggedId: string, targetId: string, position: 'left' | 'right') => {
+    if (draggedId.startsWith('int-') || targetId.startsWith('int-')) return
     setOpenTabs(prevTabs => {
       const draggedIndex = prevTabs.findIndex(tab => tab.id === draggedId)
       const targetIndex = prevTabs.findIndex(tab => tab.id === targetId)
@@ -2317,12 +2354,12 @@ export default function Layout(): JSX.Element {
     }
   }, [openTabs])
 
-  // Save activeTabId to localStorage whenever it changes
+  // Save activeTabId to localStorage whenever it changes (only document tabs, not integration tabs)
   useEffect(() => {
     try {
-      if (activeTabId) {
+      if (activeTabId && !activeTabId.startsWith('int-')) {
         localStorage.setItem('activeTabId', activeTabId)
-      } else {
+      } else if (!activeTabId) {
         localStorage.removeItem('activeTabId')
       }
     } catch (error) {
@@ -2348,7 +2385,7 @@ export default function Layout(): JSX.Element {
   // Restore tabs and navigate to active tab on mount if tabs were saved
   const hasRestoredTabsRef = useRef(false)
   useEffect(() => {
-    if (!hasRestoredTabsRef.current && openTabs.length > 0 && activeTabId && !id) {
+    if (!hasRestoredTabsRef.current && openTabs.length > 0 && activeTabId && !activeTabId.startsWith('int-') && !id) {
       // Only restore if we're not already on a document page
       hasRestoredTabsRef.current = true
       // Check if the active tab still exists in the restored tabs
@@ -2613,13 +2650,13 @@ export default function Layout(): JSX.Element {
     setProjectNameRenameValue('')
   }
 
-  // Cancel project name rename when switching to Library/Search/Source Control
+  // Cancel project name rename when switching to side panels/modes
   useEffect(() => {
-    if (isSearchMode || isGitMode || showLibraryPanel) {
+    if (isSearchMode || isGitMode || showIntegrationsPanel) {
       setIsRenamingProjectName(false)
       setProjectNameRenameValue('')
     }
-  }, [isSearchMode, isGitMode, showLibraryPanel])
+  }, [isSearchMode, isGitMode, showIntegrationsPanel])
 
   // Focus and select project name input when entering rename mode
   useEffect(() => {
@@ -6326,7 +6363,7 @@ export default function Layout(): JSX.Element {
       }}>
         {/* Top Bar - Logo + Tabs */}
       <TopBar 
-        openTabs={openTabs}
+        openTabs={allTabsForDisplay}
         activeTabId={activeTabId}
         onTabClick={handleTabClick}
         onTabClose={handleTabClose}
@@ -6334,6 +6371,7 @@ export default function Layout(): JSX.Element {
         onExportClick={() => {
           setIsSearchMode(false)
           setIsGitMode(false)
+          setShowIntegrationsPanel(false)
           setSearchQuery('')
           setShowExportModal((prev) => !prev)
         }}
@@ -6352,6 +6390,21 @@ export default function Layout(): JSX.Element {
       }} />
       
       {/* Content Area - Horizontal split with FileExplorer sidebar */}
+      <IntegrationsProvider
+        projectId={document?.projectId || documents.find(doc => doc.projectId && doc.projectId.trim() !== '')?.projectId || null}
+        onSourceRemoved={(sourceId) => {
+          const removedTabId = `int-source-${sourceId}`
+          setIntegrationTabs(prev => {
+            const next = prev.filter(t => !(t.type === 'source' && t.source.id === sourceId))
+            if (activeTabId === removedTabId) {
+              if (next.length > 0) setActiveTabId(next[next.length - 1].id)
+              else if (openTabs.length > 0) setActiveTabId(openTabs[openTabs.length - 1].id)
+              else setActiveTabId(null)
+            }
+            return next
+          })
+        }}
+      >
       <PanelGroup 
         direction="horizontal" 
         style={{ flex: 1, overflow: 'hidden' }}
@@ -6405,13 +6458,12 @@ export default function Layout(): JSX.Element {
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: theme === 'dark' ? '#141414' : '#fafafa',
-              borderBottom: `1px solid ${borderColor}`
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                 <button
                   style={{
                     border: 'none',
-                    background: (!isSearchMode && !isGitMode && !showLibraryPanel) ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8') : 'transparent',
+                    background: (!isSearchMode && !isGitMode && !showIntegrationsPanel) ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8') : 'transparent',
                     cursor: 'pointer',
                     padding: '6px',
                     width: '30px',
@@ -6420,16 +6472,16 @@ export default function Layout(): JSX.Element {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: (theme === 'dark' && !isSearchMode && !isGitMode && !showLibraryPanel) ? '#d6d6d6' : secondaryTextColor,
+                    color: (theme === 'dark' && !isSearchMode && !isGitMode && !showIntegrationsPanel) ? '#d6d6d6' : secondaryTextColor,
                     opacity: 0.9,
                     boxSizing: 'border-box'
                   }}
                   title="File Explorer"
                   onClick={() => {
-                    if (isSearchMode || isGitMode || showLibraryPanel) {
+                    if (isSearchMode || isGitMode || showIntegrationsPanel) {
                       setIsSearchMode(false)
                       setIsGitMode(false)
-                      setShowLibraryPanel(false)
+                      setShowIntegrationsPanel(false)
                       setSearchQuery('')
                       try {
                         sessionStorage.setItem('isSearchMode', 'false')
@@ -6456,7 +6508,7 @@ export default function Layout(): JSX.Element {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = (!isSearchMode && !isGitMode && !showLibraryPanel)
+                    e.currentTarget.style.backgroundColor = (!isSearchMode && !isGitMode && !showIntegrationsPanel)
                       ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8')
                       : 'transparent'
                   }}
@@ -6482,7 +6534,7 @@ export default function Layout(): JSX.Element {
                   title="Search"
                   onClick={() => {
                     setIsGitMode(false)
-                    setShowLibraryPanel(false)
+                    setShowIntegrationsPanel(false)
                     setIsSearchMode((prev) => {
                       const newValue = !prev
                       // Persist search mode state
@@ -6565,7 +6617,7 @@ export default function Layout(): JSX.Element {
                       }
                     }
                     setIsGitMode((prev) => !prev)
-                    setShowLibraryPanel(false)
+                    setShowIntegrationsPanel(false)
                     if (fileExplorerPanelRef.current) {
                       const currentSize = fileExplorerPanelRef.current.getSize()
                       if (currentSize === 0) {
@@ -6588,7 +6640,7 @@ export default function Layout(): JSX.Element {
                 <button
                   style={{
                     border: 'none',
-                    background: showLibraryPanel ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8') : 'transparent',
+                    background: showIntegrationsPanel ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8') : 'transparent',
                     cursor: 'pointer',
                     padding: '6px',
                     width: '30px',
@@ -6597,16 +6649,16 @@ export default function Layout(): JSX.Element {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: (theme === 'dark' && showLibraryPanel) ? '#d6d6d6' : secondaryTextColor,
+                    color: (theme === 'dark' && showIntegrationsPanel) ? '#d6d6d6' : secondaryTextColor,
                     opacity: 0.9,
                     boxSizing: 'border-box'
                   }}
-                  title="Library"
+                  title="Integrations"
                   onClick={() => {
                     setIsSearchMode(false)
                     setIsGitMode(false)
                     setSearchQuery('')
-                    setShowLibraryPanel((prev) => !prev)
+                    setShowIntegrationsPanel((prev) => !prev)
                     if (fileExplorerPanelRef.current) {
                       const currentSize = fileExplorerPanelRef.current.getSize()
                       if (currentSize === 0) {
@@ -6619,7 +6671,7 @@ export default function Layout(): JSX.Element {
                     e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2d2e' : '#e8e8e8'
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = showLibraryPanel
+                    e.currentTarget.style.backgroundColor = showIntegrationsPanel
                       ? (theme === 'dark' ? '#2a2d2e' : '#e8e8e8')
                       : 'transparent'
                   }}
@@ -6638,7 +6690,8 @@ export default function Layout(): JSX.Element {
               />
             </div>
 
-            {/* File Explorer Header */}
+            {/* File Explorer Header - hidden for integrations to avoid empty space */}
+            {!showIntegrationsPanel && (
             <div
               onMouseEnter={() => setIsProjectHeaderHovered(true)}
               onMouseLeave={() => setIsProjectHeaderHovered(false)}
@@ -6657,7 +6710,7 @@ export default function Layout(): JSX.Element {
                 minHeight: '28px'
               }}
             >
-              {(!isSearchMode && !isGitMode && !showLibraryPanel) && isRenamingProjectName ? (
+              {(!isSearchMode && !isGitMode && !showIntegrationsPanel) && isRenamingProjectName ? (
                 <input
                   ref={projectNameInputRef}
                   type="text"
@@ -6690,17 +6743,17 @@ export default function Layout(): JSX.Element {
               ) : (
                 <span
                   onDoubleClick={() => {
-                    if (!isSearchMode && !isGitMode && !showLibraryPanel) {
+                    if (!isSearchMode && !isGitMode && !showIntegrationsPanel) {
                       handleProjectNameRenameStart()
                     }
                   }}
-                  title={(!isSearchMode && !isGitMode && !showLibraryPanel) ? 'Double-click to rename' : undefined}
+                  title={(!isSearchMode && !isGitMode && !showIntegrationsPanel) ? 'Double-click to rename' : undefined}
                   style={{
-                    cursor: (!isSearchMode && !isGitMode && !showLibraryPanel) ? 'text' : 'default'
+                    cursor: (!isSearchMode && !isGitMode && !showIntegrationsPanel) ? 'text' : 'default'
                   }}
                 >
-                  {(showLibraryPanel
-                    ? 'LIBRARY'
+                  {(showIntegrationsPanel
+                    ? ''
                     : isGitMode
                       ? 'VERSION CONTROL'
                       : isSearchMode
@@ -6716,7 +6769,7 @@ export default function Layout(): JSX.Element {
                   minHeight: '20px'
                 }}
               >
-                {!isSearchMode && !isGitMode && !showLibraryPanel && (
+                {!isSearchMode && !isGitMode && !showIntegrationsPanel && (
                   <>
                     <button
                       onClick={handleCreateDocument}
@@ -6776,6 +6829,7 @@ export default function Layout(): JSX.Element {
                 )}
               </div>
             </div>
+            )}
             
             {/* File Explorer Content */}
             <div style={{ flex: 1, overflow: 'hidden', backgroundColor: bgColor, padding: 0, margin: 0 }}>
@@ -6802,6 +6856,7 @@ export default function Layout(): JSX.Element {
                   return (
                     <VersionControlPanel
                       projectId={projectId}
+                      refreshTrigger={versionPanelRefreshTrigger}
                       onRestore={setRestoredCommitParentId}
                       onDocumentsReload={async () => {
                         const currentProjectId = document?.projectId
@@ -6838,15 +6893,19 @@ export default function Layout(): JSX.Element {
                     />
                   )
                 })()
-              ) : showLibraryPanel ? (
-                <div style={{
-                  width: '100%',
-                  height: '100%',
-                  backgroundColor: bgColor,
-                  display: 'flex',
-                  flexDirection: 'column'
-                }}>
-                </div>
+              ) : showIntegrationsPanel ? (
+                (() => {
+                  const activeProjectId =
+                    document?.projectId ||
+                    documents.find(doc => doc.projectId && doc.projectId.trim() !== '')?.projectId ||
+                    null
+                  return (
+                    <IntegrationsSidebar
+                      projectId={activeProjectId}
+                      onOpenInEditor={handleOpenIntegrationInEditor}
+                    />
+                  )
+                })()
               ) : (
                 (() => {
                   const activeProjectId =
@@ -7092,7 +7151,16 @@ export default function Layout(): JSX.Element {
           } 
           minSize={40}
         >
-          {isLoadingDocument && !document ? (
+          {activeTabId?.startsWith('int-') ? (
+            (() => {
+              const intTab = integrationTabs.find(t => t.id === activeTabId)
+              return intTab ? (
+                <div style={{ width: '100%', height: '100%', overflow: 'auto', backgroundColor: bgColor }}>
+                  <IntegrationDetailView tab={intTab} />
+                </div>
+              ) : null
+            })()
+          ) : isLoadingDocument && !document ? (
             // Show skeleton in editor area when loading first document
             <DocumentEditorSkeleton />
           ) : isWorldLabMode && worldLabData ? (
@@ -7355,6 +7423,7 @@ export default function Layout(): JSX.Element {
           </button>
         )}
       </PanelGroup>
+      </IntegrationsProvider>
       
       {/* Word Count Modal */}
       <WordCountModal

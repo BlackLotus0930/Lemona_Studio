@@ -3,6 +3,7 @@ import { generateEmbedding } from './embeddingService.js'
 import { getVectorStore, SearchResult, getProjectLockManager } from './vectorStore.js'
 import { documentService } from './documentService.js'
 import { indexProjectLibraryFiles, indexProjectWorkspaceFiles } from './indexingService.js'
+import { parseIntegrationFileId } from './integrationTypes.js'
 
 /**
  * Parsed mention information
@@ -10,6 +11,7 @@ import { indexProjectLibraryFiles, indexProjectWorkspaceFiles } from './indexing
 export interface ParsedMentions {
   hasLibraryMention: boolean // @Library mentioned
   fileMentions: string[] // Array of file IDs or file names mentioned
+  sourceMentions: Array<'github' | 'notion'> // Source mentions like @github, @notion
   originalMessage: string // Original message text
   cleanedMessage: string // Message with @mentions removed (for embedding)
 }
@@ -24,6 +26,7 @@ export function parseMentions(message: string): ParsedMentions {
   const result: ParsedMentions = {
     hasLibraryMention: false,
     fileMentions: [],
+    sourceMentions: [],
     originalMessage: message,
     cleanedMessage: message,
   }
@@ -68,6 +71,10 @@ export function parseMentions(message: string): ParsedMentions {
     // Check for @Library mention
     if (mention === 'library') {
       result.hasLibraryMention = true
+    } else if (mention === 'github' || mention === 'notion') {
+      if (!result.sourceMentions.includes(mention)) {
+        result.sourceMentions.push(mention)
+      }
     } else {
       // Assume it's a file mention (could be filename or ID)
       // We'll resolve it later when searching
@@ -253,6 +260,12 @@ async function filterByFileExistence(results: SearchResult[]): Promise<SearchRes
   if (missingFileIds.length > 0) {
     await Promise.all(
       missingFileIds.map(async (fileId) => {
+        if (fileId.startsWith('integration:')) {
+          // Integration chunks use synthetic file IDs and are managed separately from documentService.
+          fileExistenceMap.set(fileId, true)
+          fileExistenceCache.set(fileId, { exists: true, timestamp: now })
+          return
+        }
         try {
           const doc = await documentService.getById(fileId)
           const exists = doc !== null && doc.deleted !== true
@@ -275,6 +288,22 @@ async function filterByFileExistence(results: SearchResult[]): Promise<SearchRes
   })
 
   return filteredResults
+}
+
+function filterResultsBySourceMentions(
+  results: SearchResult[],
+  sourceMentions?: Array<'github' | 'notion'>
+): SearchResult[] {
+  if (!sourceMentions || sourceMentions.length === 0) {
+    return results
+  }
+  return results.filter(result => {
+    const parsed = parseIntegrationFileId(result.chunk.fileId)
+    if (!parsed) {
+      return false
+    }
+    return sourceMentions.includes(parsed.sourceType as 'github' | 'notion')
+  })
 }
 
 /**
@@ -315,7 +344,8 @@ export async function searchLibrary(
   geminiApiKey?: string,
   openaiApiKey?: string,
   fileIds?: string[],
-  k: number = 6
+  k: number = 6,
+  sourceMentions?: Array<'github' | 'notion'>
 ): Promise<SearchResult[]> {
   if (!query || query.trim().length === 0) {
     return []
@@ -419,7 +449,35 @@ export async function searchLibrary(
       }
       
       // Apply folder-specific filtering
-      return filterByRelevance(results, folder)
+      const relevanceFiltered = filterByRelevance(results, folder)
+      const filtered = filterResultsBySourceMentions(relevanceFiltered, sourceMentions)
+      if (folder === 'library' && sourceMentions && sourceMentions.length > 0) {
+        const dedicated = await searchIntegrationBySourceTypes(
+          query.trim(),
+          projectId,
+          sourceMentions,
+          geminiApiKey,
+          openaiApiKey,
+          MIXED_SEARCH_CONFIG.integrationMention.dedicatedK
+        ).catch(() => [])
+        const seen = new Set<string>()
+        const merged: SearchResult[] = []
+        for (const r of dedicated) {
+          if (!seen.has(r.chunk.id)) {
+            seen.add(r.chunk.id)
+            merged.push(r)
+          }
+        }
+        for (const r of filtered) {
+          if (merged.length >= MIXED_SEARCH_CONFIG.integrationMention.totalKWhenMentioned) break
+          if (!seen.has(r.chunk.id)) {
+            seen.add(r.chunk.id)
+            merged.push(r)
+          }
+        }
+        return merged
+      }
+      return filtered
     } finally {
       releaseLock()
     }
@@ -496,7 +554,8 @@ export async function searchLibraryWithMentions(
     geminiApiKey,
     openaiApiKey,
     fileIds,
-    k
+    k,
+    mentions.sourceMentions
   )
 
   // Outer-layer existence validation for library-only searches
@@ -542,7 +601,7 @@ export async function searchProjectFiles(
   fileIds?: string[],
   k: number = WORKSPACE_SEARCH_K
 ): Promise<SearchResult[]> {
-  return searchLibrary(query, projectId, 'project', geminiApiKey, openaiApiKey, fileIds, k)
+  return searchLibrary(query, projectId, 'project', geminiApiKey, openaiApiKey, fileIds, k, undefined)
 }
 
 /**
@@ -600,6 +659,84 @@ export async function resolveFileMentionsAll(
 }
 
 /**
+ * Dedicated search for integration content when user @mentions a source (e.g. @github, @notion)
+ * Returns results ONLY from integration chunks matching the mentioned source types.
+ * Used to give @mentioned sources higher weight - user explicitly asked for that context.
+ *
+ * Extensible: add new source types to parseMentions and the sourceMentions type.
+ */
+async function searchIntegrationBySourceTypes(
+  query: string,
+  projectId: string,
+  sourceTypes: Array<'github' | 'notion'>,
+  geminiApiKey?: string,
+  openaiApiKey?: string,
+  k: number = MIXED_SEARCH_CONFIG.integrationMention.dedicatedK
+): Promise<SearchResult[]> {
+  if (!query?.trim() || sourceTypes.length === 0) return []
+  const hasGeminiKey = !!(geminiApiKey && geminiApiKey.trim().length > 0)
+  const hasOpenaiKey = !!(openaiApiKey && openaiApiKey.trim().length > 0)
+  if (!hasGeminiKey && !hasOpenaiKey) return []
+
+  try {
+    const { embedding } = await generateEmbedding(
+      query.trim(),
+      geminiApiKey,
+      openaiApiKey
+    )
+
+    const projectLockManager = getProjectLockManager()
+    let releaseLock = await projectLockManager.acquireReadLock(projectId)
+
+    try {
+      const vectorStore = getVectorStore(projectId, 'library')
+      try {
+        await vectorStore.loadIndexUnsafe()
+      } catch (loadError: any) {
+        releaseLock()
+        releaseLock = await projectLockManager.acquireWriteLock(projectId)
+        try {
+          await vectorStore.loadIndexUnsafe()
+        } finally {
+          releaseLock()
+          releaseLock = await projectLockManager.acquireReadLock(projectId)
+        }
+      }
+
+      const integrationFileIds = new Set<string>()
+      for (const sourceType of sourceTypes) {
+        const prefix = `integration:${sourceType}:`
+        const ids = vectorStore.getFileIdsByPrefixUnsafe(prefix)
+        ids.forEach(id => integrationFileIds.add(id))
+      }
+
+      if (integrationFileIds.size === 0) {
+        return []
+      }
+
+      const efSearch = getAdaptiveEfSearch(query)
+      const rerankK = Math.max(k, LIBRARY_RERANK_INITIAL_K)
+      let raw = await vectorStore.searchUnsafe(
+        embedding,
+        rerankK,
+        Array.from(integrationFileIds),
+        efSearch
+      )
+      raw = rerankSearchResults(raw, query, k, RRF_K)
+      return filterByRelevance(raw, 'library')
+    } finally {
+      releaseLock()
+    }
+  } catch (error: any) {
+    if (error.message?.includes('No embedding API key') || error.message?.includes('not configured')) {
+      return []
+    }
+    console.error('[SemanticSearch] Integration search failed:', error.message)
+    return []
+  }
+}
+
+/**
  * Search workspace and library folders together with normalized distances and RRF rerank
  * 
  * This function implements a fair comparison system:
@@ -632,6 +769,12 @@ const MIXED_SEARCH_CONFIG = {
   },
   rrf: {
     k: 60,                       // RRF constant
+  },
+  // @source mention: dedicated integration search gets higher weight
+  // Extensible: add new types (e.g. 'slack') to parseMentions + sourceMentions type
+  integrationMention: {
+    dedicatedK: 12,              // Results from dedicated integration search when user @mentions
+    totalKWhenMentioned: 14,      // Total results when @source used (integration first, then general)
   },
 }
 
@@ -774,7 +917,8 @@ export async function searchWorkspaceAndLibrary(
   geminiApiKey?: string,
   openaiApiKey?: string,
   fileIds?: string[],
-  k: number = MIXED_SEARCH_CONFIG.retrieval.defaultTotalK
+  k: number = MIXED_SEARCH_CONFIG.retrieval.defaultTotalK,
+  sourceMentions?: Array<'github' | 'notion'>
 ): Promise<SearchResult[]> {
   if (!query || query.trim().length === 0) {
     return []
@@ -788,22 +932,68 @@ export async function searchWorkspaceAndLibrary(
     return []
   }
 
-  // Calculate initial retrieval k (multiply for rerank)
+  const hasSourceMentions = sourceMentions && sourceMentions.length > 0
+  if (hasSourceMentions) {
+    const { dedicatedK, totalKWhenMentioned } = MIXED_SEARCH_CONFIG.integrationMention
+    const integrationK = dedicatedK
+    const totalK = totalKWhenMentioned
+    const generalK = Math.max(6, totalK - integrationK)
+
+    const [integrationResults, workspaceResults, libraryResults] = await Promise.all([
+      searchIntegrationBySourceTypes(
+        query,
+        projectId,
+        sourceMentions,
+        geminiApiKey,
+        openaiApiKey,
+        integrationK
+      ).catch(() => [] as SearchResult[]),
+      searchProjectFiles(query, projectId, geminiApiKey, openaiApiKey, fileIds, Math.ceil(generalK * 1.5)).catch(() => [] as SearchResult[]),
+      searchLibrary(query, projectId, 'library', geminiApiKey, openaiApiKey, fileIds, Math.ceil(generalK * 1.5), undefined).catch(() => [] as SearchResult[]),
+    ])
+
+    const filteredWorkspace = filterByRelevance(workspaceResults, 'project')
+    const filteredLibrary = filterByRelevance(libraryResults, 'library')
+    const mentionedFileIds = new Set(fileIds || [])
+    const generalReranked = rerankMixedResults(
+      filteredWorkspace.length > 0 ? filteredWorkspace : workspaceResults,
+      filteredLibrary.length > 0 ? filteredLibrary : libraryResults,
+      query,
+      generalK,
+      mentionedFileIds
+    )
+
+    const seenIds = new Set<string>()
+    const merged: SearchResult[] = []
+    for (const r of integrationResults) {
+      if (!seenIds.has(r.chunk.id)) {
+        seenIds.add(r.chunk.id)
+        merged.push(r)
+      }
+    }
+    for (const r of generalReranked) {
+      if (merged.length >= totalK) break
+      if (!seenIds.has(r.chunk.id)) {
+        seenIds.add(r.chunk.id)
+        merged.push(r)
+      }
+    }
+
+    const diversified = diversifyByFile(merged, 2)
+    return filterByFileExistence(diversified.slice(0, totalK))
+  }
+
   const initialK = Math.ceil(k * MIXED_SEARCH_CONFIG.retrieval.initialMultiplier)
   const workspaceK = getAdaptiveK(query, initialK, 'project')
   const libraryK = getAdaptiveK(query, initialK, 'library')
 
-  // Search both folders (get more results for rerank)
   const [workspaceResults, libraryResults] = await Promise.all([
     searchProjectFiles(query, projectId, geminiApiKey, openaiApiKey, fileIds, workspaceK).catch(() => [] as SearchResult[]),
     searchLibrary(query, projectId, 'library', geminiApiKey, openaiApiKey, fileIds, libraryK).catch(() => [] as SearchResult[]),
   ])
 
-  // Apply folder-specific filtering before rerank
   const filteredWorkspace = filterByRelevance(workspaceResults, 'project')
   const filteredLibrary = filterByRelevance(libraryResults, 'library')
-
-  // Rerank mixed results using normalized distances and RRF
   const mentionedFileIds = new Set(fileIds || [])
   const rerankedResults = rerankMixedResults(
     filteredWorkspace.length > 0 ? filteredWorkspace : workspaceResults,
@@ -813,14 +1003,8 @@ export async function searchWorkspaceAndLibrary(
     mentionedFileIds
   )
 
-  // Diversify by file to avoid over-representing one document
   const diversified = diversifyByFile(rerankedResults, 2)
-
-  // Filter by file existence - ensure all results are for existing, non-deleted files
-  // This is a final safety check even though searchLibrary/searchProjectFiles already filter
-  const finalResults = await filterByFileExistence(diversified.slice(0, k))
-
-  return finalResults
+  return filterByFileExistence(diversified.slice(0, k))
 }
 
 // Search configuration for library folder

@@ -14,6 +14,7 @@ import { extractPDFTextAsync } from './services/pdfTextExtractor.js';
 import { parseDocx, splitDocxIntoChapters } from './services/docxParser.js';
 import { saveApiKeys, getApiKeys } from './services/apiKeyStore.js';
 import { worldLabService } from './services/worldLabService.js';
+import { integrationService } from './services/integrationService.js';
 import path from 'path';
 import { app } from 'electron';
 import fs from 'fs/promises';
@@ -1016,6 +1017,107 @@ Rewritten text:`;
         }
         catch (error) {
             console.error('IPC indexing:incrementalIndexProjectFiles error:', error);
+            throw error;
+        }
+    });
+    // Integration operations
+    ipcMain.handle('integration:addSource', async (_, projectId, sourceType, config, displayName) => {
+        try {
+            return await integrationService.addSource(projectId, sourceType, config, displayName);
+        }
+        catch (error) {
+            console.error('IPC integration:addSource error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:startOAuth', async (event, projectId, sourceType) => {
+        try {
+            const parentWindow = BrowserWindow.fromWebContents(event.sender);
+            return await integrationService.startOAuth(projectId, sourceType, parentWindow);
+        }
+        catch (error) {
+            console.error('IPC integration:startOAuth error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:getOAuthConfigStatus', async (_, sourceType) => {
+        try {
+            return await integrationService.getOAuthConfigStatus(sourceType);
+        }
+        catch (error) {
+            console.error('IPC integration:getOAuthConfigStatus error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:saveOAuthConfig', async (_, sourceType, config) => {
+        try {
+            return await integrationService.saveOAuthConfig(sourceType, config);
+        }
+        catch (error) {
+            console.error('IPC integration:saveOAuthConfig error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:listGithubRepos', async (_, projectId, sourceId) => {
+        try {
+            return await integrationService.listGithubRepos(projectId, sourceId);
+        }
+        catch (error) {
+            console.error('IPC integration:listGithubRepos error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:getIndexedGithubRepos', async (_, projectId, sourceId) => {
+        try {
+            return await integrationService.getIndexedGithubRepos(projectId, sourceId);
+        }
+        catch (error) {
+            console.error('IPC integration:getIndexedGithubRepos error:', error);
+            return [];
+        }
+    });
+    ipcMain.handle('integration:updateGithubRepos', async (_, projectId, sourceId, repos) => {
+        try {
+            return await integrationService.updateGithubRepos(projectId, sourceId, repos);
+        }
+        catch (error) {
+            console.error('IPC integration:updateGithubRepos error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:removeSource', async (_, projectId, sourceId) => {
+        try {
+            return await integrationService.removeSource(projectId, sourceId);
+        }
+        catch (error) {
+            console.error('IPC integration:removeSource error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:getSources', async (_, projectId) => {
+        try {
+            return await integrationService.getSources(projectId);
+        }
+        catch (error) {
+            console.error('IPC integration:getSources error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:syncSource', async (_, projectId, sourceId, geminiApiKey, openaiApiKey) => {
+        try {
+            return await integrationService.syncSource(projectId, sourceId, geminiApiKey, openaiApiKey);
+        }
+        catch (error) {
+            console.error('IPC integration:syncSource error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:syncAll', async (_, projectId, geminiApiKey, openaiApiKey) => {
+        try {
+            return await integrationService.syncAll(projectId, geminiApiKey, openaiApiKey);
+        }
+        catch (error) {
+            console.error('IPC integration:syncAll error:', error);
             throw error;
         }
     });

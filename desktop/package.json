@@ -36,6 +36,7 @@
     "docx": "^9.5.1",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.7.3",
+    "fast-xml-parser": "^5.3.6",
     "happy-dom": "^20.0.2",
     "hnswlib-node": "^3.0.0",
     "mammoth": "^1.11.0",

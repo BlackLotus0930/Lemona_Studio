@@ -4,6 +4,21 @@ import { SearchResult } from './vectorStore.js'
 import { searchLibrary, searchWorkspaceAndLibrary, parseMentions, resolveFileMentionsAll } from './semanticSearchService.js'
 import { documentService } from './documentService.js'
 import { generateEmbedding } from './embeddingService.js'
+import { parseIntegrationFileId } from './integrationTypes.js'
+import { integrationStore } from './integrationStore.js'
+
+function sourceTypeLabel(sourceType: string): string {
+  if (sourceType === 'github') {
+    return 'GitHub'
+  }
+  if (sourceType === 'notion') {
+    return 'Notion'
+  }
+  if (sourceType === 'rss') {
+    return 'RSS'
+  }
+  return sourceType
+}
 
 /**
  * Reasoning step (defined locally to avoid compilation issues)
@@ -101,10 +116,26 @@ async function formatSearchResults(results: SearchResult[]): Promise<string> {
       if (document) {
         fileIdToTitle.set(fileId, document.title)
       } else {
-        fileIdToTitle.set(fileId, fileId) // Fallback to fileId if document not found
+        const parsedIntegration = parseIntegrationFileId(fileId)
+        if (parsedIntegration) {
+          const projectIdForFile = results.find(r => r.chunk.fileId === fileId)?.chunk.projectId
+          const source = await integrationStore.getSourceById(
+            projectIdForFile || '',
+            parsedIntegration.sourceId
+          )
+          const sourceName = source?.displayName || parsedIntegration.sourceId
+          fileIdToTitle.set(fileId, `${sourceTypeLabel(parsedIntegration.sourceType)}: ${sourceName}`)
+        } else {
+          fileIdToTitle.set(fileId, fileId) // Fallback to fileId if document not found
+        }
       }
     } catch (error) {
-      fileIdToTitle.set(fileId, fileId) // Fallback to fileId on error
+      const parsedIntegration = parseIntegrationFileId(fileId)
+      if (parsedIntegration) {
+        fileIdToTitle.set(fileId, `${sourceTypeLabel(parsedIntegration.sourceType)}: ${parsedIntegration.sourceId}`)
+      } else {
+        fileIdToTitle.set(fileId, fileId) // Fallback to fileId on error
+      }
     }
   }
 
@@ -165,7 +196,8 @@ export async function reason(
         geminiApiKey,
         openaiApiKey,
         effectiveFileIds,
-        6 // Initial k
+        6, // Initial k
+        mentions.sourceMentions
       )
     : await searchWorkspaceAndLibrary(
         searchQuery,
@@ -173,7 +205,8 @@ export async function reason(
         geminiApiKey,
         openaiApiKey,
         effectiveFileIds,
-        6 // Initial k
+        6, // Initial k
+        mentions.sourceMentions
       )
 
   allResults.push(...initialResults)
@@ -220,7 +253,8 @@ export async function reason(
               geminiApiKey,
               openaiApiKey,
               undefined,
-              6
+              6,
+              mentions.sourceMentions
             )
           : await searchWorkspaceAndLibrary(
               searchQuery,
@@ -228,7 +262,8 @@ export async function reason(
               geminiApiKey,
               openaiApiKey,
               undefined, // No file filter
-              6
+              6,
+              mentions.sourceMentions
             )
 
         // Merge results, avoiding duplicates

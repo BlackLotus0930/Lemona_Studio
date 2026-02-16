@@ -12,6 +12,7 @@ import { getVectorStore, cleanupVectorIndex } from './services/vectorStore.js';
 import { projectService } from './services/projectService.js';
 import { indexingService } from './services/indexingService.js';
 import { getApiKeys } from './services/apiKeyStore.js';
+import { startIntegrationScheduler, stopIntegrationScheduler } from './services/integrationScheduler.js';
 
 const { autoUpdater } = updater;
 
@@ -90,17 +91,28 @@ function setupCSP() {
   ];
   
   const csp = cspDirectives.join('; ');
-  
-  // Set CSP via session headers
+
+  function isOurAppUrl(url: string): boolean {
+    try {
+      const u = new URL(url);
+      if (u.protocol === 'file:') return true;
+      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return true;
+      if (u.hostname.endsWith('.localhost')) return true;
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  // Apply CSP only to our app's URLs so GitHub OAuth/2FA works in the OAuth window
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [csp]
-      }
-    });
+    const headers = { ...details.responseHeaders };
+    if (isOurAppUrl(details.url)) {
+      headers['Content-Security-Policy'] = [csp];
+    }
+    callback({ responseHeaders: headers });
   });
-  
+
   console.log(`✅ Content Security Policy configured (dev mode: ${isDev})`);
 }
 
@@ -356,6 +368,7 @@ app.whenReady().then(async () => {
   
   // Start background cleanup service for deleted documents
   documentService.startDeletedDocumentsCleanupService();
+  startIntegrationScheduler();
 
   // Then create window
   await createWindow();
@@ -370,6 +383,7 @@ app.whenReady().then(async () => {
 // Stop background services on app quit
 app.on('before-quit', () => {
   documentService.stopDeletedDocumentsCleanupService();
+  stopIntegrationScheduler();
 });
 
 /**

@@ -956,7 +956,7 @@ function FileExplorer({
     return null
   }
 
-  const renderFileItem = (item: FileItem, indentLevel: number = 0, index: number = 0): JSX.Element => {
+  const renderFileItem = (item: FileItem, indentLevel: number = 0): JSX.Element => {
     const isSelected = selectedId === item.id
     const isRenaming = renamingId === item.id
     const isFolder = item.type === 'folder'
@@ -1002,18 +1002,10 @@ function FileExplorer({
     const showIndicatorBelow = (!isFolder && draggedItemId && dropTargetId === item.id && dropPosition === 'below') ||
       (isCustomFolder && draggedFolderId && folderDropTargetId === item.id && folderDropPosition === 'below')
 
-    // Animation styles for file items (not folders) - fade in and slide down from top
-    const animationStyle = !isFolder ? {
-      animation: 'fileAppear 0.3s ease-out forwards',
-      animationDelay: `${index * 0.03}s`,
-      opacity: 0,
-      transform: 'translateY(-8px)',
-    } : {}
-
     return (
       <div
         key={item.id}
-        style={{ position: 'relative', width: '100%', boxSizing: 'border-box', margin: 0, padding: 0, ...animationStyle }}
+        style={{ position: 'relative', width: '100%', boxSizing: 'border-box', margin: 0, padding: 0 }}
       >
         {/* Drop indicator line above */}
         {showIndicatorAbove && (
@@ -1557,7 +1549,7 @@ function FileExplorer({
               backgroundColor: 'transparent',
             }}
           >
-            {item.children.map((child, childIndex) => renderFileItem(child, indentLevel + 1, childIndex))}
+            {item.children.map((child) => renderFileItem(child, indentLevel + 1))}
             
           </div>
         )}
@@ -1959,16 +1951,6 @@ function FileExplorer({
             transform: scale(1);
           }
         }
-        @keyframes fileAppear {
-          from {
-            opacity: 0;
-            transform: translateY(-8px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
       `}} />
       <div
         ref={fileExplorerScrollRef}
@@ -2011,7 +1993,7 @@ function FileExplorer({
           renderSearchUI()
         ) : (
           <>
-            {fileTree.map((item, index) => renderFileItem(item, 0, index))}
+            {fileTree.map((item) => renderFileItem(item, 0))}
           </>
         )
       })()}
