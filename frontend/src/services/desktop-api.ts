@@ -4,7 +4,7 @@ import { Project, AIChatMessage, DocumentSnapshot, WorldLab, WorldLabNode, World
 export interface IntegrationSource {
   id: string
   projectId: string
-  sourceType: 'rss' | 'github' | 'notion'
+  sourceType: 'rss' | 'github' | 'gitlab' | 'slack' | 'linear' | 'stripe' | 'sentry' | 'posthog' | 'metabase' | 'notion' | 'quickbooks' | 'hubspot' | 'db-schema'
   config: Record<string, unknown>
   connectionStatus?: 'connected' | 'disconnected' | 'expired' | 'error'
   displayName?: string
@@ -15,16 +15,39 @@ export interface IntegrationSource {
 
 export interface IntegrationSyncResult {
   sourceId: string
-  sourceType: 'rss' | 'github' | 'notion'
+  sourceType: 'rss' | 'github' | 'gitlab' | 'slack' | 'linear' | 'stripe' | 'sentry' | 'posthog' | 'metabase' | 'notion' | 'quickbooks' | 'hubspot' | 'db-schema'
   itemCount: number
   chunkCount: number
   syncedAt: string
 }
 
 export interface OAuthConfigStatus {
-  sourceType: 'github'
+  sourceType: 'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks'
   configured: boolean
   configSource: 'saved' | 'env' | 'missing'
+}
+
+export type AiProviderType = 'builtin-gemini' | 'builtin-openai' | 'custom-openai'
+
+export interface AiProviderProfile {
+  id: string
+  name: string
+  type: AiProviderType
+  baseUrl?: string
+  apiKey?: string
+  chatModel?: string
+  embeddingModel?: string
+  embeddingDimension?: number
+  enabled?: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AiProviderState {
+  profiles: AiProviderProfile[]
+  activeChatProviderId: string
+  activeEmbeddingProviderId: string
+  updatedAt: string
 }
 
 // Check if running in Electron
@@ -314,18 +337,32 @@ export const settingsApi = {
       throw error
     }
   },
+  getAiProviderState: async (): Promise<AiProviderState> => {
+    return invokeOrFetch('settings:getAiProviderState')
+  },
+  saveAiProviderProfile: async (profile: Omit<AiProviderProfile, 'createdAt' | 'updatedAt'>): Promise<AiProviderProfile> => {
+    return invokeOrFetch('settings:saveAiProviderProfile', profile)
+  },
+  removeAiProviderProfile: async (profileId: string): Promise<{ success: boolean }> => {
+    return invokeOrFetch('settings:removeAiProviderProfile', profileId)
+  },
+  setActiveAiProviders: async (active: { chatProviderId?: string; embeddingProviderId?: string }): Promise<AiProviderState> => {
+    return invokeOrFetch('settings:setActiveAiProviders', active)
+  },
 }
 
 export const integrationApi = {
   getSources: (projectId: string): Promise<IntegrationSource[]> =>
     invokeOrFetch('integration:getSources', projectId),
-  addSource: (projectId: string, sourceType: 'rss' | 'github', config: Record<string, unknown>, displayName?: string): Promise<IntegrationSource> =>
+  addSource: (projectId: string, sourceType: 'rss' | 'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks' | 'linear' | 'stripe' | 'sentry' | 'posthog' | 'metabase' | 'hubspot' | 'db-schema', config: Record<string, unknown>, displayName?: string): Promise<IntegrationSource> =>
     invokeOrFetch('integration:addSource', projectId, sourceType, config, displayName),
-  startOAuth: (projectId: string, sourceType: 'github'): Promise<IntegrationSource> =>
+  selectDbSchemaFolder: (): Promise<{ canceled: boolean; path: string | null }> =>
+    invokeOrFetch('integration:selectDbSchemaFolder'),
+  startOAuth: (projectId: string, sourceType: 'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks'): Promise<IntegrationSource> =>
     invokeOrFetch('integration:startOAuth', projectId, sourceType),
-  getOAuthConfigStatus: (sourceType: 'github'): Promise<OAuthConfigStatus> =>
+  getOAuthConfigStatus: (sourceType: 'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks'): Promise<OAuthConfigStatus> =>
     invokeOrFetch('integration:getOAuthConfigStatus', sourceType),
-  saveOAuthConfig: async (sourceType: 'github', config: { clientId: string; clientSecret: string }): Promise<OAuthConfigStatus> => {
+  saveOAuthConfig: async (sourceType: 'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks', config: { clientId: string; clientSecret: string }): Promise<OAuthConfigStatus> => {
     try {
       return await invokeOrFetch('integration:saveOAuthConfig', sourceType, config)
     } catch (error: any) {
@@ -347,6 +384,24 @@ export const integrationApi = {
     invokeOrFetch('integration:getIndexedGithubRepos', projectId, sourceId),
   updateGithubRepos: (projectId: string, sourceId: string, repos: string[]): Promise<IntegrationSource> =>
     invokeOrFetch('integration:updateGithubRepos', projectId, sourceId, repos),
+  listGitlabRepos: (projectId: string, sourceId: string): Promise<string[]> =>
+    invokeOrFetch('integration:listGitlabRepos', projectId, sourceId),
+  getIndexedGitlabRepos: (projectId: string, sourceId: string): Promise<string[]> =>
+    invokeOrFetch('integration:getIndexedGitlabRepos', projectId, sourceId),
+  updateGitlabRepos: (projectId: string, sourceId: string, repos: string[]): Promise<IntegrationSource> =>
+    invokeOrFetch('integration:updateGitlabRepos', projectId, sourceId, repos),
+  listSlackChannels: (projectId: string, sourceId: string): Promise<{ id: string; name: string; isPrivate: boolean }[]> =>
+    invokeOrFetch('integration:listSlackChannels', projectId, sourceId),
+  getIndexedSlackChannels: (projectId: string, sourceId: string): Promise<string[]> =>
+    invokeOrFetch('integration:getIndexedSlackChannels', projectId, sourceId),
+  updateSlackChannels: (projectId: string, sourceId: string, channels: string[]): Promise<IntegrationSource> =>
+    invokeOrFetch('integration:updateSlackChannels', projectId, sourceId, channels),
+  listNotionPages: (projectId: string, sourceId: string): Promise<{ id: string; title: string; url?: string }[]> =>
+    invokeOrFetch('integration:listNotionPages', projectId, sourceId),
+  getIndexedNotionPages: (projectId: string, sourceId: string): Promise<string[]> =>
+    invokeOrFetch('integration:getIndexedNotionPages', projectId, sourceId),
+  updateNotionPages: (projectId: string, sourceId: string, pageIds: string[]): Promise<IntegrationSource> =>
+    invokeOrFetch('integration:updateNotionPages', projectId, sourceId, pageIds),
 }
 
 export const indexingApi = {

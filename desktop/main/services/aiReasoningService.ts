@@ -11,13 +11,130 @@ function sourceTypeLabel(sourceType: string): string {
   if (sourceType === 'github') {
     return 'GitHub'
   }
+  if (sourceType === 'gitlab') {
+    return 'GitLab'
+  }
+  if (sourceType === 'slack') {
+    return 'Slack'
+  }
   if (sourceType === 'notion') {
     return 'Notion'
+  }
+  if (sourceType === 'quickbooks') {
+    return 'QuickBooks'
+  }
+  if (sourceType === 'hubspot') {
+    return 'HubSpot'
+  }
+  if (sourceType === 'linear') {
+    return 'Linear'
+  }
+  if (sourceType === 'stripe') {
+    return 'Stripe'
+  }
+  if (sourceType === 'sentry') {
+    return 'Sentry'
+  }
+  if (sourceType === 'posthog') {
+    return 'PostHog'
+  }
+  if (sourceType === 'metabase') {
+    return 'Metabase'
+  }
+  if (sourceType === 'db-schema') {
+    return 'DB Schema'
   }
   if (sourceType === 'rss') {
     return 'RSS'
   }
   return sourceType
+}
+
+function formatIntegrationItemDetail(sourceType: string, itemId: string): string {
+  const parts = itemId.split(':')
+
+  if (sourceType === 'github') {
+    if (parts.length >= 3 && parts[1] === 'issue') {
+      return `Issue #${parts.slice(2).join(':')} (${parts[0]})`
+    }
+    if (parts.length >= 3 && parts[1] === 'pr') {
+      return `PR #${parts.slice(2).join(':')} (${parts[0]})`
+    }
+    if (parts.length >= 3 && parts[1] === 'file') {
+      return `File ${parts.slice(2).join(':')} (${parts[0]})`
+    }
+  }
+
+  if (sourceType === 'linear') {
+    if (parts[0] === 'issue') return `Issue ${parts.slice(1).join(':')}`
+    if (parts[0] === 'project') return `Project ${parts.slice(1).join(':')}`
+    if (parts[0] === 'cycle') return `Cycle ${parts.slice(1).join(':')}`
+  }
+
+  if (sourceType === 'gitlab') {
+    if (parts[0] === 'issue') return `Issue ${parts.slice(1).join(':')}`
+    if (parts[0] === 'mr') return `MR !${parts.slice(1).join(':')}`
+    if (parts[0] === 'file') return `File ${parts.slice(1).join(':')}`
+  }
+
+  if (sourceType === 'slack') {
+    if (parts[1] === 'msg') return `Channel message`
+    return `Channel #${parts[0] || ''}`
+  }
+
+  if (sourceType === 'stripe') {
+    if (parts[0] === 'customer') return `Customer ${parts.slice(1).join(':')}`
+    if (parts[0] === 'product') return `Product ${parts.slice(1).join(':')}`
+    if (parts[0] === 'subscription') return `Subscription ${parts.slice(1).join(':')}`
+    if (parts[0] === 'invoice') return `Invoice ${parts.slice(1).join(':')}`
+  }
+
+  if (sourceType === 'sentry') {
+    if (parts[0] === 'issue') return `Issue ${parts.slice(1).join(':')}`
+  }
+
+  if (sourceType === 'posthog') {
+    if (parts[0] === 'dashboard') return `Dashboard ${parts.slice(1).join(':')}`
+    if (parts[0] === 'insight') return `Insight ${parts.slice(1).join(':')}`
+  }
+
+  if (sourceType === 'metabase') {
+    if (parts[0] === 'dashboard') return `Dashboard ${parts.slice(1).join(':')}`
+    if (parts[0] === 'question') return `Question ${parts.slice(1).join(':')}`
+  }
+
+  if (sourceType === 'notion') {
+    if (parts[0] === 'page') return `Page ${parts.slice(1).join(':')}`
+    return `Page`
+  }
+
+  if (sourceType === 'quickbooks') {
+    if (parts[0] === 'customer') return `Customer ${parts.slice(1).join(':')}`
+    if (parts[0] === 'invoice') return `Invoice ${parts.slice(1).join(':')}`
+  }
+
+  if (sourceType === 'hubspot') {
+    if (parts[0] === 'contact') return `Contact ${parts.slice(1).join(':')}`
+    if (parts[0] === 'deal') return `Deal ${parts.slice(1).join(':')}`
+    if (parts[0] === 'company') return `Company ${parts.slice(1).join(':')}`
+  }
+
+  if (sourceType === 'rss') {
+    return 'Feed Item'
+  }
+
+  if (sourceType === 'db-schema') {
+    if (parts[0] === 'file') return `Schema file: ${parts.slice(1).join(':')}`
+    return `Schema: ${itemId}`
+  }
+
+  return parts[0] || itemId
+}
+
+function formatIntegrationReference(sourceType: string, sourceName: string, itemId: string): string {
+  const sourceLabel = sourceTypeLabel(sourceType)
+  const detail = formatIntegrationItemDetail(sourceType, itemId)
+  return `${sourceLabel} • ${detail} • ${sourceName}`
 }
 
 /**
@@ -124,7 +241,7 @@ async function formatSearchResults(results: SearchResult[]): Promise<string> {
             parsedIntegration.sourceId
           )
           const sourceName = source?.displayName || parsedIntegration.sourceId
-          fileIdToTitle.set(fileId, `${sourceTypeLabel(parsedIntegration.sourceType)}: ${sourceName}`)
+          fileIdToTitle.set(fileId, formatIntegrationReference(parsedIntegration.sourceType, sourceName, parsedIntegration.itemId))
         } else {
           fileIdToTitle.set(fileId, fileId) // Fallback to fileId if document not found
         }
@@ -132,7 +249,10 @@ async function formatSearchResults(results: SearchResult[]): Promise<string> {
     } catch (error) {
       const parsedIntegration = parseIntegrationFileId(fileId)
       if (parsedIntegration) {
-        fileIdToTitle.set(fileId, `${sourceTypeLabel(parsedIntegration.sourceType)}: ${parsedIntegration.sourceId}`)
+        fileIdToTitle.set(
+          fileId,
+          formatIntegrationReference(parsedIntegration.sourceType, parsedIntegration.sourceId, parsedIntegration.itemId)
+        )
       } else {
         fileIdToTitle.set(fileId, fileId) // Fallback to fileId on error
       }

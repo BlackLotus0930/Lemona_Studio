@@ -15,7 +15,8 @@ import LightModeIcon from '@mui/icons-material/LightMode'
 import KeyboardIcon from '@mui/icons-material/Keyboard'
 // @ts-ignore
 import ShareIcon from '@mui/icons-material/Share'
-
+// @ts-ignore
+import CableIcon from '@mui/icons-material/Cable';
 // Check if running in Electron
 const isElectron = typeof window !== 'undefined' && window.electron !== undefined
 
@@ -25,6 +26,7 @@ interface TopBarProps {
   onTabClick?: (docId: string) => void
   onTabClose?: (e: React.MouseEvent, docId: string) => void
   onTabReorder?: (draggedId: string, targetId: string, position: 'left' | 'right') => void
+  onOpenAiSettingsTab?: () => void
   onExportClick?: () => void
   exportButtonRef?: React.RefObject<HTMLButtonElement>
 }
@@ -35,6 +37,7 @@ function TopBar({
   onTabClick,
   onTabClose,
   onTabReorder,
+  onOpenAiSettingsTab,
   onExportClick,
   exportButtonRef
 }: TopBarProps) {
@@ -246,6 +249,35 @@ function TopBar({
                     gap: '2px'
                   }}
                 >
+                  <button
+                    onClick={() => {
+                      onOpenAiSettingsTab?.()
+                      setShowSettingsMenu(false)
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      width: '100%',
+                      padding: '8px 10px',
+                      border: 'none',
+                      background: 'transparent',
+                      color: dropdownText,
+                      fontSize: '12px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      textAlign: 'left'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = dropdownHover
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent'
+                    }}
+                  >
+                    <CableIcon style={{ fontSize: '16px', color: dropdownMuted }} />
+                    Custom AI Endpoints
+                  </button>
                   <button
                     ref={keyboardShortcutsButtonRef}
                     onClick={() => {

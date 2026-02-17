@@ -1,9 +1,10 @@
 // Semantic Search Service - Parse @mentions and perform semantic search
-import { generateEmbedding } from './embeddingService.js'
+import { generateEmbeddingWithConfig } from './embeddingService.js'
 import { getVectorStore, SearchResult, getProjectLockManager } from './vectorStore.js'
 import { documentService } from './documentService.js'
 import { indexProjectLibraryFiles, indexProjectWorkspaceFiles } from './indexingService.js'
 import { parseIntegrationFileId } from './integrationTypes.js'
+import { aiProviderStore, buildEmbeddingIndexKey } from './aiProviderStore.js'
 
 /**
  * Parsed mention information
@@ -11,7 +12,7 @@ import { parseIntegrationFileId } from './integrationTypes.js'
 export interface ParsedMentions {
   hasLibraryMention: boolean // @Library mentioned
   fileMentions: string[] // Array of file IDs or file names mentioned
-  sourceMentions: Array<'github' | 'notion'> // Source mentions like @github, @notion
+  sourceMentions: Array<'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks' | 'hubspot' | 'linear' | 'stripe' | 'sentry' | 'posthog' | 'metabase' | 'db-schema'> // Source mentions like @github, @slack, @notion, etc.
   originalMessage: string // Original message text
   cleanedMessage: string // Message with @mentions removed (for embedding)
 }
@@ -71,7 +72,7 @@ export function parseMentions(message: string): ParsedMentions {
     // Check for @Library mention
     if (mention === 'library') {
       result.hasLibraryMention = true
-    } else if (mention === 'github' || mention === 'notion') {
+    } else if (mention === 'github' || mention === 'gitlab' || mention === 'slack' || mention === 'notion' || mention === 'quickbooks' || mention === 'hubspot' || mention === 'linear' || mention === 'stripe' || mention === 'sentry' || mention === 'posthog' || mention === 'metabase' || mention === 'db-schema') {
       if (!result.sourceMentions.includes(mention)) {
         result.sourceMentions.push(mention)
       }
@@ -292,7 +293,7 @@ async function filterByFileExistence(results: SearchResult[]): Promise<SearchRes
 
 function filterResultsBySourceMentions(
   results: SearchResult[],
-  sourceMentions?: Array<'github' | 'notion'>
+  sourceMentions?: Array<'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks' | 'hubspot' | 'linear' | 'stripe' | 'sentry' | 'posthog' | 'metabase' | 'db-schema'>
 ): SearchResult[] {
   if (!sourceMentions || sourceMentions.length === 0) {
     return results
@@ -302,7 +303,7 @@ function filterResultsBySourceMentions(
     if (!parsed) {
       return false
     }
-    return sourceMentions.includes(parsed.sourceType as 'github' | 'notion')
+    return sourceMentions.includes(parsed.sourceType as 'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks' | 'hubspot' | 'linear' | 'stripe' | 'sentry' | 'posthog' | 'metabase' | 'db-schema')
   })
 }
 
@@ -345,7 +346,7 @@ export async function searchLibrary(
   openaiApiKey?: string,
   fileIds?: string[],
   k: number = 6,
-  sourceMentions?: Array<'github' | 'notion'>
+  sourceMentions?: Array<'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks' | 'hubspot' | 'linear' | 'stripe' | 'sentry' | 'posthog' | 'metabase' | 'db-schema'>
 ): Promise<SearchResult[]> {
   if (!query || query.trim().length === 0) {
     return []
@@ -385,11 +386,9 @@ export async function searchLibrary(
 
   try {
     // Generate query embedding
-    const { embedding } = await generateEmbedding(
-      query.trim(),
-      geminiApiKey,
-      openaiApiKey
-    )
+    const embeddingConfig = await aiProviderStore.getActiveEmbeddingConfig(geminiApiKey, openaiApiKey)
+    const indexKey = buildEmbeddingIndexKey(embeddingConfig)
+    const { embedding } = await generateEmbeddingWithConfig(query.trim(), embeddingConfig, geminiApiKey, openaiApiKey)
 
     // Get vector store for the correct project and folder
     const projectLockManager = getProjectLockManager()
@@ -398,7 +397,7 @@ export async function searchLibrary(
     let releaseLock = await projectLockManager.acquireReadLock(projectId)
     
     try {
-      const vectorStore = getVectorStore(projectId, folder)
+      const vectorStore = getVectorStore(projectId, folder, indexKey)
       
       // Try to load with read lock first
       try {
@@ -668,7 +667,7 @@ export async function resolveFileMentionsAll(
 async function searchIntegrationBySourceTypes(
   query: string,
   projectId: string,
-  sourceTypes: Array<'github' | 'notion'>,
+  sourceTypes: Array<'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks' | 'hubspot' | 'linear' | 'stripe' | 'sentry' | 'posthog' | 'metabase' | 'db-schema'>,
   geminiApiKey?: string,
   openaiApiKey?: string,
   k: number = MIXED_SEARCH_CONFIG.integrationMention.dedicatedK
@@ -679,17 +678,15 @@ async function searchIntegrationBySourceTypes(
   if (!hasGeminiKey && !hasOpenaiKey) return []
 
   try {
-    const { embedding } = await generateEmbedding(
-      query.trim(),
-      geminiApiKey,
-      openaiApiKey
-    )
+    const embeddingConfig = await aiProviderStore.getActiveEmbeddingConfig(geminiApiKey, openaiApiKey)
+    const indexKey = buildEmbeddingIndexKey(embeddingConfig)
+    const { embedding } = await generateEmbeddingWithConfig(query.trim(), embeddingConfig, geminiApiKey, openaiApiKey)
 
     const projectLockManager = getProjectLockManager()
     let releaseLock = await projectLockManager.acquireReadLock(projectId)
 
     try {
-      const vectorStore = getVectorStore(projectId, 'library')
+      const vectorStore = getVectorStore(projectId, 'library', indexKey)
       try {
         await vectorStore.loadIndexUnsafe()
       } catch (loadError: any) {
@@ -918,7 +915,7 @@ export async function searchWorkspaceAndLibrary(
   openaiApiKey?: string,
   fileIds?: string[],
   k: number = MIXED_SEARCH_CONFIG.retrieval.defaultTotalK,
-  sourceMentions?: Array<'github' | 'notion'>
+  sourceMentions?: Array<'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks' | 'hubspot' | 'linear' | 'stripe' | 'sentry' | 'posthog' | 'metabase' | 'db-schema'>
 ): Promise<SearchResult[]> {
   if (!query || query.trim().length === 0) {
     return []

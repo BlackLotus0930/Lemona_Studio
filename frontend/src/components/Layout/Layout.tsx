@@ -67,6 +67,8 @@ import IntegrationsSidebar from '../Integrations/IntegrationsSidebar'
 import IntegrationDetailView from '../Integrations/IntegrationDetailView'
 import { IntegrationsProvider } from '../Integrations/IntegrationsContext'
 import type { IntegrationTabItem } from '../Integrations/IntegrationsContext'
+import AiSettingsDetailView, { type AiSettingsTabItem } from '../AISettings/AiSettingsDetailView'
+import { AiSettingsProvider } from '../AISettings/AiSettingsContext'
 
 const AI_PANEL_STORAGE_KEY = 'aiPanelState'
 const FILE_EXPLORER_SIZE_STORAGE_KEY = 'fileExplorerSize'
@@ -605,6 +607,7 @@ export default function Layout(): JSX.Element {
   const [showExportModal, setShowExportModal] = useState(false)
   const [showIntegrationsPanel, setShowIntegrationsPanel] = useState(false)
   const [integrationTabs, setIntegrationTabs] = useState<IntegrationTabItem[]>([])
+  const [aiSettingsTabs, setAiSettingsTabs] = useState<AiSettingsTabItem[]>([])
   const exportButtonRef = useRef<HTMLButtonElement>(null)
   const [isProjectHeaderHovered, setIsProjectHeaderHovered] = useState(false)
   const [isRenamingProjectName, setIsRenamingProjectName] = useState(false)
@@ -1170,7 +1173,11 @@ export default function Layout(): JSX.Element {
   
   // Load project name immediately for shell UI, then load documents
   useEffect(() => {
-    const currentProjectId = document?.projectId
+    const activeDocTabProjectId =
+      activeTabId && !activeTabId.startsWith('int-') && !activeTabId.startsWith('ai-')
+        ? openTabs.find(tab => tab.id === activeTabId)?.projectId
+        : undefined
+    const currentProjectId = document?.projectId || activeDocTabProjectId || openTabs[0]?.projectId
     
     // Function to load project name from API (always fresh)
     const loadProjectName = () => {
@@ -1209,7 +1216,12 @@ export default function Layout(): JSX.Element {
           const filteredTabs = prevTabs.filter(tab => tab.projectId === currentProjectId)
           
           // If active tab doesn't belong to current project, clear it
-          if (activeTabId && !filteredTabs.find(tab => tab.id === activeTabId)) {
+          if (
+            activeTabId &&
+            !activeTabId.startsWith('int-') &&
+            !activeTabId.startsWith('ai-') &&
+            !filteredTabs.find(tab => tab.id === activeTabId)
+          ) {
             setActiveTabId(null)
           }
           
@@ -1271,7 +1283,7 @@ export default function Layout(): JSX.Element {
     return () => {
       window.removeEventListener('projectRenamed', handleProjectRenameEvent as EventListener)
     }
-  }, [document?.projectId, activeTabId]) // Reload when project changes
+  }, [document?.projectId, activeTabId, openTabs]) // Reload when project changes
 
   // Also try to load documents when we have an id but no document yet (e.g., document failed to load)
   // This ensures the file explorer shows documents even if the current document doesn't load
@@ -1929,7 +1941,7 @@ export default function Layout(): JSX.Element {
   // Handle tab click (switch to tab)
   const handleTabClick = (tabId: string) => {
     setActiveTabId(tabId)
-    if (!tabId.startsWith('int-')) {
+    if (!tabId.startsWith('int-') && !tabId.startsWith('ai-')) {
       navigate(`/document/${tabId}`)
     }
   }
@@ -1937,10 +1949,22 @@ export default function Layout(): JSX.Element {
   const allTabsForDisplay = useMemo(() => {
     const docTabs = openTabs.map(d => ({ id: d.id, title: d.title }))
     const intTabs = integrationTabs.map(t => ({ id: t.id, title: t.title }))
-    return [...docTabs, ...intTabs]
-  }, [openTabs, integrationTabs])
+    const aiTabs = aiSettingsTabs.map(t => ({ id: t.id, title: t.title }))
+    return [...docTabs, ...intTabs, ...aiTabs]
+  }, [openTabs, integrationTabs, aiSettingsTabs])
 
-  const handleOpenIntegrationInEditor = useCallback((tab: IntegrationTabItem) => {
+  const openOrFocusAppTab = useCallback((tab: IntegrationTabItem | AiSettingsTabItem) => {
+    if (tab.type === 'ai-settings') {
+      const existing = aiSettingsTabs.find(t => t.id === tab.id)
+      if (existing) {
+        setActiveTabId(tab.id)
+        return
+      }
+      setAiSettingsTabs(prev => [...prev, tab])
+      setActiveTabId(tab.id)
+      return
+    }
+
     const existing = integrationTabs.find(t => t.id === tab.id)
     if (existing) {
       setActiveTabId(tab.id)
@@ -1948,7 +1972,20 @@ export default function Layout(): JSX.Element {
     }
     setIntegrationTabs(prev => [...prev, tab])
     setActiveTabId(tab.id)
-  }, [integrationTabs])
+  }, [aiSettingsTabs, integrationTabs])
+
+  const handleOpenIntegrationInEditor = useCallback((tab: IntegrationTabItem) => {
+    openOrFocusAppTab(tab)
+  }, [openOrFocusAppTab])
+
+  const handleOpenAiSettingsTab = useCallback(() => {
+      openOrFocusAppTab({
+        id: 'ai-settings',
+        title: 'Custom AI Endpoint',
+        type: 'ai-settings',
+        settingsTabId: 'ai-settings',
+      })
+  }, [openOrFocusAppTab])
 
   // Handle tab close
   const handleTabClose = (e: React.MouseEvent, tabId: string) => {
@@ -1960,6 +1997,29 @@ export default function Layout(): JSX.Element {
         if (activeTabId === tabId) {
           if (next.length > 0) {
             setActiveTabId(next[next.length - 1].id)
+          } else if (aiSettingsTabs.length > 0) {
+            setActiveTabId(aiSettingsTabs[aiSettingsTabs.length - 1].id)
+          } else if (openTabs.length > 0) {
+            setActiveTabId(openTabs[openTabs.length - 1].id)
+            navigate(`/document/${openTabs[openTabs.length - 1].id}`)
+          } else {
+            setActiveTabId(null)
+            navigate('/documents')
+          }
+        }
+        return next
+      })
+      return
+    }
+
+    if (tabId.startsWith('ai-')) {
+      setAiSettingsTabs(prev => {
+        const next = prev.filter(t => t.id !== tabId)
+        if (activeTabId === tabId) {
+          if (next.length > 0) {
+            setActiveTabId(next[next.length - 1].id)
+          } else if (integrationTabs.length > 0) {
+            setActiveTabId(integrationTabs[integrationTabs.length - 1].id)
           } else if (openTabs.length > 0) {
             setActiveTabId(openTabs[openTabs.length - 1].id)
             navigate(`/document/${openTabs[openTabs.length - 1].id}`)
@@ -1974,7 +2034,7 @@ export default function Layout(): JSX.Element {
     }
 
     setOpenTabs(prevTabs => {
-      const totalTabs = prevTabs.length + integrationTabs.length
+      const totalTabs = prevTabs.length + integrationTabs.length + aiSettingsTabs.length
       if (totalTabs <= 1) return prevTabs
 
       const newTabs = prevTabs.filter(tab => tab.id !== tabId)
@@ -1995,6 +2055,8 @@ export default function Layout(): JSX.Element {
           navigate(`/document/${targetTab.id}`)
         } else if (integrationTabs.length > 0) {
           setActiveTabId(integrationTabs[integrationTabs.length - 1].id)
+        } else if (aiSettingsTabs.length > 0) {
+          setActiveTabId(aiSettingsTabs[aiSettingsTabs.length - 1].id)
         } else {
           setActiveTabId(null)
           navigate('/documents')
@@ -2357,7 +2419,7 @@ export default function Layout(): JSX.Element {
   // Save activeTabId to localStorage whenever it changes (only document tabs, not integration tabs)
   useEffect(() => {
     try {
-      if (activeTabId && !activeTabId.startsWith('int-')) {
+      if (activeTabId && !activeTabId.startsWith('int-') && !activeTabId.startsWith('ai-')) {
         localStorage.setItem('activeTabId', activeTabId)
       } else if (!activeTabId) {
         localStorage.removeItem('activeTabId')
@@ -2385,7 +2447,7 @@ export default function Layout(): JSX.Element {
   // Restore tabs and navigate to active tab on mount if tabs were saved
   const hasRestoredTabsRef = useRef(false)
   useEffect(() => {
-    if (!hasRestoredTabsRef.current && openTabs.length > 0 && activeTabId && !activeTabId.startsWith('int-') && !id) {
+    if (!hasRestoredTabsRef.current && openTabs.length > 0 && activeTabId && !activeTabId.startsWith('int-') && !activeTabId.startsWith('ai-') && !id) {
       // Only restore if we're not already on a document page
       hasRestoredTabsRef.current = true
       // Check if the active tab still exists in the restored tabs
@@ -6355,6 +6417,22 @@ export default function Layout(): JSX.Element {
           }
         }
       `}} />
+      <IntegrationsProvider
+        projectId={document?.projectId || documents.find(doc => doc.projectId && doc.projectId.trim() !== '')?.projectId || null}
+        onSourceRemoved={(sourceId) => {
+          const removedTabId = `int-source-${sourceId}`
+          setIntegrationTabs(prev => {
+            const next = prev.filter(t => !(t.type === 'source' && t.source.id === sourceId))
+            if (activeTabId === removedTabId) {
+              if (next.length > 0) setActiveTabId(next[next.length - 1].id)
+              else if (openTabs.length > 0) setActiveTabId(openTabs[openTabs.length - 1].id)
+              else setActiveTabId(null)
+            }
+            return next
+          })
+        }}
+      >
+      <AiSettingsProvider>
       <div style={{ 
         height: '100vh', 
         display: 'flex', 
@@ -6368,6 +6446,7 @@ export default function Layout(): JSX.Element {
         onTabClick={handleTabClick}
         onTabClose={handleTabClose}
         onTabReorder={handleTabReorder}
+        onOpenAiSettingsTab={handleOpenAiSettingsTab}
         onExportClick={() => {
           setIsSearchMode(false)
           setIsGitMode(false)
@@ -6390,21 +6469,6 @@ export default function Layout(): JSX.Element {
       }} />
       
       {/* Content Area - Horizontal split with FileExplorer sidebar */}
-      <IntegrationsProvider
-        projectId={document?.projectId || documents.find(doc => doc.projectId && doc.projectId.trim() !== '')?.projectId || null}
-        onSourceRemoved={(sourceId) => {
-          const removedTabId = `int-source-${sourceId}`
-          setIntegrationTabs(prev => {
-            const next = prev.filter(t => !(t.type === 'source' && t.source.id === sourceId))
-            if (activeTabId === removedTabId) {
-              if (next.length > 0) setActiveTabId(next[next.length - 1].id)
-              else if (openTabs.length > 0) setActiveTabId(openTabs[openTabs.length - 1].id)
-              else setActiveTabId(null)
-            }
-            return next
-          })
-        }}
-      >
       <PanelGroup 
         direction="horizontal" 
         style={{ flex: 1, overflow: 'hidden' }}
@@ -7160,6 +7224,11 @@ export default function Layout(): JSX.Element {
                 </div>
               ) : null
             })()
+          ) : activeTabId?.startsWith('ai-') ? (
+            (() => {
+              const aiTab = aiSettingsTabs.find(t => t.id === activeTabId)
+              return aiTab ? <AiSettingsDetailView tab={aiTab} /> : null
+            })()
           ) : isLoadingDocument && !document ? (
             // Show skeleton in editor area when loading first document
             <DocumentEditorSkeleton />
@@ -7423,7 +7492,6 @@ export default function Layout(): JSX.Element {
           </button>
         )}
       </PanelGroup>
-      </IntegrationsProvider>
       
       {/* Word Count Modal */}
       <WordCountModal
@@ -7750,6 +7818,8 @@ export default function Layout(): JSX.Element {
         </div>
       ))}
       </div>
+      </AiSettingsProvider>
+      </IntegrationsProvider>
     </>
   )
 }

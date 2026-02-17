@@ -76,17 +76,24 @@ async function extractPDFTextFromBase64(base64Data: string): Promise<string> {
 // Store API key instances per API key to allow multiple users
 const openaiCache: Map<string, OpenAI> = new Map()
 
-function getClient(apiKey: string): OpenAI {
+function getClient(apiKey: string, baseUrl?: string): OpenAI {
   if (!apiKey) {
     throw new Error('OpenAI API key is not configured. Please set it in Settings > API Keys.')
   }
-  
+
+  const cacheKey = `${apiKey}::${baseUrl || ''}`
   // Use cached instance if available, otherwise create new one
-  if (!openaiCache.has(apiKey)) {
-    openaiCache.set(apiKey, new OpenAI({ apiKey }))
+  if (!openaiCache.has(cacheKey)) {
+    openaiCache.set(
+      cacheKey,
+      new OpenAI({
+        apiKey,
+        ...(baseUrl ? { baseURL: baseUrl } : {}),
+      })
+    )
   }
-  
-  return openaiCache.get(apiKey)!
+
+  return openaiCache.get(cacheKey)!
 }
 
 // Map model names to OpenAI model identifiers
@@ -551,8 +558,8 @@ Summary:`
 }
 
 export const openaiService = {
-  async chat(apiKey: string, message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string, style?: string, attachments?: ChatAttachment[], geminiApiKey?: string): Promise<AIChatMessage> {
-    const client = getClient(apiKey)
+  async chat(apiKey: string, message: string, documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], modelName?: string, style?: string, attachments?: ChatAttachment[], geminiApiKey?: string, baseUrl?: string): Promise<AIChatMessage> {
+    const client = getClient(apiKey, baseUrl)
     const model = getModelName(modelName || 'gpt-4.1-nano', attachments && attachments.length > 0)
     const { systemInstruction, chatHistory: history } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey)
     
@@ -722,9 +729,10 @@ export const openaiService = {
     modelName?: string,
     attachments?: ChatAttachment[],
     style?: string,
-    geminiApiKey?: string
+    geminiApiKey?: string,
+    baseUrl?: string
   ): AsyncGenerator<string> {
-    const client = getClient(apiKey)
+    const client = getClient(apiKey, baseUrl)
     const model = getModelName(modelName || 'gpt-4.1-nano', attachments && attachments.length > 0)
     const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey)
     
@@ -981,9 +989,10 @@ export const openaiService = {
     cursorPosition: number,
     documentContent?: string,
     projectId?: string,
-    modelName?: string
+    modelName?: string,
+    baseUrl?: string
   ): Promise<AutocompleteSuggestion> {
-    const client = getClient(apiKey)
+    const client = getClient(apiKey, baseUrl)
     const model = getModelName(modelName || 'gpt-4.1-nano', false)
     const { systemInstruction } = await buildContext(documentContent, projectId, undefined, undefined, undefined, apiKey)
     const beforeCursor = text.slice(0, cursorPosition)

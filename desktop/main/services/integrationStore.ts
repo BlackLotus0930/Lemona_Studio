@@ -4,8 +4,19 @@ import path from 'path'
 import crypto from 'crypto'
 import {
   GithubIntegrationConfig,
+  GitlabIntegrationConfig,
+  HubSpotIntegrationConfig,
+  DbSchemaIntegrationConfig,
   IntegrationSource,
   IntegrationSourceConfig,
+  LinearIntegrationConfig,
+  NotionIntegrationConfig,
+  QuickBooksIntegrationConfig,
+  SlackIntegrationConfig,
+  MetabaseIntegrationConfig,
+  PosthogIntegrationConfig,
+  SentryIntegrationConfig,
+  StripeIntegrationConfig,
   IntegrationSourceType,
   RssIntegrationConfig,
 } from './integrationTypes.js'
@@ -82,6 +93,103 @@ export const integrationStore = {
         ? config.login.trim()
         : undefined
       normalizedConfig = { repos, login } as GithubIntegrationConfig
+    } else if (sourceType === 'gitlab') {
+      const repos = Array.isArray(config.repos)
+        ? config.repos.filter((repo): repo is string => typeof repo === 'string' && repo.trim().length > 0).map(repo => repo.trim())
+        : undefined
+      const login = typeof config.login === 'string' && config.login.trim().length > 0
+        ? config.login.trim()
+        : undefined
+      normalizedConfig = { repos, login } as GitlabIntegrationConfig
+    } else if (sourceType === 'slack') {
+      const channels = Array.isArray(config.channels)
+        ? config.channels.filter((ch): ch is string => typeof ch === 'string' && ch.trim().length > 0).map(ch => ch.trim())
+        : undefined
+      const teamName = typeof config.teamName === 'string' && config.teamName.trim().length > 0
+        ? config.teamName.trim()
+        : undefined
+      const teamId = typeof config.teamId === 'string' && config.teamId.trim().length > 0
+        ? config.teamId.trim()
+        : undefined
+      normalizedConfig = { channels, teamName, teamId } as SlackIntegrationConfig
+    } else if (sourceType === 'linear') {
+      const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : ''
+      if (!apiKey) {
+        throw new Error('Linear API key is required')
+      }
+      normalizedConfig = { apiKey } as LinearIntegrationConfig
+    } else if (sourceType === 'stripe') {
+      const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : ''
+      if (!apiKey) {
+        throw new Error('Stripe API key is required')
+      }
+      normalizedConfig = { apiKey } as StripeIntegrationConfig
+    } else if (sourceType === 'sentry') {
+      const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : ''
+      const organization = typeof config.organization === 'string' ? config.organization.trim() : ''
+      if (!apiKey) {
+        throw new Error('Sentry API token is required')
+      }
+      if (!organization) {
+        throw new Error('Sentry organization slug is required')
+      }
+      const host = typeof config.host === 'string' && config.host.trim().length > 0
+        ? config.host.trim().replace(/\/$/, '')
+        : undefined
+      normalizedConfig = { apiKey, organization, ...(host ? { host } : {}) } as SentryIntegrationConfig
+    } else if (sourceType === 'posthog') {
+      const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : ''
+      const projectIdConfig = typeof config.projectId === 'string' ? config.projectId.trim() : ''
+      if (!apiKey) {
+        throw new Error('PostHog API key is required')
+      }
+      if (!projectIdConfig) {
+        throw new Error('PostHog project ID is required')
+      }
+      const host = typeof config.host === 'string' && config.host.trim().length > 0
+        ? config.host.trim().replace(/\/$/, '')
+        : 'https://us.posthog.com'
+      normalizedConfig = { apiKey, host, projectId: projectIdConfig } as PosthogIntegrationConfig
+    } else if (sourceType === 'metabase') {
+      const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : ''
+      const metabaseUrl = typeof config.metabaseUrl === 'string' ? config.metabaseUrl.trim() : ''
+      if (!apiKey) {
+        throw new Error('Metabase API key is required')
+      }
+      if (!metabaseUrl) {
+        throw new Error('Metabase URL is required')
+      }
+      normalizedConfig = { apiKey, metabaseUrl: metabaseUrl.replace(/\/$/, '') } as MetabaseIntegrationConfig
+    } else if (sourceType === 'notion') {
+      const pageIds = Array.isArray(config.pageIds)
+        ? config.pageIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0).map(id => id.trim())
+        : undefined
+      const workspaceId = typeof config.workspaceId === 'string' && config.workspaceId.trim().length > 0
+        ? config.workspaceId.trim()
+        : undefined
+      const workspaceName = typeof config.workspaceName === 'string' && config.workspaceName.trim().length > 0
+        ? config.workspaceName.trim()
+        : undefined
+      normalizedConfig = { pageIds, workspaceId, workspaceName } as NotionIntegrationConfig
+    } else if (sourceType === 'quickbooks') {
+      const realmId = typeof config.realmId === 'string' && config.realmId.trim().length > 0 ? config.realmId.trim() : undefined
+      const companyName = typeof config.companyName === 'string' && config.companyName.trim().length > 0 ? config.companyName.trim() : undefined
+      normalizedConfig = { realmId, companyName } as QuickBooksIntegrationConfig
+    } else if (sourceType === 'hubspot') {
+      const apiKey = typeof config.apiKey === 'string' ? config.apiKey.trim() : ''
+      if (!apiKey) {
+        throw new Error('HubSpot API key is required')
+      }
+      normalizedConfig = { apiKey } as HubSpotIntegrationConfig
+    } else if (sourceType === 'db-schema') {
+      const basePath = typeof config.basePath === 'string' ? config.basePath.trim() : ''
+      if (!basePath) {
+        throw new Error('DB Schema base path is required')
+      }
+      const migrationPaths = Array.isArray(config.migrationPaths)
+        ? config.migrationPaths.filter((p): p is string => typeof p === 'string' && p.trim().length > 0).map(p => p.trim())
+        : undefined
+      normalizedConfig = { basePath, migrationPaths } as DbSchemaIntegrationConfig
     } else {
       throw new Error(`Unsupported source type: ${sourceType}`)
     }

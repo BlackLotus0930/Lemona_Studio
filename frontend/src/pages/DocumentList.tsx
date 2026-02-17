@@ -705,7 +705,7 @@ export default function DocumentList() {
               color: secondaryTextColor,
               fontFamily: '"Noto Sans SC", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
             }}>
-              Manage and access your writing projects
+              Manage and access your projects
             </div>
           </div>
           <button

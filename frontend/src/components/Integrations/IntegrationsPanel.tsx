@@ -374,9 +374,9 @@ export default function IntegrationsPanel({ projectId }: IntegrationsPanelProps)
             )
           })}
           <div style={{ padding: '8px 12px', fontSize: 11, fontWeight: 600, color: subTextColor, textTransform: 'uppercase', marginTop: 8 }}>
-            AVAILABLE ({AVAILABLE_INTEGRATIONS.length})
+            AVAILABLE ({AVAILABLE_INTEGRATIONS.filter(i => !sources.some(s => s.sourceType === i.kind)).length})
           </div>
-          {AVAILABLE_INTEGRATIONS.map(({ kind, label, sub, icon }) => {
+          {AVAILABLE_INTEGRATIONS.filter(i => !sources.some(s => s.sourceType === i.kind)).map(({ kind, label, sub, icon }) => {
             const tab = tabs[activeTabIndex]
             const sel = tab?.type === 'available' && tab.kind === kind
             return (

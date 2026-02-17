@@ -10,9 +10,22 @@ function toTabItem(
   item: { type: 'source'; source: { id: string; sourceType: string; displayName?: string; config: Record<string, unknown> } } | { type: 'available'; kind: AvailableIntegrationKind }
 ): IntegrationTabItem {
   if (item.type === 'source') {
-    const cfg = item.source.config as { url?: string; login?: string }
+    const cfg = item.source.config as { url?: string; login?: string; teamName?: string; workspaceName?: string; companyName?: string }
+    const fallbackTitle = item.source.sourceType === 'github'
+      ? `GitHub${cfg?.login ? ` @${cfg.login}` : ''}`
+      : item.source.sourceType === 'gitlab'
+        ? `GitLab${cfg?.login ? ` @${cfg.login}` : ''}`
+        : item.source.sourceType === 'slack'
+          ? `Slack${cfg?.teamName ? ` (${cfg.teamName})` : ''}`
+          : item.source.sourceType === 'notion'
+            ? `Notion${cfg?.workspaceName ? ` (${cfg.workspaceName})` : ''}`
+            : item.source.sourceType === 'quickbooks'
+              ? `QuickBooks${cfg?.companyName ? ` (${cfg.companyName})` : ''}`
+              : item.source.sourceType === 'rss'
+        ? (cfg?.url || 'RSS')
+        : getIntegrationLabel(item.source.sourceType as AvailableIntegrationKind)
     const title = item.source.displayName ||
-      (item.source.sourceType === 'github' ? `GitHub${cfg?.login ? ` @${cfg.login}` : ''}` : cfg?.url) ||
+      fallbackTitle ||
       item.source.sourceType
     return { id: `int-source-${item.source.id}`, title, type: 'source', source: item.source as any }
   }
@@ -65,8 +78,22 @@ export default function IntegrationsSidebar({ projectId, onOpenInEditor }: Integ
           CONNECTED ({sources.length})
         </div>
         {sources.map(source => {
-          const cfg = source.config as { url?: string; login?: string }
-          const label = source.displayName || (source.sourceType === 'github' ? `GitHub${cfg.login ? ` @${cfg.login}` : ''}` : cfg.url) || source.sourceType
+          const cfg = source.config as { url?: string; login?: string; teamName?: string; workspaceName?: string; companyName?: string }
+          const label = source.displayName ||
+            (source.sourceType === 'github'
+              ? `GitHub${cfg.login ? ` @${cfg.login}` : ''}`
+              : source.sourceType === 'gitlab'
+                ? `GitLab${cfg.login ? ` @${cfg.login}` : ''}`
+                : source.sourceType === 'slack'
+                  ? `Slack${cfg.teamName ? ` (${cfg.teamName})` : ''}`
+                  : source.sourceType === 'notion'
+                    ? `Notion${cfg.workspaceName ? ` (${cfg.workspaceName})` : ''}`
+                    : source.sourceType === 'quickbooks'
+                      ? `QuickBooks${cfg.companyName ? ` (${cfg.companyName})` : ''}`
+                      : source.sourceType === 'rss'
+                ? (cfg.url || 'RSS')
+                : getIntegrationLabel(source.sourceType as AvailableIntegrationKind)) ||
+            source.sourceType
           return (
             <div
               key={source.id}
@@ -94,9 +121,9 @@ export default function IntegrationsSidebar({ projectId, onOpenInEditor }: Integ
           )
         })}
         <div style={{ padding: '8px 12px', fontSize: 11, fontWeight: 600, color: subTextColor, textTransform: 'uppercase', marginTop: 8 }}>
-          AVAILABLE ({AVAILABLE_INTEGRATIONS.length})
+          AVAILABLE ({AVAILABLE_INTEGRATIONS.filter(i => !sources.some(s => s.sourceType === i.kind)).length})
         </div>
-        {AVAILABLE_INTEGRATIONS.map(({ kind, label, sub, icon }) => (
+        {AVAILABLE_INTEGRATIONS.filter(i => !sources.some(s => s.sourceType === i.kind)).map(({ kind, label, sub, icon }) => (
           <div
             key={kind}
             onClick={() => onOpenInEditor(toTabItem({ type: 'available', kind }))}

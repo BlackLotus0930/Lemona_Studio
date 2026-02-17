@@ -13,6 +13,8 @@ import { versionService } from './services/versionService.js';
 import { extractPDFTextAsync } from './services/pdfTextExtractor.js';
 import { parseDocx, splitDocxIntoChapters } from './services/docxParser.js';
 import { saveApiKeys, getApiKeys } from './services/apiKeyStore.js';
+import { aiProviderStore } from './services/aiProviderStore.js';
+import { modelGatewayService } from './services/modelGatewayService.js';
 import { worldLabService } from './services/worldLabService.js';
 import { integrationService } from './services/integrationService.js';
 import path from 'path';
@@ -183,87 +185,12 @@ export function setupIPC() {
                 const document = await documentService.getById(documentId);
                 finalProjectId = document?.projectId;
             }
-            // Determine which service to use based on model name and available API keys
-            const isOpenaiModel = modelName && modelName.startsWith('gpt-');
-            const isGeminiModel = modelName && (modelName.startsWith('gemini-') || modelName.includes('gemini'));
-            const hasOpenaiKey = openaiApiKey && openaiApiKey.trim().length > 0;
-            const hasGoogleKey = googleApiKey && googleApiKey.trim().length > 0;
-            console.log('[IPC ai:streamChat] Received request:', {
-                modelName,
-                isOpenaiModel,
-                isGeminiModel,
-                hasOpenaiKey,
-                hasGoogleKey,
-                openaiKeyLength: openaiApiKey?.length || 0,
-                googleKeyLength: googleApiKey?.length || 0,
-                messagePreview: message?.substring(0, 50),
-            });
-            let useOpenai = false;
-            let finalModelName = modelName;
-            if (isOpenaiModel) {
-                // Explicit GPT model requested
-                if (!hasOpenaiKey) {
-                    // Try to fall back to Gemini if available
-                    if (hasGoogleKey) {
-                        useOpenai = false;
-                        finalModelName = 'gemini-3-flash-preview';
-                    }
-                    else {
-                        throw new Error('OpenAI API key is required for GPT models. Please set it in Settings > API Keys.');
-                    }
-                }
-                else {
-                    useOpenai = true;
-                }
-            }
-            else if (isGeminiModel) {
-                // Explicit Gemini model requested
-                if (!hasGoogleKey) {
-                    // Try to fall back to GPT if available
-                    if (hasOpenaiKey) {
-                        useOpenai = true;
-                        finalModelName = 'gpt-4.1-nano';
-                    }
-                    else {
-                        throw new Error('Google API key is required for Gemini models. Please set it in Settings > API Keys.');
-                    }
-                }
-                else {
-                    useOpenai = false;
-                }
-            }
-            else {
-                // No explicit model or unrecognized model name - auto-select based on available keys
-                if (hasOpenaiKey && !hasGoogleKey) {
-                    // Only OpenAI key available - use GPT
-                    useOpenai = true;
-                    finalModelName = modelName || 'gpt-4.1-nano';
-                }
-                else if (hasGoogleKey && !hasOpenaiKey) {
-                    // Only Google key available - use Gemini
-                    useOpenai = false;
-                    finalModelName = modelName || 'gemini-3-flash-preview';
-                }
-                else if (hasOpenaiKey && hasGoogleKey) {
-                    // Both keys available - prefer Gemini (matches frontend default)
-                    useOpenai = false;
-                    finalModelName = modelName || 'gemini-3-flash-preview';
-                }
-                else {
-                    // No keys available
-                    throw new Error('No API key configured. Please add an API key in Settings > API Keys.');
-                }
-            }
             // Start streaming in background
             ;
             (async () => {
                 try {
-                    let chunkCount = 0;
-                    const stream = useOpenai
-                        ? openaiService.streamChat(openaiApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, finalModelName, attachments, style, googleApiKey)
-                        : geminiService.streamChat(googleApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, finalModelName, attachments, style, openaiApiKey);
+                    const stream = await modelGatewayService.streamChat(googleApiKey, openaiApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, modelName, attachments, style);
                     for await (const chunk of stream) {
-                        chunkCount++;
                         webContents.send('ai:streamChunk', streamId, chunk);
                     }
                     webContents.send('ai:streamEnd', streamId);
@@ -1021,6 +948,22 @@ Rewritten text:`;
         }
     });
     // Integration operations
+    ipcMain.handle('integration:selectDbSchemaFolder', async () => {
+        try {
+            const result = await dialog.showOpenDialog({
+                title: 'Select project folder for DB Schema',
+                properties: ['openDirectory'],
+            });
+            if (result.canceled || result.filePaths.length === 0) {
+                return { canceled: true, path: null };
+            }
+            return { canceled: false, path: result.filePaths[0] };
+        }
+        catch (error) {
+            console.error('IPC integration:selectDbSchemaFolder error:', error);
+            throw error;
+        }
+    });
     ipcMain.handle('integration:addSource', async (_, projectId, sourceType, config, displayName) => {
         try {
             return await integrationService.addSource(projectId, sourceType, config, displayName);
@@ -1082,6 +1025,87 @@ Rewritten text:`;
         }
         catch (error) {
             console.error('IPC integration:updateGithubRepos error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:listGitlabRepos', async (_, projectId, sourceId) => {
+        try {
+            return await integrationService.listGitlabRepos(projectId, sourceId);
+        }
+        catch (error) {
+            console.error('IPC integration:listGitlabRepos error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:getIndexedGitlabRepos', async (_, projectId, sourceId) => {
+        try {
+            return await integrationService.getIndexedGitlabRepos(projectId, sourceId);
+        }
+        catch (error) {
+            console.error('IPC integration:getIndexedGitlabRepos error:', error);
+            return [];
+        }
+    });
+    ipcMain.handle('integration:updateGitlabRepos', async (_, projectId, sourceId, repos) => {
+        try {
+            return await integrationService.updateGitlabRepos(projectId, sourceId, repos);
+        }
+        catch (error) {
+            console.error('IPC integration:updateGitlabRepos error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:listSlackChannels', async (_, projectId, sourceId) => {
+        try {
+            return await integrationService.listSlackChannels(projectId, sourceId);
+        }
+        catch (error) {
+            console.error('IPC integration:listSlackChannels error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:getIndexedSlackChannels', async (_, projectId, sourceId) => {
+        try {
+            return await integrationService.getIndexedSlackChannels(projectId, sourceId);
+        }
+        catch (error) {
+            console.error('IPC integration:getIndexedSlackChannels error:', error);
+            return [];
+        }
+    });
+    ipcMain.handle('integration:updateSlackChannels', async (_, projectId, sourceId, channels) => {
+        try {
+            return await integrationService.updateSlackChannels(projectId, sourceId, channels);
+        }
+        catch (error) {
+            console.error('IPC integration:updateSlackChannels error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:listNotionPages', async (_, projectId, sourceId) => {
+        try {
+            return await integrationService.listNotionPages(projectId, sourceId);
+        }
+        catch (error) {
+            console.error('IPC integration:listNotionPages error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('integration:getIndexedNotionPages', async (_, projectId, sourceId) => {
+        try {
+            return await integrationService.getIndexedNotionPages(projectId, sourceId);
+        }
+        catch (error) {
+            console.error('IPC integration:getIndexedNotionPages error:', error);
+            return [];
+        }
+    });
+    ipcMain.handle('integration:updateNotionPages', async (_, projectId, sourceId, pageIds) => {
+        try {
+            return await integrationService.updateNotionPages(projectId, sourceId, pageIds);
+        }
+        catch (error) {
+            console.error('IPC integration:updateNotionPages error:', error);
             throw error;
         }
     });
@@ -1243,6 +1267,7 @@ Rewritten text:`;
         try {
             const previousKeys = getApiKeys();
             const changed = saveApiKeys(geminiApiKey, openaiApiKey);
+            await aiProviderStore.bootstrapFromLegacyKeys(geminiApiKey, openaiApiKey);
             const newKeys = getApiKeys();
             // Check if a new API key was added (previously no key, now has key)
             const hadKeyBefore = (previousKeys.geminiApiKey && previousKeys.geminiApiKey.trim().length > 0) ||
@@ -1293,6 +1318,42 @@ Rewritten text:`;
         }
         catch (error) {
             console.error('IPC settings:getSmartIndexing error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('settings:getAiProviderState', async () => {
+        try {
+            return await aiProviderStore.getState();
+        }
+        catch (error) {
+            console.error('IPC settings:getAiProviderState error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('settings:saveAiProviderProfile', async (_, profile) => {
+        try {
+            return await aiProviderStore.saveProfile(profile);
+        }
+        catch (error) {
+            console.error('IPC settings:saveAiProviderProfile error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('settings:removeAiProviderProfile', async (_, profileId) => {
+        try {
+            return { success: await aiProviderStore.removeProfile(profileId) };
+        }
+        catch (error) {
+            console.error('IPC settings:removeAiProviderProfile error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('settings:setActiveAiProviders', async (_, active) => {
+        try {
+            return await aiProviderStore.setActiveProviders(active);
+        }
+        catch (error) {
+            console.error('IPC settings:setActiveAiProviders error:', error);
             throw error;
         }
     });

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { AIChatMessage, ChatAttachment, Document, IndexingStatus } from '@shared/types'
 import { aiApi, chatApi, documentApi, projectApi, settingsApi } from '../../services/api'
 import { indexingApi } from '../../services/desktop-api'
+import { useAiSettings } from '../AISettings/AiSettingsContext'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -212,12 +213,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   }, [initialInput, initialInputReferences, initialInputVersion, input, onInputSet])
   const [isInputFocused, setIsInputFocused] = useState(false)
   const [useWebSearch, setUseWebSearch] = useState(false)
+  const BUILTIN_MODELS = ['gemini-3-flash-preview', 'gemini-3-pro-preview', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2'] as const
+  type BuiltinModel = (typeof BUILTIN_MODELS)[number]
   // Load saved model from localStorage, or use default
-  const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-3-pro-preview' | 'gpt-4.1-nano' | 'gpt-5-mini' | 'gpt-5.2'>(() => {
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
     try {
       const savedModel = localStorage.getItem('aiChatSelectedModel')
-      if (savedModel && ['gemini-3-flash-preview', 'gemini-3-pro-preview', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2'].includes(savedModel)) {
-        return savedModel as 'gemini-3-flash-preview' | 'gemini-3-pro-preview' | 'gpt-4.1-nano' | 'gpt-5-mini' | 'gpt-5.2'
+      if (savedModel && BUILTIN_MODELS.includes(savedModel as BuiltinModel)) {
+        return savedModel
       }
     } catch (error) {
       console.error('Failed to load saved model:', error)
@@ -269,6 +272,21 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [attachments, setAttachments] = useState<ChatAttachment[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [copiedCodeBlocks, setCopiedCodeBlocks] = useState<Set<string>>(new Set())
+  const { state: aiProviderState, setActiveProviders } = useAiSettings()
+  const activeChatProfile = (aiProviderState?.profiles || []).find(
+    p => p.id === aiProviderState?.activeChatProviderId
+  ) || null
+  const effectiveProviderType = activeChatProfile?.type ?? 'builtin-gemini'
+  const customChatProfiles = (aiProviderState?.profiles || []).filter(p => p.type === 'custom-openai')
+  const hasGoogleKeyConfigured = !!googleApiKey?.trim()
+  const hasOpenaiKeyConfigured = !!openaiApiKey?.trim()
+  const shortModelLabel =
+    selectedModel === 'gemini-3-flash-preview' ? 'Flash 3' :
+    selectedModel === 'gemini-3-pro-preview' ? 'Pro 3' :
+    selectedModel === 'gpt-4.1-nano' ? 'GPT-4.1 Nano' :
+    selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini' :
+    selectedModel === 'gpt-5.2' ? 'GPT-5.2' :
+    selectedModel
   // Store scroll positions per chat ID
   const scrollPositionsRef = useRef<Map<string, number>>(new Map())
   const previousChatIdRef = useRef<string | null>(null)
@@ -1030,35 +1048,17 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
   }, [chatMode])
 
-  // Validate model compatibility with available API keys on mount and when keys change
-  // Only switch if the current model is incompatible (e.g., GPT model but no OpenAI key)
+  // Sync selectedModel when active chat provider changes - only when current model is incompatible
   useEffect(() => {
-    const hasGoogleKey = !!googleApiKey
-    const hasOpenaiKey = !!openaiApiKey
-    
-    // Only auto-switch if the current model is incompatible with available API keys
-    // This respects user's saved preference but ensures compatibility
-    
-    // If user has GPT model selected but no OpenAI key, switch to Gemini
-    if (selectedModel.startsWith('gpt-') && !hasOpenaiKey) {
-      if (hasGoogleKey) {
-        setSelectedModel('gemini-3-flash-preview')
-      }
+    if (!activeChatProfile) return
+    if (activeChatProfile.type === 'custom-openai') {
+      setSelectedModel(activeChatProfile.chatModel || 'gpt-4.1-nano')
+    } else if (activeChatProfile.type === 'builtin-gemini' && selectedModel.startsWith('gpt-')) {
+      setSelectedModel('gemini-3-flash-preview')
+    } else if (activeChatProfile.type === 'builtin-openai' && (selectedModel.startsWith('gemini-') || !BUILTIN_MODELS.includes(selectedModel as BuiltinModel))) {
+      setSelectedModel('gpt-4.1-nano')
     }
-    // If user has Gemini model selected but no Google key, switch to GPT
-    else if ((selectedModel === 'gemini-3-flash-preview' || selectedModel === 'gemini-3-pro-preview') && !hasGoogleKey) {
-      if (hasOpenaiKey) {
-        setSelectedModel('gpt-4.1-nano')
-      }
-    }
-    // If both keys are available and current model is invalid, default to Gemini 2.5 Flash
-    else if (hasGoogleKey && hasOpenaiKey) {
-      if (!['gemini-3-flash-preview', 'gemini-3-pro-preview', 'gpt-4.1-nano', 'gpt-5-mini', 'gpt-5.2'].includes(selectedModel)) {
-        setSelectedModel('gemini-3-flash-preview')
-      }
-    }
-  }, [googleApiKey, openaiApiKey]) // Removed selectedModel from dependencies to avoid loops
-
+  }, [activeChatProfile?.id, activeChatProfile?.type, activeChatProfile?.chatModel, selectedModel])
 
   // Check if library is indexed for the current project
   const checkLibraryIndexStatus = async () => {
@@ -2580,15 +2580,16 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     if ((!input.trim() && attachments.length === 0) || !documentId || !chatId) return
 
     // Check for required API keys before sending
-    const isOpenaiModel = selectedModel.startsWith('gpt-')
     const hasGoogleKey = !!googleApiKey
     const hasOpenaiKey = !!openaiApiKey
+    const hasCustomKey = effectiveProviderType === 'custom-openai' && (!!(activeChatProfile as { apiKey?: string })?.apiKey || hasOpenaiKey)
+    const isOpenaiModel = selectedModel.startsWith('gpt-')
     
-    if (isOpenaiModel && !hasOpenaiKey) {
+    if (effectiveProviderType === 'custom-openai' && !hasCustomKey) {
       const errorMessage: AIChatMessage = {
         id: generateMessageId(),
         role: 'assistant',
-        content: 'OpenAI API key is required for GPT models. Please add your OpenAI API key in Settings > API Keys.',
+        content: 'Custom AI requires an API key. Add one in Custom AI Endpoint settings or use your OpenAI key in the chat panel.',
         timestamp: new Date().toISOString(),
       }
       setMessages(prev => [...prev, errorMessage])
@@ -2597,11 +2598,24 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       return
     }
     
-    if (!isOpenaiModel && !hasGoogleKey) {
+    if (isOpenaiModel && !hasOpenaiKey && effectiveProviderType === 'builtin-openai') {
       const errorMessage: AIChatMessage = {
         id: generateMessageId(),
         role: 'assistant',
-        content: 'An API key is required. Please add an API key in Enter API Key.',
+        content: 'OpenAI API key is required for GPT models. Please add your OpenAI API key in the chat panel.',
+        timestamp: new Date().toISOString(),
+      }
+      setMessages(prev => [...prev, errorMessage])
+      await saveMessage(errorMessage, false)
+      setShowSettingsModal(true)
+      return
+    }
+    
+    if (effectiveProviderType === 'builtin-gemini' && !hasGoogleKey) {
+      const errorMessage: AIChatMessage = {
+        id: generateMessageId(),
+        role: 'assistant',
+        content: 'An API key is required. Please add your Google API key in the chat panel.',
         timestamp: new Date().toISOString(),
       }
       setMessages(prev => [...prev, errorMessage])
@@ -5238,17 +5252,9 @@ Step 2 requirement:
                 <button
                   ref={modelNameRef}
                   onClick={() => {
-                    // If no API keys, open settings modal directly
-                    const hasNoApiKeys = (!googleApiKey || !googleApiKey.trim()) && (!openaiApiKey || !openaiApiKey.trim())
-                    if (hasNoApiKeys) {
-                      setShowSettingsModal(true)
-                      setShowModelDropdown(false)
-                      setShowPlusMenu(false)
-                    } else {
-                      setShowModelDropdown(!showModelDropdown)
-                      setShowSettingsModal(false)
-                      setShowPlusMenu(false)
-                    }
+                    setShowModelDropdown(!showModelDropdown)
+                    setShowSettingsModal(false)
+                    setShowPlusMenu(false)
                   }}
                   disabled={isLoading}
                   style={{
@@ -5278,314 +5284,184 @@ Step 2 requirement:
                       e.currentTarget.style.color = secondaryTextColor
                     }
                   }}
-                  title={
-                    (!googleApiKey || !googleApiKey.trim()) && (!openaiApiKey || !openaiApiKey.trim()) 
-                      ? 'Enter API Key to use AI models'
-                      : selectedModel === 'gemini-3-flash-preview' ? 'Gemini 3 Flash Preview - Faster responses' :
-                        selectedModel === 'gemini-3-pro-preview' ? 'Gemini 3 Pro - More capable' :
-                        selectedModel === 'gpt-4.1-nano' ? 'GPT-4.1 Nano - Fast and efficient' :
-                        selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini - Balanced performance' :
-                        selectedModel === 'gpt-5.2' ? 'GPT-5.2 - Most capable' : ''
-                  }
+                  title={shortModelLabel}
                 >
-                  <span>{
-                    (!googleApiKey || !googleApiKey.trim()) && (!openaiApiKey || !openaiApiKey.trim())
-                      ? 'Enter API Key'
-                      : selectedModel === 'gemini-3-flash-preview' ? 'Flash 3' :
-                        selectedModel === 'gemini-3-pro-preview' ? 'Pro 3' :
-                        selectedModel === 'gpt-4.1-nano' ? 'GPT-4.1 Nano' :
-                        selectedModel === 'gpt-5-mini' ? 'GPT-5 Mini' :
-                        selectedModel === 'gpt-5.2' ? 'GPT-5.2' : 'Flash 2.5'
-                  }</span>
+                  <span>{shortModelLabel}</span>
                   <KeyboardArrowDownIcon style={{ fontSize: '14px' }} />
                 </button>
                 
                 {/* Model Dropdown Menu */}
-                {showModelDropdown && (() => {
-                  const hasGoogleKey = !!googleApiKey
-                  const hasOpenaiKey = !!openaiApiKey
-                  
-                  return (
-                    <div
-                      ref={modelDropdownRef}
-                      style={{
-                        position: 'absolute',
-                        bottom: '100%',
-                        right: 0,
-                        marginBottom: '4px',
-                        backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
-                        borderRadius: '6px',
-                        padding: '6px',
-                        minWidth: '180px',
-                        boxShadow: theme === 'dark'
-                          ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)'
-                          : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
-                        zIndex: 10001,
-                        border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '2px',
-                        fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                {showModelDropdown && (
+                  <div
+                    ref={modelDropdownRef}
+                    style={{
+                      position: 'absolute',
+                      bottom: '100%',
+                      right: 0,
+                      marginBottom: '4px',
+                      backgroundColor: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+                      borderRadius: '6px',
+                      padding: '6px',
+                      minWidth: '240px',
+                      boxShadow: theme === 'dark'
+                        ? '0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)'
+                        : '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04)',
+                      zIndex: 10001,
+                      border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '2px',
+                      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {hasGoogleKeyConfigured && (
+                      <>
+                        <div style={{ padding: '6px 10px', fontSize: '11px', color: secondaryTextColor }}>Gemini</div>
+                        {[
+                          { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+                          { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro' },
+                        ].map(option => {
+                          const active = effectiveProviderType === 'builtin-gemini' && selectedModel === option.id
+                          return (
+                            <button
+                              key={option.id}
+                              onClick={() => {
+                                if (isLoading) return
+                                void (async () => {
+                                  await setActiveProviders({ chatProviderId: 'builtin-gemini' })
+                                  setSelectedModel(option.id)
+                                  setShowModelDropdown(false)
+                                })()
+                              }}
+                              disabled={isLoading}
+                              style={{
+                                padding: '10px 14px',
+                                backgroundColor: active ? (theme === 'dark' ? '#232323' : '#F0F0ED') : 'transparent',
+                                color: textColor,
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: isLoading ? 'not-allowed' : 'pointer',
+                                fontSize: '12px',
+                                textAlign: 'left',
+                                width: '100%',
+                                opacity: isLoading ? 0.6 : 1,
+                              }}
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        })}
+                      </>
+                    )}
+
+                    {hasOpenaiKeyConfigured && (
+                      <>
+                        <div style={{ padding: '6px 10px', fontSize: '11px', color: secondaryTextColor, marginTop: 4 }}>OpenAI</div>
+                        {[
+                          { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano' },
+                          { id: 'gpt-5-mini', label: 'GPT-5 Mini' },
+                          { id: 'gpt-5.2', label: 'GPT-5.2' },
+                        ].map(option => {
+                          const active = effectiveProviderType === 'builtin-openai' && selectedModel === option.id
+                          return (
+                            <button
+                              key={option.id}
+                              onClick={() => {
+                                if (isLoading) return
+                                void (async () => {
+                                  await setActiveProviders({ chatProviderId: 'builtin-openai' })
+                                  setSelectedModel(option.id)
+                                  setShowModelDropdown(false)
+                                })()
+                              }}
+                              disabled={isLoading}
+                              style={{
+                                padding: '10px 14px',
+                                backgroundColor: active ? (theme === 'dark' ? '#232323' : '#F0F0ED') : 'transparent',
+                                color: textColor,
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: isLoading ? 'not-allowed' : 'pointer',
+                                fontSize: '12px',
+                                textAlign: 'left',
+                                width: '100%',
+                                opacity: isLoading ? 0.6 : 1,
+                              }}
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        })}
+                      </>
+                    )}
+
+                    {customChatProfiles.length > 0 && (
+                      <>
+                        <div style={{ padding: '6px 10px', fontSize: '11px', color: secondaryTextColor, marginTop: 4 }}>Custom Endpoints</div>
+                        {customChatProfiles.map(profile => {
+                          const model = profile.chatModel || 'model'
+                          const active = aiProviderState?.activeChatProviderId === profile.id
+                          return (
+                            <button
+                              key={profile.id}
+                              onClick={() => {
+                                if (isLoading) return
+                                void (async () => {
+                                  await setActiveProviders({ chatProviderId: profile.id })
+                                  setSelectedModel(model)
+                                  setShowModelDropdown(false)
+                                })()
+                              }}
+                              disabled={isLoading}
+                              style={{
+                                padding: '10px 14px',
+                                backgroundColor: active ? (theme === 'dark' ? '#232323' : '#F0F0ED') : 'transparent',
+                                color: textColor,
+                                border: 'none',
+                                borderRadius: '6px',
+                                cursor: isLoading ? 'not-allowed' : 'pointer',
+                                fontSize: '12px',
+                                textAlign: 'left',
+                                width: '100%',
+                                opacity: isLoading ? 0.6 : 1,
+                              }}
+                            >
+                              {profile.name} · {model}
+                            </button>
+                          )
+                        })}
+                      </>
+                    )}
+
+                    <div style={{
+                      height: '1px',
+                      backgroundColor: theme === 'dark' ? '#333' : '#e0e0e0',
+                      margin: '6px 0'
+                    }} />
+                    <button
+                      onClick={() => {
+                        setShowModelDropdown(false)
+                        setShowSettingsModal(true)
                       }}
-                      onClick={(e) => e.stopPropagation()}
+                      disabled={isLoading}
+                      style={{
+                        padding: '10px 14px',
+                        backgroundColor: 'transparent',
+                        color: textColor,
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: isLoading ? 'not-allowed' : 'pointer',
+                        fontSize: '12px',
+                        textAlign: 'left',
+                        width: '100%',
+                        opacity: isLoading ? 0.5 : 1,
+                      }}
                     >
-                      {/* Gemini Models - only show if Google API key is present */}
-                      {hasGoogleKey && (
-                        <>
-                          <button
-                            onClick={() => {
-                              setSelectedModel('gemini-3-flash-preview')
-                              setShowModelDropdown(false)
-                            }}
-                            disabled={isLoading}
-                            style={{
-                              padding: '10px 14px',
-                              backgroundColor: selectedModel === 'gemini-3-flash-preview' 
-                                ? (theme === 'dark' ? '#232323' : '#F0F0ED') 
-                                : 'transparent',
-                              color: textColor,
-                              border: 'none',
-                              borderRadius: '6px',
-                              cursor: isLoading ? 'not-allowed' : 'pointer',
-                              fontSize: '12px',
-                              fontWeight: '400',
-                              fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                              textAlign: 'left',
-                              transition: 'all 0.15s',
-                              opacity: isLoading ? 0.5 : 1,
-                              width: '100%'
-                            }}
-                            onMouseEnter={(e) => {
-                              if (!isLoading && selectedModel !== 'gemini-3-flash-preview') {
-                                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!isLoading) {
-                                e.currentTarget.style.backgroundColor = selectedModel === 'gemini-3-flash-preview'
-                                  ? (theme === 'dark' ? '#232323' : '#F0F0ED')
-                                  : 'transparent'
-                              }
-                            }}
-                          >
-                            Gemini 3 Flash
-                          </button>
-                          
-                          <button
-                            onClick={() => {
-                              setSelectedModel('gemini-3-pro-preview')
-                              setShowModelDropdown(false)
-                            }}
-                            disabled={isLoading}
-                            style={{
-                              padding: '10px 14px',
-                              backgroundColor: selectedModel === 'gemini-3-pro-preview' 
-                                ? (theme === 'dark' ? '#2d2d2d' : '#e8e8e8') 
-                                : 'transparent',
-                              color: selectedModel === 'gemini-3-pro-preview'
-                                ? (theme === 'dark' ? '#ffffff' : '#202124')
-                                : (theme === 'dark' ? '#d6d6d6' : '#202124'),
-                              border: 'none',
-                              borderRadius: '6px',
-                              cursor: isLoading ? 'not-allowed' : 'pointer',
-                              fontSize: '12px',
-                              fontWeight: '400',
-                              fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                              textAlign: 'left',
-                              transition: 'all 0.15s',
-                              opacity: isLoading ? 0.5 : 1,
-                              width: '100%'
-                            }}
-                            onMouseEnter={(e) => {
-                              if (!isLoading && selectedModel !== 'gemini-3-pro-preview') {
-                                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!isLoading && selectedModel !== 'gemini-3-pro-preview') {
-                                e.currentTarget.style.backgroundColor = 'transparent'
-                              }
-                            }}
-                          >
-                            Gemini 3 Pro
-                          </button>
-                        </>
-                      )}
-                      
-                      {/* GPT Models - only show if OpenAI API key is present */}
-                      {hasOpenaiKey && (
-                        <>
-                          {hasGoogleKey && (
-                            <div style={{
-                              height: '1px',
-                              backgroundColor: theme === 'dark' ? '#333' : '#e0e0e0',
-                              margin: '6px 0'
-                            }} />
-                          )}
-                          <button
-                            onClick={() => {
-                              setSelectedModel('gpt-4.1-nano')
-                              setShowModelDropdown(false)
-                            }}
-                            disabled={isLoading}
-                            style={{
-                              padding: '10px 14px',
-                              backgroundColor: selectedModel === 'gpt-4.1-nano' 
-                                ? (theme === 'dark' ? '#2d2d2d' : '#F0F0ED') 
-                                : 'transparent',
-                              color: selectedModel === 'gpt-4.1-nano'
-                                ? (theme === 'dark' ? '#ffffff' : '#202124')
-                                : (theme === 'dark' ? '#d6d6d6' : '#202124'),
-                              border: 'none',
-                              borderRadius: '6px',
-                              cursor: isLoading ? 'not-allowed' : 'pointer',
-                              fontSize: '12px',
-                              fontWeight: '400',
-                              fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                              textAlign: 'left',
-                              transition: 'all 0.15s',
-                              opacity: isLoading ? 0.5 : 1,
-                              width: '100%'
-                            }}
-                            onMouseEnter={(e) => {
-                              if (!isLoading && selectedModel !== 'gpt-4.1-nano') {
-                                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!isLoading && selectedModel !== 'gpt-4.1-nano') {
-                                e.currentTarget.style.backgroundColor = 'transparent'
-                              }
-                            }}
-                          >
-                            GPT-4.1 Nano
-                          </button>
-                          
-                          <button
-                            onClick={() => {
-                              setSelectedModel('gpt-5-mini')
-                              setShowModelDropdown(false)
-                            }}
-                            disabled={isLoading}
-                            style={{
-                              padding: '10px 14px',
-                              backgroundColor: selectedModel === 'gpt-5-mini' 
-                                ? (theme === 'dark' ? '#2d2d2d' : '#F0F0ED') 
-                                : 'transparent',
-                              color: selectedModel === 'gpt-5-mini'
-                                ? (theme === 'dark' ? '#ffffff' : '#202124')
-                                : (theme === 'dark' ? '#d6d6d6' : '#202124'),
-                              border: 'none',
-                              borderRadius: '6px',
-                              cursor: isLoading ? 'not-allowed' : 'pointer',
-                              fontSize: '12px',
-                              fontWeight: '400',
-                              fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                              textAlign: 'left',
-                              transition: 'all 0.15s',
-                              opacity: isLoading ? 0.5 : 1,
-                              width: '100%'
-                            }}
-                            onMouseEnter={(e) => {
-                              if (!isLoading && selectedModel !== 'gpt-5-mini') {
-                                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!isLoading && selectedModel !== 'gpt-5-mini') {
-                                e.currentTarget.style.backgroundColor = 'transparent'
-                              }
-                            }}
-                          >
-                            GPT-5 Mini
-                          </button>
-                          
-                          <button
-                            onClick={() => {
-                              setSelectedModel('gpt-5.2')
-                              setShowModelDropdown(false)
-                            }}
-                            disabled={isLoading}
-                            style={{
-                              padding: '10px 14px',
-                              backgroundColor: selectedModel === 'gpt-5.2' 
-                                ? (theme === 'dark' ? '#2d2d2d' : '#F0F0ED') 
-                                : 'transparent',
-                              color: selectedModel === 'gpt-5.2'
-                                ? (theme === 'dark' ? '#ffffff' : '#202124')
-                                : (theme === 'dark' ? '#d6d6d6' : '#202124'),
-                              border: 'none',
-                              borderRadius: '6px',
-                              cursor: isLoading ? 'not-allowed' : 'pointer',
-                              fontSize: '12px',
-                              fontWeight: '400',
-                              fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                              textAlign: 'left',
-                              transition: 'all 0.15s',
-                              opacity: isLoading ? 0.5 : 1,
-                              width: '100%'
-                            }}
-                            onMouseEnter={(e) => {
-                              if (!isLoading && selectedModel !== 'gpt-5.2') {
-                                e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
-                              }
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!isLoading && selectedModel !== 'gpt-5.2') {
-                                e.currentTarget.style.backgroundColor = 'transparent'
-                              }
-                            }}
-                          >
-                            GPT-5.2
-                          </button>
-                        </>
-                      )}
-                  
-                      {/* Divider */}
-                      <div style={{
-                        height: '1px',
-                        backgroundColor: theme === 'dark' ? '#333' : '#e0e0e0',
-                        margin: '6px 0'
-                      }} />
-                      
-                      {/* API Keys Option */}
-                      <button
-                        onClick={() => {
-                          setShowModelDropdown(false)
-                          setShowSettingsModal(true)
-                        }}
-                        disabled={isLoading}
-                        style={{
-                          padding: '10px 14px',
-                          backgroundColor: 'transparent',
-                          color: textColor,
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: isLoading ? 'not-allowed' : 'pointer',
-                          fontSize: '12px',
-                          fontWeight: '400',
-                          fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          textAlign: 'left',
-                          transition: 'all 0.15s',
-                          opacity: isLoading ? 0.5 : 1,
-                          width: '100%'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isLoading) {
-                            e.currentTarget.style.backgroundColor = theme === 'dark' ? '#2a2a2a' : '#f5f5f5'
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isLoading) {
-                            e.currentTarget.style.backgroundColor = 'transparent'
-                          }
-                        }}
-                      >
-                        API Keys
-                      </button>
-                    </div>
-                  )
-                })()}
+                      API Keys
+                    </button>
+                  </div>
+                )}
               </div>
               
               {/* Send/Stop button with grey container */}

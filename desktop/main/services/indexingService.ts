@@ -4,12 +4,13 @@ import { documentService } from './documentService.js'
 import { extractPDFText } from './pdfTextExtractor.js'
 import { parseDocx } from './docxParser.js'
 import { chunkText, chunkPDF, chunkDocx, chunkTipTap, chunkTipTapToSemanticBlocks, Chunk, SemanticBlock, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, WORKSPACE_CHUNK_SIZE, WORKSPACE_CHUNK_OVERLAP } from './chunkingService.js'
-import { generateEmbeddingsBatch, EMBEDDING_DIMENSION, isQuotaError } from './embeddingService.js'
+import { generateEmbeddingsBatchWithConfig, EMBEDDING_DIMENSION, isQuotaError } from './embeddingService.js'
 import { getVectorStore, ChunkMetadata, getProjectIndexDirectory, getProjectLockManager, IndexManifest } from './vectorStore.js'
 import { app } from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
-import { buildIntegrationFileId, buildIntegrationFilePrefix, IntegrationItem, IntegrationSourceType } from './integrationTypes.js'
+import { buildIntegrationFileId, buildIntegrationFilePrefix, IntegrationItem, IntegrationItemMetadata, IntegrationSourceType } from './integrationTypes.js'
+import { aiProviderStore, buildEmbeddingIndexKey } from './aiProviderStore.js'
 
 // Indexing status directory
 const INDEXING_STATUS_DIR = path.join(app.getPath('userData'), 'indexingStatus')
@@ -24,6 +25,12 @@ async function ensureIndexingStatusDir() {
 }
 
 ensureIndexingStatusDir()
+
+async function resolveEmbeddingRuntime(geminiApiKey?: string, openaiApiKey?: string) {
+  const config = await aiProviderStore.getActiveEmbeddingConfig(geminiApiKey, openaiApiKey)
+  const indexKey = buildEmbeddingIndexKey(config)
+  return { config, indexKey }
+}
 
 /**
  * Indexing status
@@ -255,7 +262,8 @@ export async function indexLibraryFile(
           return missingStatus
         }
         
-        const vectorStore = getVectorStore(projectId, 'library')
+        const { config: embeddingConfig, indexKey } = await resolveEmbeddingRuntime(geminiApiKey, openaiApiKey)
+        const vectorStore = getVectorStore(projectId, 'library', indexKey)
         // Load index - we hold write lock
         await vectorStore.loadIndexUnsafe()
         
@@ -307,8 +315,8 @@ export async function indexLibraryFile(
           const manifest: IndexManifest = {
             projectId: projectId,
             folder: 'library',
-            embeddingModel: geminiApiKey ? 'gemini-embedding-001' : (openaiApiKey ? 'text-embedding-3-small' : 'unknown'),
-            embeddingDimension: EMBEDDING_DIMENSION,
+            embeddingModel: embeddingConfig.model,
+            embeddingDimension: embeddingConfig.dimension,
             chunkSize: DEFAULT_CHUNK_SIZE,
             chunkOverlap: DEFAULT_CHUNK_OVERLAP,
             indexVersion: '1.0.0',
@@ -347,8 +355,9 @@ export async function indexLibraryFile(
             const batch = chunks.slice(i, i + batchSize)
             const batchTexts = batch.map(chunk => chunk.text)
             
-            const batchResults = await generateEmbeddingsBatch(
+            const batchResults = await generateEmbeddingsBatchWithConfig(
               batchTexts,
+              embeddingConfig,
               geminiApiKey,
               openaiApiKey,
               batchSize
@@ -387,8 +396,8 @@ export async function indexLibraryFile(
         const manifest: IndexManifest = {
           projectId: projectId,
           folder: 'library',
-          embeddingModel: geminiApiKey ? 'gemini-embedding-001' : (openaiApiKey ? 'text-embedding-3-small' : 'unknown'),
-          embeddingDimension: EMBEDDING_DIMENSION,
+          embeddingModel: embeddingConfig.model,
+          embeddingDimension: embeddingConfig.dimension,
           chunkSize: DEFAULT_CHUNK_SIZE,
           chunkOverlap: DEFAULT_CHUNK_OVERLAP,
           indexVersion: '1.0.0', // Index structure version, manually bumped when schema changes
@@ -415,7 +424,7 @@ export async function indexLibraryFile(
         }
         
         // Use getProjectIndexDirectory to ensure consistent path building (with sanitization)
-        const indexDir = getProjectIndexDirectory(storeProjectId, storeFolder)
+        const indexDir = getProjectIndexDirectory(storeProjectId, storeFolder, indexKey)
         const indexFile = path.join(indexDir, 'index.bin')
         const metadataFile = path.join(indexDir, 'metadata.json')
         const manifestFile = path.join(indexDir, 'manifest.json')
@@ -494,7 +503,8 @@ export async function getIndexingStatus(documentId: string): Promise<IndexingSta
  */
 export async function isIndexValid(projectId: string, folder: 'library' | 'project'): Promise<boolean> {
   try {
-    const vectorStore = getVectorStore(projectId, folder)
+    const { config: embeddingConfig, indexKey } = await resolveEmbeddingRuntime()
+    const vectorStore = getVectorStore(projectId, folder, indexKey)
     const manifest = await vectorStore.loadManifest()
     
     if (!manifest) {
@@ -506,8 +516,8 @@ export async function isIndexValid(projectId: string, folder: 'library' | 'proje
     // Use different chunk sizes for library vs workspace/project folders
     const isWorkspace = folder === 'project'
     const expectedConfig = {
-      embeddingModel: 'gemini-embedding-001', // Default, will be checked against actual
-      embeddingDimension: EMBEDDING_DIMENSION,
+      embeddingModel: embeddingConfig.model,
+      embeddingDimension: embeddingConfig.dimension || EMBEDDING_DIMENSION,
       chunkSize: isWorkspace ? WORKSPACE_CHUNK_SIZE : DEFAULT_CHUNK_SIZE,
       chunkOverlap: isWorkspace ? WORKSPACE_CHUNK_OVERLAP : DEFAULT_CHUNK_OVERLAP,
       indexVersion: '1.0.0', // Current index version
@@ -535,9 +545,8 @@ export async function isIndexValid(projectId: string, folder: 'library' | 'proje
     }
     
     // Embedding model check (more lenient - accept both Gemini and OpenAI models)
-    const validModels = ['gemini-embedding-001', 'text-embedding-3-small']
-    if (!validModels.includes(manifest.embeddingModel)) {
-      console.warn(`[Indexing] Index invalid: embeddingModel not supported (${manifest.embeddingModel})`)
+    if (manifest.embeddingModel !== expectedConfig.embeddingModel) {
+      console.warn(`[Indexing] Index invalid: embeddingModel mismatch (${manifest.embeddingModel} vs ${expectedConfig.embeddingModel})`)
       return false
     }
     
@@ -883,7 +892,8 @@ export async function removeFromIndex(documentId: string): Promise<void> {
   const releaseLock = await projectLockManager.acquireWriteLock(projectId)
   
   try {
-    const vectorStore = getVectorStore(projectId, 'library')
+    const { indexKey } = await resolveEmbeddingRuntime()
+    const vectorStore = getVectorStore(projectId, 'library', indexKey)
     await vectorStore.loadIndexUnsafe()
     // removeChunksByFileUnsafe() automatically saves the index (autoSave=true by default)
     await vectorStore.removeChunksByFileUnsafe(documentId)
@@ -1010,7 +1020,8 @@ export async function migrateLibraryIndex(
         const releaseLock = await projectLockManager.acquireWriteLock(projectId)
 
         try {
-          const vectorStore = getVectorStore(projectId, 'library')
+          const { indexKey } = await resolveEmbeddingRuntime(geminiApiKey, openaiApiKey)
+          const vectorStore = getVectorStore(projectId, 'library', indexKey)
           await vectorStore.loadIndexUnsafe()
 
           // Re-generate embeddings for each chunk (destructive migration)
@@ -1187,7 +1198,8 @@ export async function incrementalIndexProjectFile(
         return missingStatus
       }
       
-      const vectorStore = getVectorStore(projectId, 'project')
+      const { config: embeddingConfig, indexKey } = await resolveEmbeddingRuntime(geminiApiKey, openaiApiKey)
+      const vectorStore = getVectorStore(projectId, 'project', indexKey)
       await vectorStore.loadIndexUnsafe()
 
       // Parse TipTap content to semantic blocks
@@ -1308,8 +1320,9 @@ export async function incrementalIndexProjectFile(
             const batch = blocksNeedingEmbeddings.slice(i, i + batchSize)
             const batchTexts = batch.map(block => block.text)
             
-            const batchResults = await generateEmbeddingsBatch(
+            const batchResults = await generateEmbeddingsBatchWithConfig(
               batchTexts,
+              embeddingConfig,
               geminiApiKey,
               openaiApiKey,
               batchSize
@@ -1369,8 +1382,8 @@ export async function incrementalIndexProjectFile(
       const manifest: IndexManifest = {
         projectId: projectId,
         folder: 'project',
-        embeddingModel: geminiApiKey ? 'gemini-embedding-001' : (openaiApiKey ? 'text-embedding-3-small' : 'unknown'),
-        embeddingDimension: EMBEDDING_DIMENSION,
+        embeddingModel: embeddingConfig.model,
+        embeddingDimension: embeddingConfig.dimension,
         chunkSize: WORKSPACE_CHUNK_SIZE,
         chunkOverlap: WORKSPACE_CHUNK_OVERLAP,
         indexVersion: '1.0.0',
@@ -1409,6 +1422,71 @@ export async function incrementalIndexProjectFile(
   }
 }
 
+function normalizeMetadataValue(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    return value
+      .map(v => normalizeMetadataValue(v))
+      .filter(Boolean)
+      .join(', ')
+  }
+  return ''
+}
+
+function buildIntegrationMetadataHint(metadata?: IntegrationItemMetadata): string {
+  if (!metadata) return ''
+
+  const lines: string[] = []
+  const knownFields: Array<[keyof IntegrationItemMetadata, string]> = [
+    ['itemType', 'Type'],
+    ['identifier', 'Identifier'],
+    ['repo', 'Repository'],
+    ['team', 'Team'],
+    ['project', 'Project'],
+    ['cycle', 'Cycle'],
+    ['state', 'State'],
+    ['author', 'Author'],
+    ['assignee', 'Assignee'],
+    ['priority', 'Priority'],
+    ['labels', 'Labels'],
+    ['url', 'URL'],
+  ]
+
+  const usedKeys = new Set<string>()
+  for (const [key, label] of knownFields) {
+    const value = normalizeMetadataValue(metadata[key])
+    if (!value) continue
+    lines.push(`${label}: ${value}`)
+    usedKeys.add(String(key))
+  }
+
+  // Preserve some additional fields as searchable hints without flooding chunk text.
+  for (const [key, rawValue] of Object.entries(metadata)) {
+    if (lines.length >= 18) break
+    if (usedKeys.has(key)) continue
+    if (key.toLowerCase().includes('token') || key.toLowerCase().includes('secret') || key.toLowerCase().includes('key')) continue
+    const value = normalizeMetadataValue(rawValue)
+    if (!value || value.length > 200) continue
+    lines.push(`${key}: ${value}`)
+  }
+
+  return lines.join('\n')
+}
+
+function buildIntegrationIndexText(item: IntegrationItem): string {
+  const title = (item.title || '').trim()
+  const content = (item.content || '').trim()
+  const metadataHint = buildIntegrationMetadataHint(item.metadata)
+  const body = title ? `${title}\n\n${content}` : content
+
+  if (metadataHint && body) {
+    return `${metadataHint}\n\n${body}`.trim()
+  }
+  return (metadataHint || body).trim()
+}
+
 export async function indexIntegrationContent(
   projectId: string,
   sourceType: IntegrationSourceType,
@@ -1427,7 +1505,8 @@ export async function indexIntegrationContent(
   const releaseLock = await projectLockManager.acquireWriteLock(projectId)
 
   try {
-    const vectorStore = getVectorStore(projectId, 'library')
+    const { config: embeddingConfig, indexKey } = await resolveEmbeddingRuntime(geminiApiKey, openaiApiKey)
+    const vectorStore = getVectorStore(projectId, 'library', indexKey)
     await vectorStore.loadIndexUnsafe()
 
     const filePrefix = buildIntegrationFilePrefix(sourceType, sourceId)
@@ -1439,9 +1518,7 @@ export async function indexIntegrationContent(
       const itemId = item.id || item.externalId
       if (!itemId) continue
       const itemFileId = buildIntegrationFileId(sourceType, sourceId, itemId)
-      const title = (item.title || '').trim()
-      const content = (item.content || '').trim()
-      const text = title ? `${title}\n\n${content}` : content
+      const text = buildIntegrationIndexText(item)
       if (!text) continue
       newItemFileIds.add(itemFileId)
       if (!existingFileIds.has(itemFileId)) {
@@ -1472,9 +1549,7 @@ export async function indexIntegrationContent(
       const itemId = item.id || item.externalId
       if (!itemId) continue
       const itemFileId = buildIntegrationFileId(sourceType, sourceId, itemId)
-      const title = (item.title || '').trim()
-      const content = (item.content || '').trim()
-      const text = title ? `${title}\n\n${content}` : content
+      const text = buildIntegrationIndexText(item)
       if (!text) continue
       const itemChunks = chunkText(text, itemFileId, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP)
       chunks.push(...itemChunks)
@@ -1485,8 +1560,9 @@ export async function indexIntegrationContent(
       return { itemCount: items.length, chunkCount: 0 }
     }
 
-    const embeddingResults = await generateEmbeddingsBatch(
+    const embeddingResults = await generateEmbeddingsBatchWithConfig(
       chunks.map(chunk => chunk.text),
+      embeddingConfig,
       geminiApiKey,
       openaiApiKey,
       10

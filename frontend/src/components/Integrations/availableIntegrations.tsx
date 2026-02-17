@@ -82,10 +82,10 @@ export const AVAILABLE_INTEGRATIONS: AvailableIntegrationItem[] = [
   { kind: 'hubspot', label: 'HubSpot', sub: 'CRM, contacts, deals', icon: <IntegrationLogo kind="hubspot" /> },
   { kind: 'sentry', label: 'Sentry', sub: 'Errors, performance', icon: <IntegrationLogo kind="sentry" /> },
   { kind: 'posthog', label: 'PostHog', sub: 'Product analytics', icon: <IntegrationLogo kind="posthog" /> },
-  { kind: 'db-schema', label: 'DB Schema', sub: 'Migrations, ORM metadata', icon: <IntegrationLogo kind="db-schema" /> },
   { kind: 'notion', label: 'Notion', sub: 'Docs, wikis', icon: <IntegrationLogo kind="notion" /> },
   { kind: 'quickbooks', label: 'QuickBooks', sub: 'Accounting, invoices', icon: <IntegrationLogo kind="quickbooks" /> },
   { kind: 'metabase', label: 'Metabase', sub: 'BI, dashboards, queries', icon: <IntegrationLogo kind="metabase" /> },
+  { kind: 'db-schema', label: 'DB Schema', sub: 'Migrations, ORM metadata', icon: <IntegrationLogo kind="db-schema" /> },
   { kind: 'rss', label: 'RSS Feed', sub: 'Blogs, news, podcasts', icon: <IntegrationLogo kind="rss" /> },
 ]
 

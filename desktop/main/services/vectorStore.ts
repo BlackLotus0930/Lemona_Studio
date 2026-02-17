@@ -50,10 +50,14 @@ function sanitizeProjectId(projectId: string): string {
  * @param projectId - Project ID (pure semantic ID, no path structure)
  * @param folder - Folder type: 'library' or 'project'
  */
-function getProjectIndexDir(projectId: string, folder: 'library' | 'project'): string {
+function getProjectIndexDir(projectId: string, folder: 'library' | 'project', indexKey?: string): string {
   // Sanitize projectId and combine with folder
   const sanitizedProjectId = sanitizeProjectId(projectId)
-  return path.join(BASE_VECTOR_INDEX_DIR, sanitizedProjectId, folder)
+  if (!indexKey || indexKey.trim().length === 0) {
+    return path.join(BASE_VECTOR_INDEX_DIR, sanitizedProjectId, folder)
+  }
+  const safeIndexKey = indexKey.replace(/[^a-zA-Z0-9._:-]/g, '_')
+  return path.join(BASE_VECTOR_INDEX_DIR, sanitizedProjectId, folder, safeIndexKey)
 }
 
 /**
@@ -61,12 +65,12 @@ function getProjectIndexDir(projectId: string, folder: 'library' | 'project'): s
  * @param projectId - Project ID (pure semantic ID)
  * @param folder - Folder type: 'library' or 'project'
  */
-function getProjectIndexFiles(projectId: string, folder: 'library' | 'project'): { 
+function getProjectIndexFiles(projectId: string, folder: 'library' | 'project', indexKey?: string): {
   indexFile: string
   metadataFile: string
   manifestFile: string
 } {
-  const projectDir = getProjectIndexDir(projectId, folder)
+  const projectDir = getProjectIndexDir(projectId, folder, indexKey)
   return {
     indexFile: path.join(projectDir, 'index.bin'),
     metadataFile: path.join(projectDir, 'metadata.json'),
@@ -80,8 +84,8 @@ function getProjectIndexFiles(projectId: string, folder: 'library' | 'project'):
  * @param projectId - Project ID (pure semantic ID)
  * @param folder - Folder type: 'library' or 'project'
  */
-export function getProjectIndexDirectory(projectId: string, folder: 'library' | 'project'): string {
-  return getProjectIndexDir(projectId, folder)
+export function getProjectIndexDirectory(projectId: string, folder: 'library' | 'project', indexKey?: string): string {
+  return getProjectIndexDir(projectId, folder, indexKey)
 }
 
 // Ensure base vector index directory exists
@@ -403,6 +407,7 @@ class VectorStore {
   private metadataDirty: boolean = false // Mark metadata to be saved on next safe save
   private currentProjectId: string | undefined = undefined // Current project ID (pure semantic ID)
   private currentFolder: 'library' | 'project' = 'library' // Current folder type
+  private currentIndexKey: string | undefined = undefined
   private indexFile: string = '' // Current index file path
   private metadataFile: string = '' // Current metadata file path
   private manifestFile: string = '' // Current manifest file path
@@ -414,13 +419,17 @@ class VectorStore {
    * @param projectId - Project ID (pure semantic ID, no path structure)
    * @param folder - Folder type: 'library' or 'project'
    */
-  setProjectId(projectId: string, folder: 'library' | 'project'): void {
-    if (this.currentProjectId === projectId && this.currentFolder === folder) {
+  setProjectId(projectId: string, folder: 'library' | 'project', indexKey?: string): void {
+    const normalizedIndexKey = indexKey && indexKey.trim().length > 0 ? indexKey : undefined
+    if (this.currentProjectId === projectId && this.currentFolder === folder && this.currentIndexKey === normalizedIndexKey) {
       return // No change
     }
     
     // If already initialized with a different project/folder, reset
-    if (this.isInitialized && (this.currentProjectId !== projectId || this.currentFolder !== folder)) {
+    if (
+      this.isInitialized &&
+      (this.currentProjectId !== projectId || this.currentFolder !== folder || this.currentIndexKey !== normalizedIndexKey)
+    ) {
       this.isInitialized = false
       this.index = null
       this.metadata.clear()
@@ -431,7 +440,8 @@ class VectorStore {
     
     this.currentProjectId = projectId
     this.currentFolder = folder
-    const files = getProjectIndexFiles(projectId, folder)
+    this.currentIndexKey = normalizedIndexKey
+    const files = getProjectIndexFiles(projectId, folder, normalizedIndexKey)
     this.indexFile = files.indexFile
     this.metadataFile = files.metadataFile
     this.manifestFile = files.manifestFile
@@ -457,6 +467,10 @@ class VectorStore {
     return this.currentFolder
   }
 
+  getIndexKey(): string | undefined {
+    return this.currentIndexKey
+  }
+
   // Note: VectorStore is a "database kernel", not a transaction manager
   // Lock management is handled by transaction boundaries (documentService/projectService)
   // All public methods assume caller already holds appropriate lock
@@ -468,7 +482,7 @@ class VectorStore {
     if (!this.currentProjectId) {
       throw new Error('Project ID must be set before ensuring directory')
     }
-    const projectDir = getProjectIndexDir(this.currentProjectId, this.currentFolder)
+    const projectDir = getProjectIndexDir(this.currentProjectId, this.currentFolder, this.currentIndexKey)
     try {
       await fs.mkdir(projectDir, { recursive: true })
     } catch (error) {
@@ -1096,7 +1110,7 @@ class VectorStore {
         if (!this.currentProjectId) {
           throw new Error('Project ID must be set before saving')
         }
-        const projectDir = getProjectIndexDir(this.currentProjectId, this.currentFolder)
+        const projectDir = getProjectIndexDir(this.currentProjectId, this.currentFolder, this.currentIndexKey)
         try {
           await fs.access(projectDir)
           console.log(`[VectorStore] ✓ Project directory exists: ${projectDir}`)
@@ -1860,22 +1874,23 @@ const vectorStoreInstances: Map<string, VectorStore> = new Map()
  * @param projectId - Project ID (pure semantic ID, required)
  * @param folder - Folder type: 'library' or 'project'
  */
-export function getVectorStore(projectId: string, folder: 'library' | 'project'): VectorStore {
+export function getVectorStore(projectId: string, folder: 'library' | 'project', indexKey?: string): VectorStore {
   if (!projectId) {
     throw new Error('Project ID is required')
   }
 
   // Create a unique key for the instance map
-  const instanceKey = `${projectId}:${folder}`
+  const normalizedIndexKey = indexKey && indexKey.trim().length > 0 ? indexKey : '__legacy__'
+  const instanceKey = `${projectId}:${folder}:${normalizedIndexKey}`
   
   if (!vectorStoreInstances.has(instanceKey)) {
     const store = new VectorStore()
-    store.setProjectId(projectId, folder)
+    store.setProjectId(projectId, folder, indexKey)
     vectorStoreInstances.set(instanceKey, store)
   } else {
     // Ensure project ID and folder are set (in case they were changed)
     const store = vectorStoreInstances.get(instanceKey)!
-    store.setProjectId(projectId, folder)
+    store.setProjectId(projectId, folder, indexKey)
   }
   
   return vectorStoreInstances.get(instanceKey)!

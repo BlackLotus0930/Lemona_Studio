@@ -7,6 +7,14 @@ import OpenAI from 'openai'
 // Embedding dimension for both providers
 export const EMBEDDING_DIMENSION = 1536
 
+export interface EmbeddingProviderConfig {
+  providerType: 'builtin-gemini' | 'builtin-openai' | 'custom-openai'
+  model: string
+  dimension: number
+  apiKey?: string
+  baseUrl?: string
+}
+
 // Cache for API clients to avoid recreating instances
 const geminiClientCache: Map<string, GoogleGenerativeAI> = new Map()
 const openaiClientCache: Map<string, OpenAI> = new Map()
@@ -29,16 +37,23 @@ function getGeminiClient(apiKey: string): GoogleGenerativeAI {
 /**
  * Get OpenAI client instance (cached)
  */
-function getOpenAIClient(apiKey: string): OpenAI {
+function getOpenAIClient(apiKey: string, baseUrl?: string): OpenAI {
   if (!apiKey) {
     throw new Error('OpenAI API key is not configured.')
   }
-  
-  if (!openaiClientCache.has(apiKey)) {
-    openaiClientCache.set(apiKey, new OpenAI({ apiKey }))
+
+  const cacheKey = `${apiKey}::${baseUrl || ''}`
+  if (!openaiClientCache.has(cacheKey)) {
+    openaiClientCache.set(
+      cacheKey,
+      new OpenAI({
+        apiKey,
+        ...(baseUrl ? { baseURL: baseUrl } : {}),
+      })
+    )
   }
-  
-  return openaiClientCache.get(apiKey)!
+
+  return openaiClientCache.get(cacheKey)!
 }
 
 /**
@@ -48,7 +63,9 @@ function getOpenAIClient(apiKey: string): OpenAI {
  */
 async function generateGeminiEmbedding(
   text: string,
-  apiKey: string
+  apiKey: string,
+  model: string = 'gemini-embedding-001',
+  dimension: number = EMBEDDING_DIMENSION
 ): Promise<number[]> {
   try {
     const genAI = getGeminiClient(apiKey)
@@ -59,20 +76,20 @@ async function generateGeminiEmbedding(
     // output_dimensionality: 1536 (recommended: 768, 1536, or 3072)
     
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'models/gemini-embedding-001',
+          model: `models/${model}`,
           content: {
             parts: [{ text }],
           },
           // CRITICAL: Specify output_dimensionality to ensure 1536 dimensions
           // Default is 3072, but we need 1536 to match our index
-          output_dimensionality: EMBEDDING_DIMENSION,
+          output_dimensionality: dimension,
         }),
       }
     )
@@ -93,11 +110,11 @@ async function generateGeminiEmbedding(
       throw new Error('Invalid embedding response from Gemini API')
     }
     
-    if (embedding.length !== EMBEDDING_DIMENSION) {
+    if (embedding.length !== dimension) {
       console.error(
-        `[Embedding] Gemini embedding dimension mismatch: expected ${EMBEDDING_DIMENSION}, got ${embedding.length}. This may cause search failures.`
+        `[Embedding] Gemini embedding dimension mismatch: expected ${dimension}, got ${embedding.length}. This may cause search failures.`
       )
-      throw new Error(`Gemini embedding dimension mismatch: expected ${EMBEDDING_DIMENSION}, got ${embedding.length}`)
+      throw new Error(`Gemini embedding dimension mismatch: expected ${dimension}, got ${embedding.length}`)
     }
     
     return embedding
@@ -113,13 +130,16 @@ async function generateGeminiEmbedding(
  */
 async function generateOpenAIEmbedding(
   text: string,
-  apiKey: string
+  apiKey: string,
+  model: string = 'text-embedding-3-small',
+  dimension: number = EMBEDDING_DIMENSION,
+  baseUrl?: string
 ): Promise<number[]> {
   try {
-    const client = getOpenAIClient(apiKey)
+    const client = getOpenAIClient(apiKey, baseUrl)
     
     const response = await client.embeddings.create({
-      model: 'text-embedding-3-small',
+      model,
       input: text,
     })
     
@@ -129,9 +149,9 @@ async function generateOpenAIEmbedding(
       throw new Error('Invalid embedding response from OpenAI API')
     }
     
-    if (embedding.length !== EMBEDDING_DIMENSION) {
+    if (embedding.length !== dimension) {
       console.warn(
-        `[Embedding] OpenAI embedding dimension mismatch: expected ${EMBEDDING_DIMENSION}, got ${embedding.length}`
+        `[Embedding] OpenAI embedding dimension mismatch: expected ${dimension}, got ${embedding.length}`
       )
     }
     
@@ -187,6 +207,39 @@ export async function generateEmbedding(
   }
   
   throw new Error('No embedding API key available. Please configure Gemini or OpenAI API key.')
+}
+
+export async function generateEmbeddingWithConfig(
+  text: string,
+  config: EmbeddingProviderConfig,
+  fallbackGeminiApiKey?: string,
+  fallbackOpenaiApiKey?: string
+): Promise<{ embedding: number[]; provider: 'gemini' | 'openai' | 'custom-openai' }> {
+  if (!text || text.trim().length === 0) {
+    throw new Error('Text cannot be empty')
+  }
+
+  const model = config.model || (config.providerType === 'builtin-gemini' ? 'gemini-embedding-001' : 'text-embedding-3-small')
+  const dimension = config.dimension || EMBEDDING_DIMENSION
+
+  if (config.providerType === 'builtin-gemini') {
+    const apiKey = config.apiKey || fallbackGeminiApiKey
+    if (!apiKey) throw new Error('Gemini API key is not configured.')
+    const embedding = await generateGeminiEmbedding(text, apiKey, model, dimension)
+    return { embedding, provider: 'gemini' }
+  }
+
+  if (config.providerType === 'builtin-openai') {
+    const apiKey = config.apiKey || fallbackOpenaiApiKey
+    if (!apiKey) throw new Error('OpenAI API key is not configured.')
+    const embedding = await generateOpenAIEmbedding(text, apiKey, model, dimension)
+    return { embedding, provider: 'openai' }
+  }
+
+  const customApiKey = config.apiKey || fallbackOpenaiApiKey
+  if (!customApiKey) throw new Error('Custom OpenAI-compatible API key is not configured.')
+  const embedding = await generateOpenAIEmbedding(text, customApiKey, model, dimension, config.baseUrl)
+  return { embedding, provider: 'custom-openai' }
 }
 
 /**
@@ -365,6 +418,47 @@ export async function generateEmbeddingsBatch(
   return results
 }
 
+export async function generateEmbeddingsBatchWithConfig(
+  texts: string[],
+  config: EmbeddingProviderConfig,
+  fallbackGeminiApiKey?: string,
+  fallbackOpenaiApiKey?: string,
+  batchSize: number = 10
+): Promise<Array<{ embedding: number[]; provider: 'gemini' | 'openai' | 'custom-openai' }>> {
+  if (texts.length === 0) {
+    return []
+  }
+
+  const results: Array<{ embedding: number[]; provider: 'gemini' | 'openai' | 'custom-openai' }> = []
+
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize)
+    const batchPromises = batch.map(async (text, batchIndex) => {
+      return retryWithBackoff(
+        () => generateEmbeddingWithConfig(text, config, fallbackGeminiApiKey, fallbackOpenaiApiKey),
+        10,
+        1000
+      ).catch((error: any) => {
+        if (isQuotaError(error)) {
+          console.error('[Embedding] Quota error detected, stopping batch processing:', error.message)
+          throw error
+        }
+        console.error(`[Embedding] Failed embedding for text index ${i + batchIndex}:`, error.message)
+        throw error
+      })
+    })
+
+    const batchResults = await Promise.all(batchPromises)
+    results.push(...batchResults)
+
+    if (i + batchSize < texts.length) {
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+  }
+
+  return results
+}
+
 /**
  * Estimate tokens in text (rough approximation)
  * Used for chunking: ~4 characters per token
@@ -375,7 +469,9 @@ export function estimateTokens(text: string): number {
 
 export const embeddingService = {
   generateEmbedding,
+  generateEmbeddingWithConfig,
   generateEmbeddingsBatch,
+  generateEmbeddingsBatchWithConfig,
   estimateTokens,
   EMBEDDING_DIMENSION,
   isQuotaError,
