@@ -138,178 +138,32 @@ const getEdgesSignature = (edges: WorldLabEdge[]) => {
   return JSON.stringify(normalizeWorldLabEdgesForCompare(edges))
 }
 
-// Enhanced category color palette with gradients
-function getCategoryColor(category: string, theme: 'dark' | 'light'): {
+// Simple category color - single default style for all nodes
+function getCategoryColor(_category: string, theme: 'dark' | 'light'): {
   primary: string
   secondary: string
   glow: string
   badgeBg: string
 } {
-  // Normalize category name (support both lowercase and capitalized)
-  const categoryKey = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase()
-  
-  const colors: Record<string, { dark: any; light: any }> = {
-    Uncategorized: {
-      dark: {
-        primary: '#9E9E9E',
-        secondary: '#757575',
-        glow: 'rgba(158, 158, 158, 0.25)',
-        badgeBg: 'rgba(158, 158, 158, 0.12)',
-      },
-      light: {
-        primary: '#757575',
-        secondary: '#616161',
-        glow: 'rgba(117, 117, 117, 0.15)',
-        badgeBg: 'rgba(117, 117, 117, 0.08)',
-      },
-    },
-    Character: {
-      dark: {
-        primary: '#5BA3FF',
-        secondary: '#4285F4',
-        glow: 'rgba(91, 163, 255, 0.4)',
-        badgeBg: 'rgba(91, 163, 255, 0.15)',
-      },
-      light: {
-        primary: '#1976D2',
-        secondary: '#1565C0',
-        glow: 'rgba(25, 118, 210, 0.2)',
-        badgeBg: 'rgba(25, 118, 210, 0.1)',
-      },
-    },
-    Event: {
-      dark: {
-        primary: '#FF6B9D',
-        secondary: '#FF5252',
-        glow: 'rgba(255, 107, 157, 0.4)',
-        badgeBg: 'rgba(255, 107, 157, 0.15)',
-      },
-      light: {
-        primary: '#D32F2F',
-        secondary: '#C62828',
-        glow: 'rgba(211, 47, 47, 0.2)',
-        badgeBg: 'rgba(211, 47, 47, 0.1)',
-      },
-    },
-    Concept: {
-      dark: {
-        primary: '#9C88FF',
-        secondary: '#7C6AFF',
-        glow: 'rgba(156, 136, 255, 0.4)',
-        badgeBg: 'rgba(156, 136, 255, 0.15)',
-      },
-      light: {
-        primary: '#6A4C93',
-        secondary: '#5A3C83',
-        glow: 'rgba(106, 76, 147, 0.2)',
-        badgeBg: 'rgba(106, 76, 147, 0.1)',
-      },
-    },
-    Custom: {
-      dark: {
-        primary: '#FFB84D',
-        secondary: '#FFA726',
-        glow: 'rgba(255, 184, 77, 0.4)',
-        badgeBg: 'rgba(255, 184, 77, 0.15)',
-      },
-      light: {
-        primary: '#F57C00',
-        secondary: '#E65100',
-        glow: 'rgba(245, 124, 0, 0.2)',
-        badgeBg: 'rgba(245, 124, 0, 0.1)',
-      },
-    },
-    Location: {
-      dark: {
-        primary: '#51CF66',
-        secondary: '#40C057',
-        glow: 'rgba(81, 207, 102, 0.4)',
-        badgeBg: 'rgba(81, 207, 102, 0.15)',
-      },
-      light: {
-        primary: '#388E3C',
-        secondary: '#2E7D32',
-        glow: 'rgba(56, 142, 60, 0.2)',
-        badgeBg: 'rgba(56, 142, 60, 0.1)',
-      },
-    },
-    Rule: {
-      dark: {
-        primary: '#FFD43B',
-        secondary: '#FCC419',
-        glow: 'rgba(255, 212, 59, 0.4)',
-        badgeBg: 'rgba(255, 212, 59, 0.15)',
-      },
-      light: {
-        primary: '#F57C00',
-        secondary: '#E65100',
-        glow: 'rgba(245, 124, 0, 0.2)',
-        badgeBg: 'rgba(245, 124, 0, 0.1)',
-      },
-    },
-    Setting: {
-      dark: {
-        primary: '#B197FC',
-        secondary: '#9775FA',
-        glow: 'rgba(177, 151, 252, 0.4)',
-        badgeBg: 'rgba(177, 151, 252, 0.15)',
-      },
-      light: {
-        primary: '#7B1FA2',
-        secondary: '#6A1B9A',
-        glow: 'rgba(123, 31, 162, 0.2)',
-        badgeBg: 'rgba(123, 31, 162, 0.1)',
-      },
-    },
-    Time: {
-      dark: {
-        primary: '#66D9EF',
-        secondary: '#4DD0E1',
-        glow: 'rgba(102, 217, 239, 0.4)',
-        badgeBg: 'rgba(102, 217, 239, 0.15)',
-      },
-      light: {
-        primary: '#0277BD',
-        secondary: '#01579B',
-        glow: 'rgba(2, 119, 189, 0.2)',
-        badgeBg: 'rgba(2, 119, 189, 0.1)',
-      },
-    },
-    Place: {
-      dark: {
-        primary: '#51CF66',
-        secondary: '#40C057',
-        glow: 'rgba(81, 207, 102, 0.4)',
-        badgeBg: 'rgba(81, 207, 102, 0.15)',
-      },
-      light: {
-        primary: '#388E3C',
-        secondary: '#2E7D32',
-        glow: 'rgba(56, 142, 60, 0.2)',
-        badgeBg: 'rgba(56, 142, 60, 0.1)',
-      },
-    },
-  }
-  const defaultColors = {
+  const colors = {
     dark: {
-      primary: '#858585',
-      secondary: '#666666',
-      glow: 'rgba(133, 133, 133, 0.3)',
-      badgeBg: 'rgba(133, 133, 133, 0.1)',
+      primary: '#7C8DB5',
+      secondary: '#5A6B8A',
+      glow: 'rgba(124, 141, 181, 0.3)',
+      badgeBg: 'rgba(124, 141, 181, 0.12)',
     },
     light: {
-      primary: '#5F6368',
-      secondary: '#3C4043',
-      glow: 'rgba(95, 99, 104, 0.15)',
-      badgeBg: 'rgba(95, 99, 104, 0.08)',
+      primary: '#5A6B8A',
+      secondary: '#4A5A77',
+      glow: 'rgba(90, 107, 138, 0.2)',
+      badgeBg: 'rgba(90, 107, 138, 0.08)',
     },
   }
-  const cat = colors[categoryKey] || colors[category] || { dark: defaultColors.dark, light: defaultColors.light }
-  return theme === 'dark' ? cat.dark : cat.light
+  return theme === 'dark' ? colors.dark : colors.light
 }
 
-// Category list (Uncategorized is not shown in dropdown, only used as default for new nodes)
-const CATEGORIES = ['Character', 'Concept', 'Event', 'Place', 'Time']
+// No fixed categories - framework only
+const CATEGORIES: string[] = []
 
 // Beautiful custom node component representing "existences in the world"
 // Helper function to extract preview text from content (markdown or TipTap JSON)
@@ -716,7 +570,8 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
         )
       })}
 
-      {/* Category color dot - top right corner */}
+      {/* Category color dot - top right corner (hidden when no categories) */}
+      {CATEGORIES.length > 0 && (
       <div style={{ position: 'relative' }} ref={categoryDropdownRef}>
         <div
           onClick={handleCategoryClick}
@@ -819,6 +674,7 @@ const CustomNode = ({ data, selected, id }: { data: any; selected: boolean; id: 
           </div>
         )}
       </div>
+      )}
 
       {/* Main label - inline edit when renaming */}
       {/* Always render label div (hidden when renaming) so we can measure its width */}

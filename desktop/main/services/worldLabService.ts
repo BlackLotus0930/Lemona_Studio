@@ -5,11 +5,8 @@ import fs from 'fs/promises'
 import path from 'path'
 
 // Use Electron's userData directory for WorldLab
-// Structure: /worldlab/WorldLab(1).worldlab/nodes/..., edges.json, metadata.json
+// Structure: /worldlab/{projectId}/{labName}.worldlab/nodes/..., edges.json, metadata.json
 const WORLDLAB_DIR = path.join(app.getPath('userData'), 'worldlab')
-
-console.log('Desktop WorldLab service initialized:')
-console.log('  WORLDLAB_DIR:', WORLDLAB_DIR)
 
 // Ensure worldlab directory exists
 async function ensureWorldLabDir() {
@@ -108,7 +105,6 @@ export const worldLabService = {
   async load(labName: string, projectId: string): Promise<WorldLab | null> {
     try {
       const labPath = getLabPath(labName, projectId)
-      console.log(`[worldLabService] Loading Lab: labName=${labName}, projectId=${projectId}, labPath=${labPath}`)
       
       // Ensure project directory exists
       const projectDir = path.join(WORLDLAB_DIR, projectId)
@@ -117,9 +113,7 @@ export const worldLabService = {
       // Check if Lab directory exists
       try {
         await fs.access(labPath)
-        console.log(`[worldLabService] Lab directory exists: ${labPath}`)
       } catch {
-        console.log(`[worldLabService] Lab directory not found: ${labPath}, will create empty structure`)
         // Instead of returning null, create empty Lab structure
         // This allows users to start with an empty canvas
         return {
@@ -134,17 +128,10 @@ export const worldLabService = {
         }
       }
 
-      // Load metadata
+      // Load metadata, nodes, edges
       const metadata = await this.loadMetadata(labName, projectId)
-      console.log(`[worldLabService] Loaded metadata:`, metadata)
-      
-      // Load nodes
       const nodes = await this.loadNodes(labName, projectId)
-      console.log(`[worldLabService] Loaded ${nodes.length} nodes`)
-      
-      // Load edges
       const edges = await this.loadEdges(labName, projectId)
-      console.log(`[worldLabService] Loaded ${edges.length} edges`)
 
       return {
         labPath,
@@ -551,55 +538,23 @@ export const worldLabService = {
    */
   async deleteNode(labName: string, nodeId: string, projectId: string): Promise<boolean> {
     try {
-      console.log(`[worldLabService] deleteNode called for lab: ${labName}, nodeId: ${nodeId}, projectId: ${projectId}`)
       const labPath = getLabPath(labName, projectId)
       const filePath = getNodeFilePath(labPath, nodeId)
-      console.log(`[worldLabService] deleteNode - labPath: ${labPath}`)
-      console.log(`[worldLabService] deleteNode - filePath: ${filePath}`)
       
-      // Check if file exists before attempting to delete
-      let fileExists = false
       try {
-        await fs.access(filePath)
-        fileExists = true
-        console.log(`[worldLabService] deleteNode - File exists, proceeding with deletion`)
-      } catch (accessError) {
-        console.warn(`[worldLabService] deleteNode - File does not exist or cannot be accessed: ${filePath}`, accessError)
-        // File doesn't exist - this is okay, we'll treat it as already deleted
-      }
-      
-      // Only try to delete if file exists
-      if (fileExists) {
-        try {
-          await fs.unlink(filePath)
-          console.log(`[worldLabService] deleteNode - Successfully deleted file: ${filePath}`)
-        } catch (unlinkError: any) {
-          // If file was deleted between access check and unlink, that's okay
-          if (unlinkError?.code === 'ENOENT') {
-            console.log(`[worldLabService] deleteNode - File was already deleted: ${filePath}`)
-          } else {
-            throw unlinkError // Re-throw if it's a different error
-          }
+        await fs.unlink(filePath)
+      } catch (unlinkError: any) {
+        if (unlinkError?.code !== 'ENOENT') {
+          throw unlinkError
         }
-      } else {
-        console.log(`[worldLabService] deleteNode - File does not exist, skipping deletion`)
       }
       
-      // Also remove edges connected to this node (even if file didn't exist)
-      console.log(`[worldLabService] deleteNode - Loading edges to remove connections`)
       const edges = await this.loadEdges(labName, projectId)
-      console.log(`[worldLabService] deleteNode - Loaded ${edges.length} edges`)
       const filteredEdges = edges.filter(
         edge => edge.source !== nodeId && edge.target !== nodeId
       )
-      console.log(`[worldLabService] deleteNode - Filtered to ${filteredEdges.length} edges (removed ${edges.length - filteredEdges.length} edges connected to node)`)
       await this.saveEdges(labName, filteredEdges, projectId)
-      console.log(`[worldLabService] deleteNode - Saved filtered edges`)
-      
-      // Update metadata updatedAt
-      console.log(`[worldLabService] deleteNode - Updating metadata timestamp`)
       await this.updateMetadataTimestamp(labName, projectId)
-      console.log(`[worldLabService] deleteNode - Successfully completed deletion for node ${nodeId}`)
       
       return true
     } catch (error) {
@@ -696,20 +651,14 @@ export const worldLabService = {
   async deleteLab(labName: string, projectId: string): Promise<boolean> {
     try {
       const labPath = getLabPath(labName, projectId)
-      console.log(`[worldLabService] deleteLab called for lab: ${labName}, labPath: ${labPath}`)
       
-      // Check if directory exists
       try {
         await fs.access(labPath)
       } catch {
-        // Directory doesn't exist, consider it already deleted
-        console.log(`[worldLabService] deleteLab - Lab directory does not exist: ${labPath}`)
         return true
       }
       
-      // Delete the entire directory recursively
       await fs.rm(labPath, { recursive: true, force: true })
-      console.log(`[worldLabService] deleteLab - Successfully deleted Lab directory: ${labPath}`)
       
       return true
     } catch (error) {

@@ -46,10 +46,8 @@ interface IntegrationsContextValue {
   dbSchemaBasePath: string
   setDbSchemaBasePath: React.Dispatch<React.SetStateAction<string>>
   isSelectingDbSchemaFolder: boolean
-  oauthClientId: string
-  setOauthClientId: React.Dispatch<React.SetStateAction<string>>
-  oauthClientSecret: string
-  setOauthClientSecret: React.Dispatch<React.SetStateAction<string>>
+  oauthCredentialsByProvider: Record<'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks', { clientId: string; clientSecret: string }>
+  setOauthCredentials: (provider: 'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks', creds: { clientId?: string; clientSecret?: string }) => void
   oauthStatus: OAuthConfigStatus | null
   showOAuthConfigForm: boolean
   setShowOAuthConfigForm: React.Dispatch<React.SetStateAction<boolean>>
@@ -151,8 +149,25 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
   const [hubspotApiKey, setHubspotApiKey] = useState('')
   const [dbSchemaBasePath, setDbSchemaBasePath] = useState('')
   const [isSelectingDbSchemaFolder, setIsSelectingDbSchemaFolder] = useState(false)
-  const [oauthClientId, setOauthClientId] = useState('')
-  const [oauthClientSecret, setOauthClientSecret] = useState('')
+  const initialOauthCreds = { clientId: '', clientSecret: '' }
+  const [oauthCredentialsByProvider, setOauthCredentialsByProvider] = useState<
+    Record<'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks', { clientId: string; clientSecret: string }>
+  >({
+    github: { ...initialOauthCreds },
+    gitlab: { ...initialOauthCreds },
+    slack: { ...initialOauthCreds },
+    notion: { ...initialOauthCreds },
+    quickbooks: { ...initialOauthCreds },
+  })
+  const setOauthCredentials = useCallback(
+    (provider: 'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks', creds: { clientId?: string; clientSecret?: string }) => {
+      setOauthCredentialsByProvider(prev => ({
+        ...prev,
+        [provider]: { ...prev[provider], ...creds },
+      }))
+    },
+    []
+  )
   const [oauthStatus, setOauthStatus] = useState<OAuthConfigStatus | null>(null)
   const [gitlabOauthStatus, setGitlabOauthStatus] = useState<OAuthConfigStatus | null>(null)
   const [gitlabRepos, setGitlabRepos] = useState<string[]>([])
@@ -586,36 +601,22 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
 
   const handleConnectGithub = useCallback(async () => {
     if (!projectId) return
-    if (!oauthStatus?.configured) {
-      const cid = oauthClientId.trim()
-      const csec = oauthClientSecret.trim()
-      if (!cid || !csec) {
-        setError('Client ID and Secret required')
-        return
-      }
-      setIsConnectingGithub(true)
-      setError(null)
-      try {
-        await integrationApi.saveOAuthConfig('github', { clientId: cid, clientSecret: csec })
-        await loadOAuthStatus()
-        await integrationApi.startOAuth(projectId, 'github')
-        await loadSources()
-        setSuccessMessage('GitHub connected. Select repos and click Save and Index.')
-        setTimeout(() => setSuccessMessage(null), 5000)
-      } catch (err: any) {
-        const msg = err?.message || 'Connect failed'
-        setError(msg)
-      } finally {
-        setIsConnectingGithub(false)
-      }
+    const { clientId: cid, clientSecret: csec } = oauthCredentialsByProvider.github
+    const needsForm = !githubSource
+    if (needsForm && (!cid.trim() || !csec.trim())) {
+      setError('Client ID and Secret required')
       return
     }
     setIsConnectingGithub(true)
     setError(null)
     try {
+      if (needsForm && cid.trim() && csec.trim()) {
+        await integrationApi.saveOAuthConfig('github', { clientId: cid.trim(), clientSecret: csec.trim() })
+        await loadOAuthStatus()
+      }
       await integrationApi.startOAuth(projectId, 'github')
       await loadSources()
-      setSuccessMessage('GitHub connected. Select repos and Save scope, then Sync to index.')
+      setSuccessMessage(githubSource ? 'GitHub connected. Select repos and Save scope, then Sync to index.' : 'GitHub connected. Select repos and click Save and Index.')
       setTimeout(() => setSuccessMessage(null), 5000)
     } catch (err: any) {
       const msg = err?.message || 'Connect failed'
@@ -623,7 +624,7 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
     } finally {
       setIsConnectingGithub(false)
     }
-  }, [projectId, oauthStatus?.configured, oauthClientId, oauthClientSecret, loadOAuthStatus, loadSources])
+  }, [projectId, githubSource, oauthCredentialsByProvider.github, loadOAuthStatus, loadSources])
 
   const cancelConnectGithub = useCallback(() => {
     setIsConnectingGithub(false)
@@ -631,36 +632,22 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
 
   const handleConnectGitlab = useCallback(async () => {
     if (!projectId) return
-    if (!gitlabOauthStatus?.configured) {
-      const cid = oauthClientId.trim()
-      const csec = oauthClientSecret.trim()
-      if (!cid || !csec) {
-        setError('Client ID and Secret required')
-        return
-      }
-      setIsConnectingGitlab(true)
-      setError(null)
-      try {
-        await integrationApi.saveOAuthConfig('gitlab', { clientId: cid, clientSecret: csec })
-        await loadGitlabOAuthStatus()
-        await integrationApi.startOAuth(projectId, 'gitlab')
-        await loadSources()
-        setSuccessMessage('GitLab connected. Select projects and click Save and Index.')
-        setTimeout(() => setSuccessMessage(null), 5000)
-      } catch (err: any) {
-        const msg = err?.message || 'Connect failed'
-        setError(msg)
-      } finally {
-        setIsConnectingGitlab(false)
-      }
+    const { clientId: cid, clientSecret: csec } = oauthCredentialsByProvider.gitlab
+    const needsForm = !gitlabSource
+    if (needsForm && (!cid.trim() || !csec.trim())) {
+      setError('Client ID and Secret required')
       return
     }
     setIsConnectingGitlab(true)
     setError(null)
     try {
+      if (needsForm && cid.trim() && csec.trim()) {
+        await integrationApi.saveOAuthConfig('gitlab', { clientId: cid.trim(), clientSecret: csec.trim() })
+        await loadGitlabOAuthStatus()
+      }
       await integrationApi.startOAuth(projectId, 'gitlab')
       await loadSources()
-      setSuccessMessage('GitLab connected. Select projects and Save scope, then Sync to index.')
+      setSuccessMessage(gitlabSource ? 'GitLab connected. Select projects and Save scope, then Sync to index.' : 'GitLab connected. Select projects and click Save and Index.')
       setTimeout(() => setSuccessMessage(null), 5000)
     } catch (err: any) {
       const msg = err?.message || 'Connect failed'
@@ -668,7 +655,7 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
     } finally {
       setIsConnectingGitlab(false)
     }
-  }, [projectId, gitlabOauthStatus?.configured, oauthClientId, oauthClientSecret, loadGitlabOAuthStatus, loadSources])
+  }, [projectId, gitlabSource, oauthCredentialsByProvider.gitlab, loadGitlabOAuthStatus, loadSources])
 
   const cancelConnectGitlab = useCallback(() => {
     setIsConnectingGitlab(false)
@@ -676,36 +663,22 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
 
   const handleConnectSlack = useCallback(async () => {
     if (!projectId) return
-    if (!slackOauthStatus?.configured) {
-      const cid = oauthClientId.trim()
-      const csec = oauthClientSecret.trim()
-      if (!cid || !csec) {
-        setError('Client ID and Secret required')
-        return
-      }
-      setIsConnectingSlack(true)
-      setError(null)
-      try {
-        await integrationApi.saveOAuthConfig('slack', { clientId: cid, clientSecret: csec })
-        await loadSlackOAuthStatus()
-        await integrationApi.startOAuth(projectId, 'slack')
-        await loadSources()
-        setSuccessMessage('Slack connected. Select channels and click Save and Index.')
-        setTimeout(() => setSuccessMessage(null), 5000)
-      } catch (err: any) {
-        const msg = err?.message || 'Connect failed'
-        setError(msg)
-      } finally {
-        setIsConnectingSlack(false)
-      }
+    const { clientId: cid, clientSecret: csec } = oauthCredentialsByProvider.slack
+    const needsForm = !slackSource
+    if (needsForm && (!cid.trim() || !csec.trim())) {
+      setError('Client ID and Secret required')
       return
     }
     setIsConnectingSlack(true)
     setError(null)
     try {
+      if (needsForm && cid.trim() && csec.trim()) {
+        await integrationApi.saveOAuthConfig('slack', { clientId: cid.trim(), clientSecret: csec.trim() })
+        await loadSlackOAuthStatus()
+      }
       await integrationApi.startOAuth(projectId, 'slack')
       await loadSources()
-      setSuccessMessage('Slack connected. Select channels and Save scope, then Sync to index.')
+      setSuccessMessage(slackSource ? 'Slack connected. Select channels and Save scope, then Sync to index.' : 'Slack connected. Select channels and click Save and Index.')
       setTimeout(() => setSuccessMessage(null), 5000)
     } catch (err: any) {
       const msg = err?.message || 'Connect failed'
@@ -713,7 +686,7 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
     } finally {
       setIsConnectingSlack(false)
     }
-  }, [projectId, slackOauthStatus?.configured, oauthClientId, oauthClientSecret, loadSlackOAuthStatus, loadSources])
+  }, [projectId, slackSource, oauthCredentialsByProvider.slack, loadSlackOAuthStatus, loadSources])
 
   const cancelConnectSlack = useCallback(() => {
     setIsConnectingSlack(false)
@@ -721,36 +694,22 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
 
   const handleConnectNotion = useCallback(async () => {
     if (!projectId) return
-    if (!notionOauthStatus?.configured) {
-      const cid = oauthClientId.trim()
-      const csec = oauthClientSecret.trim()
-      if (!cid || !csec) {
-        setError('Client ID and Secret required')
-        return
-      }
-      setIsConnectingNotion(true)
-      setError(null)
-      try {
-        await integrationApi.saveOAuthConfig('notion', { clientId: cid, clientSecret: csec })
-        await loadNotionOAuthStatus()
-        await integrationApi.startOAuth(projectId, 'notion')
-        await loadSources()
-        setSuccessMessage('Notion connected. Select pages and click Save and Index.')
-        setTimeout(() => setSuccessMessage(null), 5000)
-      } catch (err: any) {
-        const msg = err?.message || 'Connect failed'
-        setError(msg)
-      } finally {
-        setIsConnectingNotion(false)
-      }
+    const { clientId: cid, clientSecret: csec } = oauthCredentialsByProvider.notion
+    const needsForm = !notionSource
+    if (needsForm && (!cid.trim() || !csec.trim())) {
+      setError('Client ID and Secret required')
       return
     }
     setIsConnectingNotion(true)
     setError(null)
     try {
+      if (needsForm && cid.trim() && csec.trim()) {
+        await integrationApi.saveOAuthConfig('notion', { clientId: cid.trim(), clientSecret: csec.trim() })
+        await loadNotionOAuthStatus()
+      }
       await integrationApi.startOAuth(projectId, 'notion')
       await loadSources()
-      setSuccessMessage('Notion connected. Select pages and Save scope, then Sync to index.')
+      setSuccessMessage(notionSource ? 'Notion connected. Select pages and Save scope, then Sync to index.' : 'Notion connected. Select pages and click Save and Index.')
       setTimeout(() => setSuccessMessage(null), 5000)
     } catch (err: any) {
       const msg = err?.message || 'Connect failed'
@@ -758,7 +717,7 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
     } finally {
       setIsConnectingNotion(false)
     }
-  }, [projectId, notionOauthStatus?.configured, oauthClientId, oauthClientSecret, loadNotionOAuthStatus, loadSources])
+  }, [projectId, notionSource, oauthCredentialsByProvider.notion, loadNotionOAuthStatus, loadSources])
 
   const cancelConnectNotion = useCallback(() => {
     setIsConnectingNotion(false)
@@ -766,21 +725,21 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
 
   const handleConnectQuickbooks = useCallback(async () => {
     if (!projectId) return
+    const { clientId: cid, clientSecret: csec } = oauthCredentialsByProvider.quickbooks
+    const needsForm = !quickbooksSource
+    if (needsForm && (!cid.trim() || !csec.trim())) {
+      setError('Client ID and Secret required')
+      return
+    }
     setIsConnectingQuickbooks(true)
     setError(null)
     try {
-      if (!quickbooksOauthStatus?.configured) {
-        const cid = oauthClientId.trim()
-        const csec = oauthClientSecret.trim()
-        if (cid && csec) {
-          await integrationApi.saveOAuthConfig('quickbooks', { clientId: cid, clientSecret: csec })
-          setOauthClientSecret('')
-        }
-        await loadQuickBooksOAuthStatus()
-        await integrationApi.startOAuth(projectId, 'quickbooks')
-      } else {
-        await integrationApi.startOAuth(projectId, 'quickbooks')
+      if (needsForm && cid.trim() && csec.trim()) {
+        await integrationApi.saveOAuthConfig('quickbooks', { clientId: cid.trim(), clientSecret: csec.trim() })
+        setOauthCredentials('quickbooks', { clientSecret: '' })
       }
+      await loadQuickBooksOAuthStatus()
+      await integrationApi.startOAuth(projectId, 'quickbooks')
       await loadSources()
     } catch (err: any) {
       const msg = err?.message || 'QuickBooks connection failed'
@@ -788,36 +747,35 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
     } finally {
       setIsConnectingQuickbooks(false)
     }
-  }, [projectId, quickbooksOauthStatus?.configured, oauthClientId, oauthClientSecret, loadQuickBooksOAuthStatus, loadSources])
+  }, [projectId, quickbooksOauthStatus?.configured, oauthCredentialsByProvider.quickbooks, setOauthCredentials, loadQuickBooksOAuthStatus, loadSources])
 
   const cancelConnectQuickbooks = useCallback(() => {
     setIsConnectingQuickbooks(false)
   }, [])
 
   const handleSaveOAuthConfig = useCallback(async (sourceType: 'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks') => {
-    const cid = oauthClientId.trim()
-    const csec = oauthClientSecret.trim()
-    if (!cid || !csec) {
+    const { clientId: cid, clientSecret: csec } = oauthCredentialsByProvider[sourceType]
+    if (!cid.trim() || !csec.trim()) {
       setError('Client ID and Secret required')
       return
     }
     setIsSavingOAuthConfig(true)
     setError(null)
     try {
-      await integrationApi.saveOAuthConfig(sourceType, { clientId: cid, clientSecret: csec })
+      await integrationApi.saveOAuthConfig(sourceType, { clientId: cid.trim(), clientSecret: csec.trim() })
       if (sourceType === 'github') await loadOAuthStatus()
       else if (sourceType === 'gitlab') await loadGitlabOAuthStatus()
       else if (sourceType === 'slack') await loadSlackOAuthStatus()
       else if (sourceType === 'notion') await loadNotionOAuthStatus()
       else await loadQuickBooksOAuthStatus()
-      setOauthClientSecret('')
+      setOauthCredentials(sourceType, { clientSecret: '' })
       setShowOAuthConfigForm(false)
     } catch (err: any) {
       setError(err?.message || 'Save failed')
     } finally {
       setIsSavingOAuthConfig(false)
     }
-  }, [oauthClientId, oauthClientSecret, loadOAuthStatus, loadGitlabOAuthStatus, loadSlackOAuthStatus, loadNotionOAuthStatus, loadQuickBooksOAuthStatus])
+  }, [oauthCredentialsByProvider, setOauthCredentials, loadOAuthStatus, loadGitlabOAuthStatus, loadSlackOAuthStatus, loadNotionOAuthStatus, loadQuickBooksOAuthStatus])
 
   const handleSaveGithubRepos = useCallback(async () => {
     if (!projectId || !githubSource) return
@@ -927,7 +885,7 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
     }
   }, [projectId, loadSources, onSourceRemoved])
 
-  const value = useMemo(() => ({
+  const value: IntegrationsContextValue = {
     projectId,
     sources,
     githubRepos,
@@ -967,10 +925,8 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
     dbSchemaBasePath,
     setDbSchemaBasePath,
     isSelectingDbSchemaFolder,
-    oauthClientId,
-    setOauthClientId,
-    oauthClientSecret,
-    setOauthClientSecret,
+    oauthCredentialsByProvider,
+    setOauthCredentials,
     oauthStatus,
     showOAuthConfigForm,
     setShowOAuthConfigForm,
@@ -1043,13 +999,7 @@ export function IntegrationsProvider({ projectId, children, onSourceRemoved }: {
     handleSaveGithubRepos,
     handleSaveGitlabRepos,
     handleRemove,
-  }), [
-    projectId, sources, githubRepos, indexedGithubRepos, selectedGithubRepos, isLoading, isAdding, isSyncingAll,
-    isConnectingGithub, isSavingGithubRepos, isSavingOAuthConfig, displayName, url, linearApiKey, stripeApiKey,     metabaseApiKey, metabaseUrl, hubspotApiKey, dbSchemaBasePath, oauthClientId,
-    oauthClientSecret, oauthStatus, showOAuthConfigForm, error, successMessage, syncingSourceId, getStatusInfo,
-    githubSource, gitlabSource, notionSource, quickbooksSource, quickbooksOauthStatus, isConnectingQuickbooks, canAdd, canAddLinear, canAddStripe, canAddSentry, canAddPosthog, canAddMetabase, canAddDbSchema, loadSources, handleAddSource, handleAddLinearSource, handleAddStripeSource, handleAddSentrySource, handleAddPosthogSource, handleAddDbSchemaSource, handleBrowseDbSchemaFolder, handleAddMetabaseSource, handleSyncSource, handleSyncAll,
-    handleConnectGithub, cancelConnectGithub, handleConnectGitlab, cancelConnectGitlab, handleConnectNotion, handleConnectQuickbooks, handleSaveOAuthConfig, handleSaveGithubRepos, handleSaveGitlabRepos, handleRemove,
-  ])
+  }
 
   return <IntegrationsContext.Provider value={value}>{children}</IntegrationsContext.Provider>
 }

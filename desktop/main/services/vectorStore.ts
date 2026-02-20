@@ -56,7 +56,8 @@ function getProjectIndexDir(projectId: string, folder: 'library' | 'project', in
   if (!indexKey || indexKey.trim().length === 0) {
     return path.join(BASE_VECTOR_INDEX_DIR, sanitizedProjectId, folder)
   }
-  const safeIndexKey = indexKey.replace(/[^a-zA-Z0-9._:-]/g, '_')
+  // Keep this cross-platform: ':' is invalid on Windows directory names.
+  const safeIndexKey = indexKey.replace(/[^a-zA-Z0-9._-]/g, '_')
   return path.join(BASE_VECTOR_INDEX_DIR, sanitizedProjectId, folder, safeIndexKey)
 }
 
@@ -115,6 +116,7 @@ export interface ChunkMetadata {
   startChar: number
   endChar: number
   tokenCount: number
+  indexedAt?: string // Optional chunk indexing timestamp (ISO)
   projectId?: string // Optional: Project ID this chunk belongs to (for library files scoped to projects)
   // Workspace paragraph-level indexing fields (only for folder === 'project')
   paragraphId?: string // UUID, unique identifier (identity)
@@ -1340,6 +1342,7 @@ class VectorStore {
         startChar: chunk.startChar || 0,
         endChar: chunk.endChar || chunk.text.length,
         tokenCount: chunk.tokenCount || 0,
+        indexedAt: chunk.indexedAt,
         projectId: projectId, // Store projectId for library file scoping
       }
 
@@ -1722,6 +1725,24 @@ class VectorStore {
     }
 
     return results
+  }
+
+  /**
+   * Get a chunk by chunk ID
+   * 📌 UNSAFE: Assumes caller already holds read lock
+   *
+   * @param chunkId - The chunk ID
+   * @returns Chunk metadata if found, null otherwise
+   */
+  getChunkByIdUnsafe(chunkId: string): ChunkMetadata | null {
+    if (!chunkId || chunkId.trim().length === 0) {
+      return null
+    }
+    const label = this.idToLabel.get(chunkId)
+    if (label === undefined) {
+      return null
+    }
+    return this.metadata.get(label) || null
   }
 
   /**

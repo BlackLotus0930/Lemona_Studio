@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { AIChatMessage, ChatAttachment, Document, IndexingStatus } from '@shared/types'
+import { AIChatMessage, ChatAttachment, Document, IndexingStatus, AgentProgressEvent } from '@shared/types'
 import { aiApi, chatApi, documentApi, projectApi, settingsApi } from '../../services/api'
 import { indexingApi } from '../../services/desktop-api'
 import { useAiSettings } from '../AISettings/AiSettingsContext'
@@ -26,6 +26,8 @@ import CloseIcon from '@mui/icons-material/Close'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 // @ts-ignore
 import CheckIcon from '@mui/icons-material/Check'
+// @ts-ignore
+import EditIcon from '@mui/icons-material/Edit'
 // @ts-ignore
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 // @ts-ignore
@@ -68,17 +70,21 @@ function formatIntegrationFileIdForDisplay(fileId: string): string | null {
 
 interface AgentActionPayload {
   actions?: Array<{
+    actionId?: string
     type: 'create_file' | 'edit_file' | 'edit_block'
     fileName?: string
     targetDocumentId?: string
+    targetBlockId?: string
     content: string
     oldContent?: string
     newContent?: string
   }>
 }
+type AgentAction = NonNullable<AgentActionPayload['actions']>[number]
 
 interface AgentFileProposal {
   id: string
+  actionId?: string
   messageId: string
   type: 'create_file' | 'edit_file' | 'edit_block'
   fileName: string
@@ -119,35 +125,55 @@ const AGENT_ACTION_BLOCK_NAME = 'lemona-actions'
 const AGENT_LOCATE_BLOCK_NAME = 'lemona-block-locate'
 const AGENT_PROMPT_PREFIX = `You are in AGENT MODE.
 
-When the user asks to create or edit files, include exactly one fenced block using this format:
+When the user asks to create or edit files, include exactly one fenced block:
 \`\`\`${AGENT_ACTION_BLOCK_NAME}
 {
   "actions": [
-    { "type": "edit_block", "targetDocumentId": "doc_id", "fileName": "display-title", "oldContent": "exact existing text to replace", "newContent": "replacement text" }
+    { "type": "edit_block", "targetDocumentId": "doc_id", "targetBlockId": "blk_x", "fileName": "display-title", "oldContent": "existing text to replace", "newContent": "replacement" }
   ]
 }
 \`\`\`
 
 Rules:
-- Preferred action type for edits: "edit_block" (surgical find-and-replace)
-  - "oldContent": the exact text currently in the document that should be replaced (copy verbatim, preserve whitespace)
-  - "newContent": the replacement text
-  - Only the matched region is changed; everything else stays untouched
-  - If multiple blocks need editing, use multiple edit_block actions in the same array
-- "create_file": for new files only, requires "fileName" and "content" (full file text)
-- "edit_file": AVOID unless creating entirely new content for an existing empty file; requires "content" with full text
-- "targetDocumentId" must come from AVAILABLE_FILES
-- "fileName" is display-only for edit actions
-- Never output the entire file content when only a small section needs changing
-- CRITICAL formatting rule for "newContent":
-  - Match the writing style, tone, and format of "oldContent"
-  - If the original text is prose paragraphs, write prose paragraphs — do NOT convert to bullet lists
-  - Do NOT add markdown syntax (-, *, #, **) unless the original text already uses it
-  - For create_file: match style/tone of CURRENT EDITING CONTEXT and WORKSPACE REFERENCES when available
-- If REFERENCED_SNIPPETS is present in the prompt:
-  - Treat each snippet's selectedText as authoritative quoted context for its mentionToken
-- Keep a normal explanation outside the block
-- Do not include any extra keys`
+- edit_block: oldContent = text to replace (verbatim). newContent = improved text — you may add, split, or merge paragraphs within the block.
+- If target blocks are provided, include targetBlockId and output at most one edit_block per targetBlockId.
+- create_file: requires "fileName" and "content".
+- edit_file: avoid unless rewriting an empty file.
+- targetDocumentId from AVAILABLE_FILES. fileName is display-only for edits.
+- newContent: match style and tone of original; keep prose as prose.
+- REFERENCED_SNIPPETS: use selectedText as authoritative context for mentionToken.
+- Explain outside the block. No extra keys.`
+
+function formatTraceQuery(rawQuery: string | undefined, action?: string): string | null {
+  if (!rawQuery) {
+    return null
+  }
+  const query = rawQuery.trim()
+  if (!query) {
+    return null
+  }
+
+  let sanitized = query
+  if (sanitized.startsWith('You are in AGENT MODE.')) {
+    const userRequestMatch = sanitized.match(/User request:\s*([\s\S]*)$/i)
+    sanitized = userRequestMatch?.[1]?.trim() || '[Agent instruction hidden]'
+  }
+
+  const maxLength = action === 'read' ? 120 : 200
+  if (sanitized.length > maxLength) {
+    sanitized = `${sanitized.slice(0, maxLength)}...`
+  }
+  return sanitized
+}
+
+function stripTimingText(input?: string): string | undefined {
+  if (!input) return input
+  return input
+    .replace(/\(\s*\d+\s*ms\s*\)/gi, '')
+    .replace(/\b\d+\s*ms\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
 
 
 const ONBOARDING_DOCUMENT_TITLE = 'Lemona'
@@ -169,6 +195,7 @@ interface ChatInterfaceProps {
   projectId?: string
   chatId: string
   documentContent?: string
+  getRealtimeDocumentContent?: () => string | undefined
   isStreaming: boolean
   setIsStreaming: (streaming: boolean) => void
   onFirstMessage?: (message: string) => void
@@ -178,14 +205,35 @@ interface ChatInterfaceProps {
   onInputSet?: () => void
 }
 
-export default function ChatInterface({ documentId, projectId, chatId, documentContent, isStreaming, setIsStreaming, onFirstMessage, initialInput, initialInputReferences, initialInputVersion, onInputSet }: ChatInterfaceProps) {
+export default function ChatInterface({ documentId, projectId, chatId, documentContent, getRealtimeDocumentContent, isStreaming, setIsStreaming, onFirstMessage, initialInput, initialInputReferences, initialInputVersion, onInputSet }: ChatInterfaceProps) {
   const { theme } = useTheme()
   const [messages, setMessages] = useState<AIChatMessage[]>([])
   const [expandedActions, setExpandedActions] = useState<Set<string>>(new Set()) // Track expanded actions by messageId:action
+  const [expandedReasoningChains, setExpandedReasoningChains] = useState<Set<string>>(new Set()) // Track expanded reasoning chain by message id
+  const [showOriginalMessages, setShowOriginalMessages] = useState<Set<string>>(new Set()) // Track "show original" toggles by message id
+  const [progressEventsByMessageId, setProgressEventsByMessageId] = useState<Record<string, AgentProgressEvent[]>>({})
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [editingMessageContent, setEditingMessageContent] = useState('')
   const [input, setInput] = useState(initialInput || '')
   const [pendingAddToChatReferences, setPendingAddToChatReferences] = useState<AddToChatReference[]>([])
   const lastAppliedInitialInputVersionRef = useRef(0)
   const [isLoading, setIsLoading] = useState(false)
+
+  const upsertProgressEvent = (messageId: string, event: AgentProgressEvent) => {
+    setProgressEventsByMessageId(prev => {
+      const existing = prev[messageId] ? [...prev[messageId]] : []
+      const index = existing.findIndex(item => item.stepId === event.stepId)
+      if (index >= 0) {
+        existing[index] = { ...existing[index], ...event }
+      } else {
+        existing.push(event)
+      }
+      return {
+        ...prev,
+        [messageId]: existing.slice(-20),
+      }
+    })
+  }
   
   // Handle initial input from external source (e.g., "Add to Chat" from editor)
   useEffect(() => {
@@ -303,6 +351,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const mentionStartIndexRef = useRef<number>(-1)
   const [showMentionDropdown, setShowMentionDropdown] = useState(false)
   const mentionDropdownRef = useRef<HTMLDivElement>(null)
+  const userMessageEditTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const userMessageEditContainerRef = useRef<HTMLDivElement>(null)
+  const assistantMessageEditTextareaRef = useRef<HTMLTextAreaElement>(null)
   const [isInMentionMode, setIsInMentionMode] = useState(false)
   const [agentProposals, setAgentProposals] = useState<AgentFileProposal[]>([])
 
@@ -691,41 +742,370 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     return { oldSegment, newSegment, occurrenceIndex, prefixAnchor, suffixAnchor }
   }
 
-  const parseAgentActions = (messageContent: string): { cleanedContent: string; actions: AgentActionPayload['actions'] } => {
-    const blockRegex = new RegExp(`\`\`\`${AGENT_ACTION_BLOCK_NAME}\\s*([\\s\\S]*?)\`\`\``, 'i')
-    const match = messageContent.match(blockRegex)
-    if (!match) return { cleanedContent: messageContent, actions: [] }
+  const applyPatchToPlainText = (
+    sourceText: string,
+    oldSegment: string,
+    newSegment: string,
+    occurrenceIndex: number = 0,
+    prefixAnchor: string = '',
+    suffixAnchor: string = ''
+  ): { applied: boolean; text: string } => {
+    const haystack = (sourceText || '').replace(/\r\n/g, '\n')
+    const needle = (oldSegment || '').replace(/\r\n/g, '\n')
+    const replacement = (newSegment || '').replace(/\r\n/g, '\n')
+    if (needle === replacement) {
+      return { applied: true, text: haystack }
+    }
 
-    const cleanedContent = messageContent.replace(blockRegex, '').trim()
-    try {
-      const parsed: AgentActionPayload = JSON.parse(match[1].trim())
-      const actions = Array.isArray(parsed.actions) ? parsed.actions.filter(action => {
-        if (!action) return false
-        if (action.type === 'create_file') {
-          return typeof action.content === 'string' && typeof action.fileName === 'string' && action.fileName.trim().length > 0
-        }
-        if (action.type === 'edit_block') {
-          return typeof action.oldContent === 'string' && typeof action.newContent === 'string' &&
-            ((typeof action.targetDocumentId === 'string' && action.targetDocumentId.trim().length > 0) ||
-             (typeof action.fileName === 'string' && action.fileName.trim().length > 0))
-        }
-        if (action.type === 'edit_file') {
-          return typeof action.content === 'string' &&
-            ((typeof action.targetDocumentId === 'string' && action.targetDocumentId.trim().length > 0) ||
-             (typeof action.fileName === 'string' && action.fileName.trim().length > 0))
-        }
-        return false
-      }) : []
-      return { cleanedContent, actions }
-    } catch {
-      return { cleanedContent, actions: [] }
+    if (needle.length === 0) {
+      const insertAt = haystack.length
+      return { applied: true, text: `${haystack.slice(0, insertAt)}${replacement}${haystack.slice(insertAt)}` }
+    }
+
+    const candidates: Array<{ index: number; score: number }> = []
+    let searchFrom = 0
+    while (true) {
+      const idx = haystack.indexOf(needle, searchFrom)
+      if (idx < 0) break
+      const leftContext = haystack.slice(Math.max(0, idx - 120), idx)
+      const rightContext = haystack.slice(idx + needle.length, Math.min(haystack.length, idx + needle.length + 120))
+      let score = 0
+      if (prefixAnchor && leftContext.endsWith(prefixAnchor.slice(-Math.min(40, prefixAnchor.length)))) {
+        score += 2
+      }
+      if (suffixAnchor && rightContext.startsWith(suffixAnchor.slice(0, Math.min(40, suffixAnchor.length)))) {
+        score += 2
+      }
+      candidates.push({ index: idx, score })
+      searchFrom = idx + Math.max(1, needle.length)
+    }
+
+    if (candidates.length === 0) {
+      return { applied: false, text: haystack }
+    }
+
+    const bestScore = Math.max(...candidates.map(c => c.score))
+    const pool = bestScore > 0 ? candidates.filter(c => c.score === bestScore) : candidates
+    const pick = Math.max(0, Math.min(occurrenceIndex, pool.length - 1))
+    const start = pool[pick].index
+    const end = start + needle.length
+    return {
+      applied: true,
+      text: `${haystack.slice(0, start)}${replacement}${haystack.slice(end)}`,
     }
   }
 
-  const rejectAgentProposal = (proposalId: string) => {
-    setAgentProposals(prev => prev.map(proposal =>
-      proposal.id === proposalId ? { ...proposal, status: 'rejected' } : proposal
+  const actionSignature = (action: AgentAction): string => {
+    return JSON.stringify({
+      type: action.type,
+      fileName: action.fileName || '',
+      targetDocumentId: action.targetDocumentId || '',
+      targetBlockId: action.targetBlockId || '',
+      oldContent: action.oldContent || '',
+      newContent: action.newContent || '',
+      content: action.content || '',
+    })
+  }
+
+  const hashString = (value: string): string => {
+    let hash = 0
+    for (let i = 0; i < value.length; i += 1) {
+      hash = ((hash << 5) - hash + value.charCodeAt(i)) | 0
+    }
+    return Math.abs(hash).toString(36)
+  }
+
+  const proposalStatusKeyFromProposal = (proposal: AgentFileProposal): string => {
+    if (proposal.actionId) {
+      return `actionId:${proposal.actionId}`
+    }
+    return JSON.stringify({
+      type: proposal.type,
+      fileName: proposal.fileName || '',
+      targetDocumentId: proposal.targetDocumentId || '',
+      content: proposal.content || '',
+      oldContent: proposal.patchOldText || '',
+      newContent: proposal.patchNewText || '',
+    })
+  }
+
+  const withStableActionIds = (actions: AgentAction[]): AgentAction[] => {
+    return actions.map((action) => {
+      const incoming = (action.actionId || '').trim()
+      if (incoming) return action
+      return {
+        ...action,
+        actionId: `action_${hashString(actionSignature(action))}`,
+      }
+    })
+  }
+
+  const editBlockTargetKey = (action: AgentAction): string | null => {
+    if (action.type !== 'edit_block') return null
+    const docKey = (action.targetDocumentId || '').trim().toLowerCase()
+    const blockKey = (action.targetBlockId || '').trim().toLowerCase()
+    const oldKey = (action.oldContent || '').replace(/\r\n/g, '\n').trim()
+    const fallbackFile = (action.fileName || '').trim().toLowerCase()
+    return blockKey
+      ? `${docKey}::${blockKey}`
+      : `${docKey || fallbackFile}::${oldKey}`
+  }
+
+  const dedupeEditBlocksByTarget = (actions: AgentAction[]): AgentAction[] => {
+    const deduped: AgentAction[] = []
+    const seenByKey = new Map<string, number>()
+
+    for (const action of actions) {
+      if (action.type !== 'edit_block') {
+        deduped.push(action)
+        continue
+      }
+
+      const identity = editBlockTargetKey(action) || ''
+
+      const existingIndex = seenByKey.get(identity)
+      if (existingIndex !== undefined) {
+        // Keep the last action for the same target in this round.
+        deduped[existingIndex] = action
+      } else {
+        seenByKey.set(identity, deduped.length)
+        deduped.push(action)
+      }
+    }
+
+    return deduped
+  }
+
+  const parseAllAgentActionBlocks = (messageContent: string): AgentActionPayload['actions'] => {
+    const blockRegex = new RegExp(`\`\`\`${AGENT_ACTION_BLOCK_NAME}\\s*([\\s\\S]*?)\`\`\``, 'gi')
+    const allActions: AgentActionPayload['actions'] = []
+    const isValidAction = (action: any): action is AgentAction => {
+      if (!action || typeof action !== 'object') return false
+      if (action.type === 'create_file') {
+        return typeof action.content === 'string' && typeof action.fileName === 'string' && action.fileName.trim().length > 0
+      }
+      if (action.type === 'edit_block') {
+        return typeof action.oldContent === 'string' && typeof action.newContent === 'string' &&
+          ((typeof action.targetDocumentId === 'string' && action.targetDocumentId.trim().length > 0) ||
+           (typeof action.fileName === 'string' && action.fileName.trim().length > 0) ||
+           (typeof action.targetBlockId === 'string' && action.targetBlockId.trim().length > 0))
+      }
+      if (action.type === 'edit_file') {
+        return typeof action.content === 'string' &&
+          ((typeof action.targetDocumentId === 'string' && action.targetDocumentId.trim().length > 0) ||
+           (typeof action.fileName === 'string' && action.fileName.trim().length > 0))
+      }
+      return false
+    }
+    let match: RegExpExecArray | null
+    let blocksScanned = 0
+    while ((match = blockRegex.exec(messageContent)) !== null) {
+      blocksScanned += 1
+      if (blocksScanned > 24) {
+        break // Guardrail: avoid pathological huge responses.
+      }
+      try {
+        const parsed: AgentActionPayload = JSON.parse(match[1].trim())
+        if (Array.isArray(parsed.actions)) {
+          allActions.push(...parsed.actions.filter(isValidAction))
+        }
+      } catch (parseError) {
+        console.warn('[ChatInterface] Invalid action JSON block; skipping unsafe fallback parse.', parseError)
+      }
+    }
+    return dedupeEditBlocksByTarget(allActions)
+  }
+
+  const createProposalsFromActions = (
+    actions: AgentAction[],
+    messageId: string,
+    docs: Document[],
+    userContent: string
+  ): AgentFileProposal[] => {
+    const normalizedActions = withStableActionIds(actions)
+    return normalizedActions.map((action) => {
+      const stableActionId = (action.actionId || '').trim() || `action_${hashString(actionSignature(action))}`
+      const proposalId = `proposal_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      if (action.type === 'create_file') {
+        const createFileName = typeof action.fileName === 'string' && action.fileName.trim()
+          ? action.fileName
+          : 'Untitled'
+        return {
+          id: proposalId,
+          actionId: stableActionId,
+          messageId,
+          type: action.type,
+          fileName: createFileName,
+          content: action.content || '',
+          oldText: '',
+          status: 'pending',
+        } as AgentFileProposal
+      }
+      const requestedId = (action.targetDocumentId || '').trim()
+      const requestedFileName = (action.fileName || '').trim()
+      if (action.type === 'edit_block' && !requestedId) {
+        const resolved = requestedFileName ? resolveAgentFileTargets(requestedFileName, docs, userContent) : {}
+        const candidates = resolved.targetDocumentId
+          ? (() => {
+              const doc = docs.find((item: Document) => item.id === resolved.targetDocumentId)
+              return doc ? [{ documentId: doc.id, title: doc.title }] : []
+            })()
+          : (resolved.candidateTargets || [])
+        return {
+          id: proposalId,
+          actionId: stableActionId,
+          messageId,
+          type: action.type,
+          fileName: requestedFileName || 'Unknown file',
+          content: action.newContent || action.content || '',
+          oldText: '',
+          candidateTargets: candidates.length > 0 ? candidates : undefined,
+          status: 'needs_target',
+          error: 'Missing targetDocumentId for edit_block. Select the intended file before applying this diff.',
+        } as AgentFileProposal
+      }
+      let targetDoc: Document | undefined
+      if (requestedId) {
+        targetDoc = docs.find((doc: Document) => doc.id === requestedId)
+      }
+      if (!targetDoc && requestedFileName) {
+        const resolved = resolveAgentFileTargets(requestedFileName, docs, userContent)
+        if (resolved.targetDocumentId) {
+          targetDoc = docs.find((doc: Document) => doc.id === resolved.targetDocumentId)
+        }
+        if (!targetDoc && resolved.candidateTargets && resolved.candidateTargets.length > 0) {
+          return {
+            id: proposalId,
+            actionId: stableActionId,
+            messageId,
+            type: action.type,
+            fileName: requestedFileName || 'Ambiguous file',
+            content: action.content || '',
+            oldText: '',
+            candidateTargets: resolved.candidateTargets,
+            status: 'needs_target',
+            error: `Multiple possible files matched "${requestedFileName}". Select one.`,
+          } as AgentFileProposal
+        }
+      }
+      if (!targetDoc) {
+        if (action.type === 'edit_block') {
+          return {
+            id: proposalId,
+            actionId: stableActionId,
+            messageId,
+            type: action.type,
+            fileName: requestedFileName || requestedId || 'Unknown file',
+            content: action.newContent || action.content || '',
+            oldText: '',
+            status: 'needs_target',
+            error: 'Target file is ambiguous or missing. Please choose the correct file before applying this diff.',
+          } as AgentFileProposal
+        }
+        return {
+          id: proposalId,
+          actionId: stableActionId,
+          messageId,
+          type: action.type,
+          fileName: requestedFileName || requestedId || 'Unknown file',
+          content: action.content || '',
+          oldText: '',
+          status: 'error',
+          error: `File not found: ${requestedFileName || requestedId}`,
+        } as AgentFileProposal
+      }
+      const targetOldText = extractTextFromTipTap(targetDoc.content)
+      const displayName = requestedFileName || (action.fileName && action.fileName.trim()) || targetDoc.title
+      if (action.type === 'edit_block' && action.oldContent && action.newContent) {
+        return {
+          id: proposalId,
+          actionId: stableActionId,
+          messageId,
+          type: 'edit_block',
+          fileName: displayName,
+          content: action.newContent,
+          patchOldText: action.oldContent,
+          patchNewText: action.newContent,
+          patchOccurrenceIndex: 0,
+          patchPrefixAnchor: '',
+          patchSuffixAnchor: '',
+          targetDocumentId: targetDoc.id,
+          oldText: targetOldText,
+          status: 'pending',
+        } as AgentFileProposal
+      }
+      const patch = extractPatchSegment(targetOldText, action.content || '')
+      return {
+        id: proposalId,
+        actionId: stableActionId,
+        messageId,
+        type: action.type,
+        fileName: displayName,
+        content: action.content || '',
+        patchOldText: patch.oldSegment,
+        patchNewText: patch.newSegment,
+        patchOccurrenceIndex: patch.occurrenceIndex,
+        patchPrefixAnchor: patch.prefixAnchor,
+        patchSuffixAnchor: patch.suffixAnchor,
+        targetDocumentId: targetDoc.id,
+        oldText: targetOldText,
+        status: 'pending',
+      } as AgentFileProposal
+    })
+  }
+
+  const persistProposalStatusesForMessage = async (
+    messageId: string,
+    proposals: AgentFileProposal[]
+  ) => {
+    if (!documentId || !chatId) return
+    const message = messages.find(msg => msg.id === messageId && msg.role === 'assistant')
+    if (!message) return
+
+    const relatedProposals = proposals.filter(proposal => proposal.messageId === messageId)
+    const nextStatuses: Record<string, 'accepted' | 'rejected'> = {}
+    for (const proposal of relatedProposals) {
+      if (proposal.status === 'accepted' || proposal.status === 'rejected') {
+        nextStatuses[proposalStatusKeyFromProposal(proposal)] = proposal.status
+      }
+    }
+
+    const previousStatuses = message.reasoningMetadata?.agentActionStatuses || {}
+    if (JSON.stringify(previousStatuses) === JSON.stringify(nextStatuses)) {
+      return
+    }
+
+    const nextReasoningMetadata: AIChatMessage['reasoningMetadata'] = {
+      ...(message.reasoningMetadata || {}),
+      agentActionStatuses: nextStatuses,
+    }
+
+    await chatApi.updateMessage(
+      documentId,
+      chatId,
+      messageId,
+      message.content,
+      nextReasoningMetadata
+    )
+
+    setMessages(prev => prev.map(msg =>
+      msg.id === messageId
+        ? { ...msg, reasoningMetadata: nextReasoningMetadata }
+        : msg
     ))
+  }
+
+  const rejectAgentProposal = (proposalId: string) => {
+    const proposal = agentProposals.find(item => item.id === proposalId)
+    if (!proposal) return
+    let nextProposals: AgentFileProposal[] = []
+    setAgentProposals(prev => {
+      nextProposals = prev.map(item =>
+        item.id === proposalId ? { ...item, status: 'rejected' } : item
+      )
+      return nextProposals
+    })
+    void persistProposalStatusesForMessage(proposal.messageId, nextProposals)
     window.dispatchEvent(new CustomEvent('lemona:agent-diff-clear', { detail: { proposalId } }))
   }
 
@@ -802,10 +1182,18 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           const targetDoc = await documentApi.get(proposal.targetDocumentId)
           if (targetDoc) {
             const fullText = extractTextFromTipTap(targetDoc.content)
-            const patched = fullText.replace(proposal.patchOldText, proposal.patchNewText)
-            if (patched !== fullText) {
-              await documentApi.update(proposal.targetDocumentId, plainTextToTipTap(patched))
+            const patched = applyPatchToPlainText(
+              fullText,
+              proposal.patchOldText,
+              proposal.patchNewText,
+              proposal.patchOccurrenceIndex ?? 0,
+              proposal.patchPrefixAnchor || '',
+              proposal.patchSuffixAnchor || ''
+            )
+            if (!patched.applied) {
+              throw new Error('Patch target not found in target document. Please refresh and re-run this diff.')
             }
+            await documentApi.update(proposal.targetDocumentId, plainTextToTipTap(patched.text))
           }
           window.dispatchEvent(new CustomEvent('lemona:documents-refresh-request', { detail: { projectId } }))
         }
@@ -818,25 +1206,46 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         }
         window.dispatchEvent(new CustomEvent('lemona:documents-refresh-request', { detail: { projectId } }))
       } else if (proposal.targetDocumentId) {
-        if (proposal.targetDocumentId === documentId && proposal.patchOldText !== undefined && proposal.patchNewText !== undefined) {
-          logAgent('apply_patch_dispatch', {
-            proposalId,
-            targetDocumentId: proposal.targetDocumentId,
-            oldChars: proposal.patchOldText.length,
-            newChars: proposal.patchNewText.length,
-          })
-          window.dispatchEvent(new CustomEvent('lemona:agent-apply-editor-patch', {
-            detail: {
-              proposalId: proposal.id,
-              documentId: proposal.targetDocumentId,
-              oldText: proposal.patchOldText,
-              newText: proposal.patchNewText,
-              occurrenceIndex: proposal.patchOccurrenceIndex ?? 0,
-              prefixAnchor: proposal.patchPrefixAnchor || '',
-              suffixAnchor: proposal.patchSuffixAnchor || '',
+        if (proposal.patchOldText !== undefined && proposal.patchNewText !== undefined) {
+          if (proposal.targetDocumentId === documentId) {
+            logAgent('apply_patch_dispatch', {
+              proposalId,
+              targetDocumentId: proposal.targetDocumentId,
+              oldChars: proposal.patchOldText.length,
+              newChars: proposal.patchNewText.length,
+            })
+            window.dispatchEvent(new CustomEvent('lemona:agent-apply-editor-patch', {
+              detail: {
+                proposalId: proposal.id,
+                documentId: proposal.targetDocumentId,
+                oldText: proposal.patchOldText,
+                newText: proposal.patchNewText,
+                occurrenceIndex: proposal.patchOccurrenceIndex ?? 0,
+                prefixAnchor: proposal.patchPrefixAnchor || '',
+                suffixAnchor: proposal.patchSuffixAnchor || '',
+              }
+            }))
+            awaitingPatchAck = true
+          } else {
+            const targetDoc = await documentApi.get(proposal.targetDocumentId)
+            if (!targetDoc) {
+              throw new Error('Target document not found')
             }
-          }))
-          awaitingPatchAck = true
+            const fullText = extractTextFromTipTap(targetDoc.content)
+            const patched = applyPatchToPlainText(
+              fullText,
+              proposal.patchOldText,
+              proposal.patchNewText,
+              proposal.patchOccurrenceIndex ?? 0,
+              proposal.patchPrefixAnchor || '',
+              proposal.patchSuffixAnchor || ''
+            )
+            if (!patched.applied) {
+              throw new Error('Patch target not found in target document. Please refresh and re-run this diff.')
+            }
+            await documentApi.update(proposal.targetDocumentId, plainTextToTipTap(patched.text))
+            window.dispatchEvent(new CustomEvent('lemona:documents-refresh-request', { detail: { projectId } }))
+          }
         } else {
           logAgent('apply_full_update', { proposalId, targetDocumentId: proposal.targetDocumentId })
           await documentApi.update(proposal.targetDocumentId, plainTextToTipTap(proposal.content))
@@ -861,9 +1270,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         return
       }
 
-      setAgentProposals(prev => prev.map(item =>
-        item.id === proposalId ? { ...item, status: 'accepted' } : item
-      ))
+      let acceptedProposals: AgentFileProposal[] = []
+      setAgentProposals(prev => {
+        acceptedProposals = prev.map(item =>
+          item.id === proposalId ? { ...item, status: 'accepted' } : item
+        )
+        return acceptedProposals
+      })
+      void persistProposalStatusesForMessage(proposal.messageId, acceptedProposals)
       window.dispatchEvent(new CustomEvent('lemona:agent-diff-clear', { detail: { proposalId } }))
     } catch (error: any) {
       setAgentProposals(prev => prev.map(item =>
@@ -878,9 +1292,21 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       .map(proposal => proposal.id)
 
     if (pendingIds.length === 0) return
-    setAgentProposals(prev => prev.map(proposal =>
-      pendingIds.includes(proposal.id) ? { ...proposal, status: 'rejected' } : proposal
+    let nextProposals: AgentFileProposal[] = []
+    setAgentProposals(prev => {
+      nextProposals = prev.map(proposal =>
+        pendingIds.includes(proposal.id) ? { ...proposal, status: 'rejected' } : proposal
+      )
+      return nextProposals
+    })
+    const affectedMessageIds = Array.from(new Set(
+      nextProposals
+        .filter(proposal => pendingIds.includes(proposal.id))
+        .map(proposal => proposal.messageId)
     ))
+    for (const messageId of affectedMessageIds) {
+      void persistProposalStatusesForMessage(messageId, nextProposals)
+    }
     window.dispatchEvent(new CustomEvent('lemona:agent-diff-clear', { detail: {} }))
   }
 
@@ -1526,9 +1952,17 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       const proposalId = customEvent.detail?.proposalId
       if (!proposalId) return
       logAgent('patch_applied', { proposalId })
-      setAgentProposals(prev => prev.map(item =>
-        item.id === proposalId ? { ...item, status: 'accepted', error: undefined } : item
-      ))
+      const proposal = agentProposals.find(item => item.id === proposalId)
+      let nextProposals: AgentFileProposal[] = []
+      setAgentProposals(prev => {
+        nextProposals = prev.map(item =>
+          item.id === proposalId ? { ...item, status: 'accepted', error: undefined } : item
+        )
+        return nextProposals
+      })
+      if (proposal) {
+        void persistProposalStatusesForMessage(proposal.messageId, nextProposals)
+      }
       window.dispatchEvent(new CustomEvent('lemona:agent-diff-clear', { detail: { proposalId } }))
     }
 
@@ -1657,6 +2091,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   useEffect(() => {
     if (!documentId || !chatId) {
       setMessages([])
+      setAgentProposals([])
       setPendingAddToChatReferences([])
       hasNotifiedFirstMessage.current = false
       return
@@ -1690,6 +2125,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           const onboardingMessages = await buildOnboardingMessages()
           if (onboardingMessages && onboardingMessages.length > 0) {
             setMessages(onboardingMessages)
+            setAgentProposals([])
             for (const message of onboardingMessages) {
               await saveMessage(message, false)
             }
@@ -1697,17 +2133,66 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
             hasNotifiedFirstMessage.current = true
           } else {
             setMessages(messages)
+            setAgentProposals([])
             addedMessageIdsRef.current = new Set()
             hasNotifiedFirstMessage.current = false
           }
         } else {
           setMessages(messages)
-          // Initialize addedMessageIdsRef with existing message IDs
           addedMessageIdsRef.current = new Set(messages.map(msg => msg.id))
-          // Reset notification flag if chat already has messages
           hasNotifiedFirstMessage.current = true
+
+          const actionsToRestore: Array<{ action: AgentAction; messageId: string; userContent: string }> = []
+          const restoredStatusesByMessage = new Map<string, Record<string, 'accepted' | 'rejected'>>()
+          for (const msg of messages) {
+            if (msg.role !== 'assistant' || !Array.isArray(msg.reasoningMetadata?.agentActions) || msg.reasoningMetadata.agentActions.length === 0) continue
+            const prevUser = messages[messages.indexOf(msg) - 1]
+            const userContent = prevUser?.role === 'user' ? (prevUser.content || '') : ''
+            restoredStatusesByMessage.set(msg.id, msg.reasoningMetadata?.agentActionStatuses || {})
+            for (const a of msg.reasoningMetadata!.agentActions) {
+              actionsToRestore.push({ action: a as AgentAction, messageId: msg.id, userContent })
+            }
+          }
+
+          if (actionsToRestore.length > 0) {
+            try {
+              const docs = await documentApi.list()
+              const projectScopedDocs = docs.filter((doc: Document) => {
+                const sameProject = projectId ? doc.projectId === projectId : true
+                return sameProject && doc.folder !== 'worldlab'
+              })
+              const byMessage = new Map<string, { actions: AgentAction[]; userContent: string }>()
+              for (const { action, messageId, userContent } of actionsToRestore) {
+                let existing = byMessage.get(messageId)
+                if (!existing) {
+                  existing = { actions: [] as AgentAction[], userContent }
+                  byMessage.set(messageId, existing)
+                }
+                existing.actions.push(action)
+                existing.userContent = userContent
+              }
+              const allProposals: AgentFileProposal[] = []
+              for (const [messageId, { actions, userContent }] of byMessage) {
+                const restoredStatuses = restoredStatusesByMessage.get(messageId) || {}
+                const restored = createProposalsFromActions(actions, messageId, projectScopedDocs, userContent).map(proposal => {
+                  const restoredStatus = restoredStatuses[proposalStatusKeyFromProposal(proposal)]
+                  if (restoredStatus === 'accepted' || restoredStatus === 'rejected') {
+                    return { ...proposal, status: restoredStatus } as AgentFileProposal
+                  }
+                  return proposal
+                })
+                allProposals.push(...restored)
+              }
+              setAgentProposals(allProposals)
+            } catch (err) {
+              console.warn('[ChatInterface] Failed to restore agent proposals:', err)
+              setAgentProposals([])
+            }
+          } else {
+            setAgentProposals([])
+          }
         }
-        
+
         // Only scroll to bottom when opening a NEW chat (chatId changed)
         // If only documentId changed, restore the previous scroll position
         if (isNewChat) {
@@ -1737,6 +2222,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       } catch (error) {
         console.error('Failed to load chat messages:', error)
         setMessages([])
+        setAgentProposals([])
         addedMessageIdsRef.current = new Set()
         hasNotifiedFirstMessage.current = false
       }
@@ -2004,6 +2490,181 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       }, 2000)
     } catch (error) {
       console.error('Failed to copy code:', error)
+    }
+  }
+
+  const getDisplayTitleForFile = (fileId: string): string => {
+    const doc = allDocuments.find((d: Document) => d.id === fileId)
+    return doc
+      ? doc.title
+      : (documentTitleCache.get(fileId) || formatIntegrationFileIdForDisplay(fileId) || fileId.substring(0, 30) + (fileId.length > 30 ? '…' : ''))
+  }
+
+  const ensureDocumentTitleLoaded = (fileId: string) => {
+    const doc = allDocuments.find((d: Document) => d.id === fileId)
+    const isIntegration = fileId.startsWith('integration:')
+    if (doc || documentTitleCache.has(fileId) || isIntegration) return
+
+    documentApi.get(fileId).then((loadedDoc: Document | null) => {
+      if (loadedDoc) {
+        setDocumentTitleCache(prev => new Map(prev).set(fileId, loadedDoc.title))
+        setAllDocuments(prev => {
+          if (!prev.find(d => d.id === fileId)) {
+            return [...prev, loadedDoc]
+          }
+          return prev
+        })
+      }
+    }).catch((error) => {
+      console.warn(`[ChatInterface] Failed to load document ${fileId}:`, error)
+    })
+  }
+
+  const startEditingMessage = (message: AIChatMessage) => {
+    setEditingMessageId(message.id)
+    setEditingMessageContent(message.content)
+  }
+
+  // Focus user message inline editor when it opens; cursor at end
+  useEffect(() => {
+    if (!editingMessageId) return
+    const msg = messages.find(m => m.id === editingMessageId)
+    if (msg?.role !== 'user') return
+    const timer = requestAnimationFrame(() => {
+      const el = userMessageEditTextareaRef.current
+      if (el) {
+        el.focus()
+        const len = el.value?.length ?? 0
+        el.setSelectionRange(len, len)
+      }
+    })
+    return () => cancelAnimationFrame(timer)
+  }, [editingMessageId, messages])
+
+  // Focus AI reply inline editor when it opens; cursor at end
+  useEffect(() => {
+    if (!editingMessageId) return
+    const msg = messages.find(m => m.id === editingMessageId)
+    if (msg?.role !== 'assistant') return
+    const timer = requestAnimationFrame(() => {
+      const el = assistantMessageEditTextareaRef.current
+      if (el) {
+        el.focus()
+        const len = el.value?.length ?? 0
+        el.setSelectionRange(len, len)
+      }
+    })
+    return () => cancelAnimationFrame(timer)
+  }, [editingMessageId, messages])
+
+  const cancelEditingMessage = () => {
+    setEditingMessageId(null)
+    setEditingMessageContent('')
+  }
+
+  const handleUserEditBlur = () => {
+    setTimeout(() => {
+      const el = userMessageEditContainerRef.current
+      if (!el) return
+      const active = document.activeElement
+      if (!active || !el.contains(active)) {
+        cancelEditingMessage()
+      }
+    }, 0)
+  }
+
+  const handleResendFromMessage = async (message: AIChatMessage, overrideContent?: string) => {
+    if (!documentId || !chatId) return
+    if (isLoading) {
+      await handleStopGeneration()
+    }
+
+    const messageIndex = messages.findIndex(item => item.id === message.id)
+    if (messageIndex === -1) return
+
+    const truncatedHistory = messages.slice(0, messageIndex)
+    const resendText = overrideContent ?? message.content
+    const resendAttachments = message.attachments ? [...message.attachments] : []
+
+    try {
+      if (messageIndex === 0) {
+        await chatApi.deleteChat(documentId, chatId)
+      } else {
+        await chatApi.truncateChatAfterIndex(documentId, chatId, messageIndex - 1)
+      }
+      setMessages(truncatedHistory)
+      await handleSend({
+        inputText: resendText,
+        attachmentsOverride: resendAttachments,
+        historyOverride: truncatedHistory,
+      })
+    } catch (error) {
+      console.error('Failed to resend from selected message:', error)
+    }
+  }
+
+  const saveEditedAssistantMessage = async (message: AIChatMessage) => {
+    if (!documentId || !chatId) return
+
+    const now = new Date().toISOString()
+    const originalContent = message.editedByUser ? message.originalContent : message.content
+    const updatedMessage: AIChatMessage = {
+      ...message,
+      content: editingMessageContent,
+      editedByUser: true,
+      originalContent,
+      editedAt: now,
+      timestamp: now,
+    }
+
+    setMessages(prev => prev.map(item => item.id === message.id ? updatedMessage : item))
+    setEditingMessageId(null)
+    setEditingMessageContent('')
+
+    try {
+      await chatApi.updateMessage(
+        documentId,
+        chatId,
+        message.id,
+        updatedMessage.content,
+        updatedMessage.reasoningMetadata,
+        {
+          editedByUser: true,
+          originalContent: updatedMessage.originalContent,
+          editedAt: updatedMessage.editedAt,
+        }
+      )
+    } catch (error) {
+      console.error('Failed to save edited assistant message:', error)
+    }
+  }
+
+  const saveEditedUserMessage = async (message: AIChatMessage, resendFromHere: boolean = false) => {
+    if (!documentId || !chatId) return
+
+    const now = new Date().toISOString()
+    const updatedMessage: AIChatMessage = {
+      ...message,
+      content: editingMessageContent,
+      timestamp: now,
+    }
+
+    setMessages(prev => prev.map(item => item.id === message.id ? updatedMessage : item))
+    setEditingMessageId(null)
+    setEditingMessageContent('')
+
+    try {
+      await chatApi.updateMessage(
+        documentId,
+        chatId,
+        message.id,
+        updatedMessage.content,
+      )
+      if (resendFromHere) {
+        await handleResendFromMessage(updatedMessage, updatedMessage.content)
+      }
+    } catch (error) {
+      console.error('Failed to save edited user message:', error)
     }
   }
 
@@ -2570,14 +3231,22 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     setIsStreaming(false)
   }
 
-  const handleSend = async () => {
+  const handleSend = async (sendOverrides?: {
+    inputText?: string
+    attachmentsOverride?: ChatAttachment[]
+    historyOverride?: AIChatMessage[]
+  }) => {
     // If already generating, stop the current generation
     if (isLoading) {
       await handleStopGeneration()
       return
     }
 
-    if ((!input.trim() && attachments.length === 0) || !documentId || !chatId) return
+    const effectiveInput = sendOverrides?.inputText ?? input
+    const effectiveAttachments = sendOverrides?.attachmentsOverride ?? attachments
+
+    if ((!effectiveInput.trim() && effectiveAttachments.length === 0) || !documentId || !chatId) return
+    const effectiveDocumentContent = getRealtimeDocumentContent?.() || documentContent
 
     // Check for required API keys before sending
     const hasGoogleKey = !!googleApiKey
@@ -2625,8 +3294,8 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
 
     // Store the input value before clearing it (for onFirstMessage callback)
-    const messageContent = input.trim()
-    const inlineRangeReferences = buildInlineRangeReferencesFromInput(input)
+    const messageContent = effectiveInput.trim()
+    const inlineRangeReferences = buildInlineRangeReferencesFromInput(effectiveInput)
     const referencedSnippetsForSend = [...pendingAddToChatReferences, ...inlineRangeReferences]
       .filter(ref => ref.mentionToken && ref.selectedText)
       .filter((ref, index, arr) =>
@@ -2645,9 +3314,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     const userMessage: AIChatMessage = {
       id: generateMessageId(),
       role: 'user',
-      content: input,
+      content: effectiveInput,
       timestamp: new Date().toISOString(),
-      attachments: attachments.length > 0 ? [...attachments] : undefined,
+      attachments: effectiveAttachments.length > 0 ? [...effectiveAttachments] : undefined,
     }
 
     const assistantMessage: AIChatMessage = {
@@ -2656,6 +3325,14 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       content: '',
       timestamp: new Date().toISOString(),
     }
+    upsertProgressEvent(assistantMessage.id, {
+      type: 'agent_note',
+      stepId: `note_${Date.now()}`,
+      action: 'orchestrate',
+      status: 'note',
+      label: 'Starting retrieval...',
+      timestamp: new Date().toISOString(),
+    })
     currentAssistantMessageIdRef.current = assistantMessage.id
     setMessages(prev => [...prev, userMessage, assistantMessage])
     setInput('')
@@ -2667,6 +3344,16 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
     setIsLoading(true)
     setIsStreaming(true)
+    const requestStartedAt = Date.now()
+    let hasRecordedFirstFeedback = false
+    let hasRecordedFirstToken = false
+    let hasRecordedFirstPatch = false
+    let patchesEmittedBeforeStreamEnd = 0
+    let totalPatchSizeChars = 0
+    let patchParseErrorCount = 0
+    let patchEventsSeen = 0
+    const streamedActionSignatures = new Set<string>()
+    const streamedEditBlockTargets = new Set<string>()
 
     // Notify parent about first message for chat naming (only when message is actually being sent)
     if (!hasNotifiedFirstMessage.current && onFirstMessage && messageContent) {
@@ -2688,8 +3375,68 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       abortControllerRef.current = new AbortController()
       
       // Pass chat history (excluding the just-added user message) for conversation continuity
-      const chatHistoryForAPI = messages.filter(msg => msg.id !== userMessage.id)
+      const chatHistoryForAPI = sendOverrides?.historyOverride ?? messages.filter(msg => msg.id !== userMessage.id)
       let projectScopedDocs: Document[] = []
+      const appendAgentActionsAsProposals = async (actions: AgentActionPayload['actions']) => {
+        if (!actions || actions.length === 0) return
+        if (projectScopedDocs.length === 0) {
+          const docs = await documentApi.list()
+          projectScopedDocs = docs.filter((doc: Document) => {
+            const sameProject = projectId ? doc.projectId === projectId : true
+            return sameProject && doc.folder !== 'worldlab'
+          })
+        }
+        const uniqueActions = actions.filter(action => {
+          const signature = actionSignature(action)
+          if (streamedActionSignatures.has(signature)) return false
+          const targetKey = editBlockTargetKey(action)
+          if (targetKey && streamedEditBlockTargets.has(targetKey)) {
+            streamedActionSignatures.add(signature)
+            return false
+          }
+          if (targetKey) {
+            streamedEditBlockTargets.add(targetKey)
+          }
+          streamedActionSignatures.add(signature)
+          return true
+        })
+        if (uniqueActions.length === 0) return
+        const proposals = createProposalsFromActions(
+          uniqueActions,
+          assistantMessage.id,
+          projectScopedDocs,
+          userMessage.content || ''
+        )
+        setAgentProposals(prev => [...prev, ...proposals])
+        patchesEmittedBeforeStreamEnd += proposals.length
+        totalPatchSizeChars += proposals.reduce((sum, proposal) => sum + (proposal.patchNewText || proposal.content || '').length, 0)
+        if (!hasRecordedFirstPatch && proposals.length > 0) {
+          hasRecordedFirstPatch = true
+          console.info('[AgentUX] time_to_first_patch_ms', Date.now() - requestStartedAt)
+        }
+
+        const currentDocPatches = proposals.filter(
+          p => p.status === 'pending' && p.targetDocumentId === documentId &&
+               p.type === 'edit_block' && p.patchOldText && p.patchNewText
+        )
+        if (currentDocPatches.length > 0) {
+          window.dispatchEvent(new CustomEvent('lemona:agent-diff-preview', {
+            detail: {
+              proposalId: currentDocPatches[0].id,
+              documentId: documentId,
+              fileName: currentDocPatches[0].fileName,
+              oldText: currentDocPatches[0].patchOldText,
+              newText: currentDocPatches[0].patchNewText,
+              isPatch: true,
+              patches: currentDocPatches.map(p => ({
+                proposalId: p.id,
+                oldText: p.patchOldText!,
+                newText: p.patchNewText!,
+              })),
+            }
+          }))
+        }
+      }
       let targetBlockInstruction = ''
       if (chatMode === 'agent') {
         const docs = await documentApi.list()
@@ -2698,7 +3445,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
           return sameProject && doc.folder !== 'worldlab'
         })
 
-        const currentDocBlocks = extractTextBlocksFromTipTap(documentContent)
+        const currentDocBlocks = extractTextBlocksFromTipTap(effectiveDocumentContent)
         if (currentDocBlocks.length > 0) {
           const validIds = new Set(currentDocBlocks.map(block => block.id))
           let resolvedBlockIds: string[] = []
@@ -2727,7 +3474,7 @@ ${listedBlocks}`
 
             const locateResponse = await aiApi.streamChat(
               locatePrompt,
-              documentContent,
+              effectiveDocumentContent,
               documentId,
               [],
               false,
@@ -2780,8 +3527,10 @@ ${tailContext}`)
 ${blockSections.join('\n\n')}
 
 Step 2 requirement:
-- For EACH target block above, output one "edit_block" action with "oldContent" copied verbatim from that block's targetBlockText, and "newContent" as the replacement.
+- For EACH target block above, output one "edit_block" action with "targetBlockId", "oldContent" copied verbatim from that block's targetBlockText, and "newContent" as the replacement.
 - If ${resolvedBlockIds.length} blocks are listed, output ${resolvedBlockIds.length} edit_block actions in the actions array.
+- Include "targetBlockId" exactly matching the listed targetBlockId.
+- Do NOT output multiple edit_block actions for the same targetBlockId.
 - Do NOT use "edit_file" or rewrite the full document.
 - Do NOT merge multiple blocks into one action.
 - If the entire block needs replacing, oldContent = the full targetBlockText.
@@ -2799,13 +3548,35 @@ Step 2 requirement:
       const contentForModel = chatMode === 'agent'
         ? `${AGENT_PROMPT_PREFIX}\n\n${buildAgentAvailableFilesContext(projectScopedDocs)}${targetBlockInstruction}${referencedSnippetsInstruction}\n\nUser request:\n${userMessage.content}`
         : `${userMessage.content}${referencedSnippetsInstruction}`
-      const response = await aiApi.streamChat(contentForModel, documentContent, documentId, chatHistoryForAPI, useWebSearch, selectedModel, attachments.length > 0 ? attachments : undefined, selectedStyle, projectId, googleApiKey, openaiApiKey)
+      const response = await aiApi.streamChat(
+        contentForModel,
+        effectiveDocumentContent,
+        documentId,
+        chatHistoryForAPI,
+        useWebSearch,
+        selectedModel,
+        effectiveAttachments.length > 0 ? effectiveAttachments : undefined,
+        selectedStyle,
+        projectId,
+        googleApiKey,
+        openaiApiKey
+      )
       const reader = response.body?.getReader()
       
       // Store reader reference for cancellation
       streamReaderRef.current = reader || null
       
       const decoder = new TextDecoder()
+      const STREAM_UI_UPDATE_INTERVAL_MS = 80
+      let lastAssistantUiUpdateAt = 0
+      const flushAssistantMessageToUI = () => {
+        setMessages(prev => {
+          const updated = [...prev]
+          updated[updated.length - 1] = { ...assistantMessage }
+          return updated
+        })
+        lastAssistantUiUpdateAt = Date.now()
+      }
 
       // Scroll to bottom when stream starts
       setTimeout(() => {
@@ -2837,6 +3608,34 @@ Step 2 requirement:
                   if (data.error) {
                     throw new Error(data.error)
                   }
+                  if (data.event && typeof data.event === 'object') {
+                    const progressEvent = data.event as AgentProgressEvent
+                    if (progressEvent.stepId && progressEvent.action && progressEvent.type) {
+                      const isPatchProgressEvent = progressEvent.type.startsWith('agent_patch_')
+                      if (!isPatchProgressEvent) {
+                        upsertProgressEvent(assistantMessage.id, progressEvent)
+                      }
+                      if (!hasRecordedFirstFeedback && progressEvent.type !== 'agent_metrics') {
+                        hasRecordedFirstFeedback = true
+                        const firstFeedbackMs = Date.now() - requestStartedAt
+                        console.info('[AgentUX] time_to_first_feedback_ms', firstFeedbackMs)
+                      }
+                      if (chatMode === 'agent' && progressEvent.type === 'agent_patch_finished') {
+                        patchEventsSeen += 1
+                        const maybeAction = progressEvent.meta?.action
+                        if (maybeAction && typeof maybeAction === 'object') {
+                          const streamedAction = maybeAction as AgentAction
+                          if (streamedAction?.type) {
+                            await appendAgentActionsAsProposals([streamedAction])
+                          }
+                        }
+                      }
+                      if (progressEvent.type === 'agent_patch_error') {
+                        patchEventsSeen += 1
+                        patchParseErrorCount += 1
+                      }
+                    }
+                  }
                   if (data.chunk) {
                     // Check if this is a metadata chunk
                     if (data.chunk.includes('__METADATA__')) {
@@ -2856,11 +3655,15 @@ Step 2 requirement:
                       }
                     } else {
                       assistantMessage.content += data.chunk
-                      setMessages(prev => {
-                        const updated = [...prev]
-                        updated[updated.length - 1] = { ...assistantMessage }
-                        return updated
-                      })
+                      if (!hasRecordedFirstToken) {
+                        hasRecordedFirstToken = true
+                        const firstTokenMs = Date.now() - requestStartedAt
+                        console.info('[AgentUX] time_to_first_token_ms', firstTokenMs)
+                      }
+                      const now = Date.now()
+                      if (now - lastAssistantUiUpdateAt >= STREAM_UI_UPDATE_INTERVAL_MS) {
+                        flushAssistantMessageToUI()
+                      }
                       // Update message during streaming (debounced)
                       await saveMessage(assistantMessage, true)
                     }
@@ -2884,171 +3687,32 @@ Step 2 requirement:
             throw readError
           }
         }
+        // Ensure the final streamed content is rendered immediately.
+        if (!isStreamCancelledRef.current) {
+          flushAssistantMessageToUI()
+        }
       }
 
       // Parse and prepare agent-mode file actions before final save
       if (!isStreamCancelledRef.current && chatMode === 'agent' && assistantMessage.content.trim()) {
         try {
-          const { cleanedContent, actions } = parseAgentActions(assistantMessage.content)
+          const cleanedContent = assistantMessage.content
+            .replace(new RegExp(`\`\`\`${AGENT_ACTION_BLOCK_NAME}\\s*[\\s\\S]*?\`\`\``, 'gi'), '')
+            .trim()
+          const actions = parseAllAgentActionBlocks(assistantMessage.content)
           if (actions && actions.length > 0) {
+            const actionsWithIds = withStableActionIds(actions)
             assistantMessage.content = cleanedContent || 'Prepared file update proposal.'
+            assistantMessage.reasoningMetadata = {
+              ...assistantMessage.reasoningMetadata,
+              agentActions: actionsWithIds,
+            }
             logAgent('actions_parsed', {
-              actionCount: actions.length,
-              actionTypes: actions.slice(0, 6).map(action => action.type),
+              actionCount: actionsWithIds.length,
+              actionTypes: actionsWithIds.slice(0, 6).map(action => action.type),
             })
-
-            if (projectScopedDocs.length === 0) {
-              const docs = await documentApi.list()
-              projectScopedDocs = docs.filter((doc: Document) => {
-                const sameProject = projectId ? doc.projectId === projectId : true
-                return sameProject && doc.folder !== 'worldlab'
-              })
-            }
-            const proposals: AgentFileProposal[] = actions.map((action) => {
-              const proposalId = `proposal_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-
-              // --- create_file ---
-              if (action.type === 'create_file') {
-                const createFileName = typeof action.fileName === 'string' && action.fileName.trim()
-                  ? action.fileName
-                  : 'Untitled'
-                return {
-                  id: proposalId,
-                  messageId: assistantMessage.id,
-                  type: action.type,
-                  fileName: createFileName,
-                  content: action.content || '',
-                  oldText: '',
-                  status: 'pending',
-                } as AgentFileProposal
-              }
-
-              // --- resolve target document ---
-              const requestedId = (action.targetDocumentId || '').trim()
-              const requestedFileName = (action.fileName || '').trim()
-              let targetDoc: Document | undefined
-
-              if (requestedId) {
-                targetDoc = projectScopedDocs.find((doc: Document) => doc.id === requestedId)
-              }
-              if (!targetDoc && requestedFileName) {
-                const resolved = resolveAgentFileTargets(requestedFileName, projectScopedDocs, userMessage.content || '')
-                if (resolved.targetDocumentId) {
-                  targetDoc = projectScopedDocs.find((doc: Document) => doc.id === resolved.targetDocumentId)
-                }
-                if (!targetDoc && resolved.candidateTargets && resolved.candidateTargets.length > 0) {
-                  return {
-                    id: proposalId,
-                    messageId: assistantMessage.id,
-                    type: action.type,
-                    fileName: requestedFileName || 'Ambiguous file',
-                    content: action.content || '',
-                    oldText: '',
-                    candidateTargets: resolved.candidateTargets,
-                    status: 'needs_target',
-                    error: `Multiple possible files matched "${requestedFileName}". Select one.`,
-                  } as AgentFileProposal
-                }
-              }
-
-              if (!targetDoc) {
-                return {
-                  id: proposalId,
-                  messageId: assistantMessage.id,
-                  type: action.type,
-                  fileName: requestedFileName || requestedId || 'Unknown file',
-                  content: action.content || '',
-                  oldText: '',
-                  status: 'error',
-                  error: `File not found: ${requestedFileName || requestedId}`,
-                } as AgentFileProposal
-              }
-
-              const targetOldText = extractTextFromTipTap(targetDoc.content)
-              const displayName = requestedFileName || (action.fileName && action.fileName.trim()) || targetDoc.title
-
-              // --- edit_block: surgical patch (preferred) ---
-              if (action.type === 'edit_block' && action.oldContent && action.newContent) {
-                logAgent('edit_block_proposal', {
-                  proposalId,
-                  targetDocumentId: targetDoc.id,
-                  oldChars: action.oldContent.length,
-                  newChars: action.newContent.length,
-                })
-                return {
-                  id: proposalId,
-                  messageId: assistantMessage.id,
-                  type: 'edit_block',
-                  fileName: displayName,
-                  content: action.newContent,
-                  patchOldText: action.oldContent,
-                  patchNewText: action.newContent,
-                  patchOccurrenceIndex: 0,
-                  patchPrefixAnchor: '',
-                  patchSuffixAnchor: '',
-                  targetDocumentId: targetDoc.id,
-                  oldText: targetOldText,
-                  status: 'pending',
-                } as AgentFileProposal
-              }
-
-              // --- edit_file fallback (full content) ---
-              const patch = extractPatchSegment(targetOldText, action.content || '')
-              return {
-                id: proposalId,
-                messageId: assistantMessage.id,
-                type: action.type,
-                fileName: displayName,
-                content: action.content || '',
-                patchOldText: patch.oldSegment,
-                patchNewText: patch.newSegment,
-                patchOccurrenceIndex: patch.occurrenceIndex,
-                patchPrefixAnchor: patch.prefixAnchor,
-                patchSuffixAnchor: patch.suffixAnchor,
-                targetDocumentId: targetDoc.id,
-                oldText: targetOldText,
-                status: 'pending',
-              } as AgentFileProposal
-            })
-
-            setAgentProposals(prev => [...prev, ...proposals])
-
-            // Collect ALL edit_block patches for the current document to show at once
-            const currentDocPatches = proposals.filter(
-              p => p.status === 'pending' && p.targetDocumentId === documentId &&
-                   p.type === 'edit_block' && p.patchOldText && p.patchNewText
-            )
-            if (currentDocPatches.length > 0) {
-              window.dispatchEvent(new CustomEvent('lemona:agent-diff-preview', {
-                detail: {
-                  proposalId: currentDocPatches[0].id,
-                  documentId: documentId,
-                  fileName: currentDocPatches[0].fileName,
-                  oldText: currentDocPatches[0].patchOldText,
-                  newText: currentDocPatches[0].patchNewText,
-                  isPatch: true,
-                  patches: currentDocPatches.map(p => ({
-                    proposalId: p.id,
-                    oldText: p.patchOldText!,
-                    newText: p.patchNewText!,
-                  })),
-                }
-              }))
-            } else {
-              // Fallback for edit_file or other types
-              const firstEditable = proposals.find(p => p.status === 'pending' && p.targetDocumentId)
-              if (firstEditable) {
-                window.dispatchEvent(new CustomEvent('lemona:agent-diff-preview', {
-                  detail: {
-                    proposalId: firstEditable.id,
-                    documentId: firstEditable.targetDocumentId,
-                    fileName: firstEditable.fileName,
-                    oldText: firstEditable.oldText,
-                    newText: firstEditable.content,
-                  }
-                }))
-              }
-            }
+            const fallbackActions = actionsWithIds.filter(action => !streamedActionSignatures.has(actionSignature(action)))
+            await appendAgentActionsAsProposals(fallbackActions)
             setMessages(prev => {
               const updated = [...prev]
               updated[updated.length - 1] = { ...assistantMessage }
@@ -3058,6 +3722,15 @@ Step 2 requirement:
         } catch (proposalError) {
           console.warn('[ChatInterface] Failed to parse agent actions:', proposalError)
         }
+      }
+
+      if (!isStreamCancelledRef.current && chatMode === 'agent') {
+        const avgPatchSizeChars = patchesEmittedBeforeStreamEnd > 0
+          ? Math.round(totalPatchSizeChars / patchesEmittedBeforeStreamEnd)
+          : 0
+        console.info('[AgentUX] patches_emitted_before_stream_end', patchesEmittedBeforeStreamEnd)
+        console.info('[AgentUX] patch_parse_error_rate', patchEventsSeen > 0 ? patchParseErrorCount / patchEventsSeen : 0)
+        console.info('[AgentUX] avg_patch_size_chars', avgPatchSizeChars)
       }
 
       // Save final message when streaming completes (only if not cancelled)
@@ -3203,14 +3876,29 @@ Step 2 requirement:
             msUserSelect: 'text'
           }}>
         {messages.map((message, index) => {
-          const hasReasoningMetadata = Boolean(
-            message.reasoningMetadata &&
-            message.reasoningMetadata.actions &&
+          const hasReasoningActions = Boolean(
+            message.reasoningMetadata?.actions &&
             Object.keys(message.reasoningMetadata.actions).length > 0
+          )
+          const hasReasoningChain = Boolean(
+            message.reasoningMetadata?.reasoningChain &&
+            message.reasoningMetadata.reasoningChain.steps.length > 0
+          )
+          const hasReasoningSources = Boolean(
+            message.reasoningMetadata?.dataSources &&
+            message.reasoningMetadata.dataSources.length > 0
+          )
+          const hasReasoningMetadata = hasReasoningActions || hasReasoningChain || hasReasoningSources
+          const progressEvents = (progressEventsByMessageId[message.id] || []).filter(event =>
+            event.type !== 'agent_metrics' && !event.type.startsWith('agent_patch_')
           )
           const messageProposals = agentProposals.filter(proposal => proposal.messageId === message.id)
           const previousMessage = index > 0 ? messages[index - 1] : null
           const prevIsAssistant = previousMessage?.role === 'assistant'
+          const isStreamingCurrentAssistantMessage =
+            message.role === 'assistant' &&
+            isStreaming &&
+            currentAssistantMessageIdRef.current === message.id
           const prevAssistantHasDiffCard = Boolean(
             previousMessage &&
             previousMessage.role === 'assistant' &&
@@ -3231,88 +3919,176 @@ Step 2 requirement:
             }}
           >
             {message.role === 'user' && (
-              <div
-                style={{
-                  marginLeft: 'auto',
-                  width: inputContainerWidth ? `${inputContainerWidth}px` : '92%',
-                  maxWidth: inputContainerWidth ? `${inputContainerWidth}px` : '92%',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  backgroundColor: userMessageBg,
-                  color: textColor,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  fontSize: '13px',
-                  lineHeight: '1.7',
-                  fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
-                  userSelect: 'text',
-                  WebkitUserSelect: 'text',
-                  MozUserSelect: 'text',
-                  msUserSelect: 'text',
-                  cursor: 'text',
-                  WebkitFontSmoothing: 'antialiased',
-                  MozOsxFontSmoothing: 'grayscale',
-                  textRendering: 'optimizeLegibility'
-                }}
-              >
-                {highlightMentions(message.content)}
-                {message.attachments && message.attachments.length > 0 && (
-                  <div style={{
-                    marginTop: '8px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px'
-                  }}>
-                    {message.attachments.map((att) => (
-                      <div key={att.id} style={{
+              <>
+                {editingMessageId === message.id ? (
+                  <div
+                    ref={userMessageEditContainerRef}
+                    style={{
+                      marginLeft: 'auto',
+                      width: inputContainerWidth ? `${inputContainerWidth}px` : '92%',
+                      maxWidth: inputContainerWidth ? `${inputContainerWidth}px` : '92%',
+                      marginTop: '8px',
+                      position: 'relative',
+                      borderRadius: '6px',
+                      border: `1px solid ${theme === 'dark' ? '#4a4a4a' : '#d0d5dd'}`,
+                      backgroundColor: brighterBg,
+                    }}
+                  >
+                    <textarea
+                      ref={userMessageEditTextareaRef}
+                      value={editingMessageContent}
+                      onChange={(event) => setEditingMessageContent(event.target.value)}
+                      onBlur={handleUserEditBlur}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          if (editingMessageContent.trim()) {
+                            void saveEditedUserMessage(message, true)
+                          }
+                        }
+                      }}
+                      rows={2}
+                      style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
                         borderRadius: '6px',
-                        overflow: 'hidden',
-                        border: `1px solid ${theme === 'dark' ? '#313131' : '#DADCE0'}`,
-                        width: '60px',
-                        height: '60px',
-                        flexShrink: 0
+                        border: 'none',
+                        backgroundColor: 'transparent',
+                        color: textColor,
+                        padding: '8px 12px 40px 12px',
+                        lineHeight: 1.7,
+                        fontSize: '13px',
+                        fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
+                        resize: 'vertical',
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      onClick={() => void saveEditedUserMessage(message, true)}
+                      disabled={!editingMessageContent.trim()}
+                      style={{
+                        position: 'absolute',
+                        bottom: '8px',
+                        right: '8px',
+                        padding: '4px',
+                        backgroundColor: !editingMessageContent.trim()
+                          ? (theme === 'dark' ? '#282828' : '#e0e0e0')
+                          : (theme === 'dark' ? '#3d3d3d' : '#e8e8e8'),
+                        color: !editingMessageContent.trim()
+                          ? secondaryTextColor
+                          : (theme === 'dark' ? '#b0b0b0' : '#202124'),
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: !editingMessageContent.trim() ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: !editingMessageContent.trim() ? 0.5 : 1,
+                        width: '24px',
+                        height: '24px',
+                      }}
+                      title="Send"
+                    >
+                      <ArrowUpwardIcon style={{
+                        fontSize: '19px',
+                        transform: 'translateY(0px)',
+                        color: !editingMessageContent.trim()
+                          ? secondaryTextColor
+                          : (theme === 'dark' ? '#b0b0b0' : '#5a5a5a')
+                      }} />
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    onClick={() => {
+                      if (!isStreaming) {
+                        startEditingMessage(message)
+                      }
+                    }}
+                    style={{
+                      marginLeft: 'auto',
+                      width: inputContainerWidth ? `${inputContainerWidth}px` : '92%',
+                      maxWidth: inputContainerWidth ? `${inputContainerWidth}px` : '92%',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      backgroundColor: userMessageBg,
+                      color: textColor,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      fontSize: '13px',
+                      lineHeight: '1.7',
+                      fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
+                      userSelect: 'text',
+                      WebkitUserSelect: 'text',
+                      MozUserSelect: 'text',
+                      msUserSelect: 'text',
+                      cursor: isStreaming ? 'text' : 'pointer',
+                      WebkitFontSmoothing: 'antialiased',
+                      MozOsxFontSmoothing: 'grayscale',
+                      textRendering: 'optimizeLegibility'
+                    }}
+                    title={isStreaming ? undefined : 'Click to edit and resend'}
+                  >
+                    {highlightMentions(message.content)}
+                    {message.attachments && message.attachments.length > 0 && (
+                      <div style={{
+                        marginTop: '8px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px'
                       }}>
-                        {att.type === 'image' ? (
-                          <img 
-                            src={`data:${att.mimeType || 'image/png'};base64,${att.data}`}
-                            alt={att.name}
-                            style={{
-                              width: '100%',
-                              height: '100%',
-                              display: 'block',
-                              objectFit: 'cover'
-                            }}
-                          />
-                        ) : (
-                          <div style={{
-                            padding: '4px',
-                            backgroundColor: theme === 'dark' ? '#2d2d2d' : '#f5f5f5',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            height: '100%',
-                            width: '100%'
+                        {message.attachments.map((att) => (
+                          <div key={att.id} style={{
+                            borderRadius: '6px',
+                            overflow: 'hidden',
+                            border: `1px solid ${theme === 'dark' ? '#313131' : '#DADCE0'}`,
+                            width: '60px',
+                            height: '60px',
+                            flexShrink: 0
                           }}>
-                            <PictureAsPdfIcon style={{ fontSize: '20px', color: theme === 'dark' ? '#d6d6d6' : '#202124', marginBottom: '2px' }} />
-                            <span style={{ 
-                              fontSize: '8px', 
-                              color: textColor,
-                              textAlign: 'center',
-                              wordBreak: 'break-word',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical'
-                            }}>{att.name}</span>
+                            {att.type === 'image' ? (
+                              <img
+                                src={`data:${att.mimeType || 'image/png'};base64,${att.data}`}
+                                alt={att.name}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  display: 'block',
+                                  objectFit: 'cover'
+                                }}
+                              />
+                            ) : (
+                              <div style={{
+                                padding: '4px',
+                                backgroundColor: theme === 'dark' ? '#2d2d2d' : '#f5f5f5',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                height: '100%',
+                                width: '100%'
+                              }}>
+                                <PictureAsPdfIcon style={{ fontSize: '20px', color: theme === 'dark' ? '#d6d6d6' : '#202124', marginBottom: '2px' }} />
+                                <span style={{
+                                  fontSize: '8px',
+                                  color: textColor,
+                                  textAlign: 'center',
+                                  wordBreak: 'break-word',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical'
+                                }}>{att.name}</span>
+                              </div>
+                            )}
                           </div>
-                        )}
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
-              </div>
+              </>
             )}
             {message.role === 'assistant' && (
               <div
@@ -3332,21 +4108,42 @@ Step 2 requirement:
                   textRendering: 'optimizeLegibility'
                 }}
               >
-                {/* Thinking state: show before metadata/content arrives (only when no actions are present)
-                  Only visible in agent mode
-                */}
+                {/* Agent progress: show only while waiting. Hide once content starts streaming. */}
+                {!message.content.trim() && progressEvents.length > 0 && (
+                  <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    {progressEvents.map((event) => (
+                      <div
+                        key={`${message.id}-evt-${event.stepId}`}
+                        style={{
+                          fontSize: '11px',
+                          lineHeight: 1.4,
+                          padding: '0',
+                          color: theme === 'dark' ? '#8a8a8a' : '#777b84',
+                          opacity: 0.78,
+                        }}
+                      >
+                        <span style={{ marginRight: '6px' }}>·</span>
+                        <span style={{ fontWeight: 500 }}>
+                          {stripTimingText(event.label) || `${event.action} ${event.status || ''}`.trim()}
+                        </span>
+                        {event.summary && <span style={{ marginLeft: '6px', opacity: 0.85 }}>{stripTimingText(event.summary)}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {chatMode === 'agent' &&
                   index === messages.length - 1 &&
                   message.role === 'assistant' &&
                   isStreaming &&
                   !message.content.trim() &&
-                  !(message.reasoningMetadata?.actions && Object.keys(message.reasoningMetadata.actions).length > 0) && (
+                  !hasReasoningMetadata &&
+                  progressEvents.length === 0 && (
                     <div style={{ fontSize: '12px', color: theme === 'dark' ? '#888888' : '#999999', marginBottom: '6px', opacity: 0.8 }}>
                       Thinking…
                     </div>
                 )}
                 {/* Show reasoning metadata if available */}
-                {message.reasoningMetadata && message.reasoningMetadata.actions && Object.keys(message.reasoningMetadata.actions).length > 0 && (
+                {hasReasoningMetadata && (
                   <div
                     style={{
                       fontSize: '12px',
@@ -3356,7 +4153,9 @@ Step 2 requirement:
                       lineHeight: '1.4'
                     }}
                   >
-                    {message.reasoningMetadata.actions && Object.entries(message.reasoningMetadata.actions).map(([action, data], index, arr) => {
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px 12px' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                    {hasReasoningActions && message.reasoningMetadata?.actions && Object.entries(message.reasoningMetadata.actions).map(([action, data], index, arr) => {
                       const actionKey = `${message.id}:${action}`
                       const isExpanded = expandedActions.has(actionKey)
                       const hasFiles = data.fileIds && data.fileIds.length > 0
@@ -3403,34 +4202,8 @@ Step 2 requirement:
                                   }}
                                 >
                                   {Array.from(new Set(data.fileIds)).map((fileId: string) => {
-                                    const doc = allDocuments.find((d: Document) => d.id === fileId)
-                                    const isIntegration = fileId.startsWith('integration:')
-                                    // Note: Backend already filters out non-existent files, so fileIds should only contain existing files.
-                                    // Integration fileIds are not documents - skip async load for them.
-                                    if (!doc && !documentTitleCache.has(fileId) && !isIntegration) {
-                                      // Load document asynchronously to get its title
-                                      documentApi.get(fileId).then((loadedDoc: Document | null) => {
-                                        if (loadedDoc) {
-                                          setDocumentTitleCache(prev => new Map(prev).set(fileId, loadedDoc.title))
-                                          // Also update allDocuments to avoid future lookups
-                                          setAllDocuments(prev => {
-                                            if (!prev.find(d => d.id === fileId)) {
-                                              return [...prev, loadedDoc]
-                                            }
-                                            return prev
-                                          })
-                                        }
-                                      }).catch((error) => {
-                                        // File should exist (backend filtered), but loading failed.
-                                        // This could be a network error or file was deleted after search.
-                                        // Don't cache a fallback - let it retry on next render if needed.
-                                        console.warn(`[ChatInterface] Failed to load document ${fileId}:`, error)
-                                      })
-                                    }
-                                    // Display title: doc, cache, integration format (e.g. "GitHub (owner/repo): path"), or fallback
-                                    const displayTitle = doc
-                                      ? doc.title
-                                      : (documentTitleCache.get(fileId) || formatIntegrationFileIdForDisplay(fileId) || fileId.substring(0, 30) + (fileId.length > 30 ? '…' : ''))
+                                    ensureDocumentTitleLoaded(fileId)
+                                    const displayTitle = getDisplayTitleForFile(fileId)
                                     return (
                                       <div key={fileId} style={{ marginTop: '2px' }}>
                                         {displayTitle}
@@ -3448,9 +4221,276 @@ Step 2 requirement:
                         </span>
                       )
                     })}
+                    {hasReasoningChain && (
+                      <span style={{ marginLeft: hasReasoningActions ? '10px' : '0' }}>
+                        <span
+                          onClick={() => {
+                            setExpandedReasoningChains(prev => {
+                              const next = new Set(prev)
+                              if (next.has(message.id)) {
+                                next.delete(message.id)
+                              } else {
+                                next.add(message.id)
+                              }
+                              return next
+                            })
+                          }}
+                          style={{
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            textDecoration: 'underline',
+                          }}
+                        >
+                          {expandedReasoningChains.has(message.id) ? 'Hide trace' : 'View trace'}
+                        </span>
+                      </span>
+                    )}
+                      </div>
+                      {editingMessageId !== message.id && !isStreaming && (
+                        <button
+                          onClick={() => startEditingMessage(message)}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: theme === 'dark' ? '#bdbdbd' : '#5f6368',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            cursor: 'pointer',
+                            fontSize: '11px',
+                            padding: 0,
+                            flexShrink: 0,
+                          }}
+                          title="Edit conclusion"
+                        >
+                          <EditIcon style={{ fontSize: '13px' }} />
+                          Edit
+                        </button>
+                      )}
+                    </div>
+                    {hasReasoningChain && expandedReasoningChains.has(message.id) && message.reasoningMetadata?.reasoningChain && (
+                      <div
+                        style={{
+                          marginTop: '8px',
+                          padding: '8px',
+                          borderRadius: '6px',
+                          border: `1px solid ${theme === 'dark' ? '#3a3a3a' : '#d9d9d9'}`,
+                          backgroundColor: theme === 'dark' ? '#1f1f1f' : '#f8f9fb',
+                        }}
+                      >
+                        {message.reasoningMetadata?.complexityLevel && (
+                          <div style={{ marginBottom: '6px', opacity: 0.85 }}>
+                            Complexity: {message.reasoningMetadata.complexityLevel}
+                          </div>
+                        )}
+                        {message.reasoningMetadata?.complexityLevel === 'complex' && message.reasoningMetadata?.plan && message.reasoningMetadata.plan.length > 0 && (
+                          <div style={{ marginBottom: '8px' }}>
+                            <div style={{ fontWeight: 600, marginBottom: '4px' }}>Plan</div>
+                            {message.reasoningMetadata.plan.map((planStep, planIdx) => (
+                              <div key={`${message.id}-plan-${planIdx}`} style={{ marginLeft: '8px', opacity: 0.85 }}>
+                                Step {planIdx + 1}: {planStep.action}
+                                {formatTraceQuery(planStep.query, planStep.action) ? ` - ${formatTraceQuery(planStep.query, planStep.action)}` : ''}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {message.reasoningMetadata.reasoningChain.steps.map((step) => {
+                          const steps = message.reasoningMetadata!.reasoningChain!.steps
+                          const showStepNumber = steps.length > 1
+                          return (
+                          <div key={`${message.id}-step-${step.step}`} style={{ marginBottom: '8px' }}>
+                            <div style={{ fontWeight: 600, color: theme === 'dark' ? '#b5c9ff' : '#3559b5' }}>
+                              {showStepNumber ? `Step ${step.step}: ` : ''}{step.action.charAt(0).toUpperCase() + step.action.slice(1)}
+                            </div>
+                            {formatTraceQuery(step.query, step.action) && <div>Query: {formatTraceQuery(step.query, step.action)}</div>}
+                            {typeof step.relevanceScore === 'number' && <div>Relevance: {step.relevanceScore.toFixed(3)}</div>}
+                            {step.informationGap && <div>Gap: {step.informationGap}</div>}
+                            {step.chunkRefs.length > 0 && (
+                              <div style={{ marginTop: '4px', marginLeft: '8px' }}>
+                                {Array.from(new Set(step.chunkRefs.map(ref => ref.fileId))).map((fileId) => {
+                                  ensureDocumentTitleLoaded(fileId)
+                                  return (
+                                    <div key={`${message.id}-step-${step.step}-${fileId}`}>
+                                      {getDisplayTitleForFile(fileId)}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                          )
+                        })}
+                        {message.reasoningMetadata.dataSources && message.reasoningMetadata.dataSources.length > 0 && (
+                          <div style={{ marginTop: '8px' }}>
+                            <div style={{ fontWeight: 600, marginBottom: '4px' }}>Sources</div>
+                            {message.reasoningMetadata.dataSources.slice(0, 6).map((source) => {
+                              ensureDocumentTitleLoaded(source.fileId)
+                              const sourceLabel = source.sourceName || source.sourceType
+                              return (
+                                <div key={`${message.id}-source-${source.chunkId}`} style={{ marginBottom: '6px' }}>
+                                  <div>{getDisplayTitleForFile(source.fileId)}</div>
+                                  {sourceLabel && (
+                                    <div style={{ opacity: 0.65, fontSize: '11px' }}>
+                                      {sourceLabel}
+                                    </div>
+                                  )}
+                                  <div style={{ opacity: 0.8 }}>{source.excerpt}</div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
-                {(() => {
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  {message.editedByUser && (
+                    <span
+                      onClick={() => {
+                        if (message.originalContent) {
+                          setShowOriginalMessages(prev => {
+                            const next = new Set(prev)
+                            if (next.has(message.id)) {
+                              next.delete(message.id)
+                            } else {
+                              next.add(message.id)
+                            }
+                            return next
+                          })
+                        }
+                      }}
+                      style={{
+                        fontSize: '11px',
+                        color: theme === 'dark' ? '#9bb0ff' : '#3559b5',
+                        border: `1px solid ${theme === 'dark' ? '#3f4b73' : '#c3cef6'}`,
+                        borderRadius: '10px',
+                        padding: '1px 8px',
+                        cursor: message.originalContent ? 'pointer' : 'default',
+                      }}
+                      title={message.originalContent ? (showOriginalMessages.has(message.id) ? 'Hide original' : 'View original') : undefined}
+                    >
+                      Edited
+                    </span>
+                  )}
+                  {!hasReasoningMetadata && editingMessageId !== message.id && !isStreaming && (
+                    <button
+                      onClick={() => startEditingMessage(message)}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        color: theme === 'dark' ? '#bdbdbd' : '#5f6368',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        cursor: 'pointer',
+                        fontSize: '11px',
+                        padding: 0,
+                        marginLeft: 'auto',
+                      }}
+                      title="Edit conclusion"
+                    >
+                      <EditIcon style={{ fontSize: '13px' }} />
+                      Edit
+                    </button>
+                  )}
+                </div>
+                {showOriginalMessages.has(message.id) && message.originalContent && (
+                  <div style={{
+                    marginBottom: '8px',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    border: `1px solid ${theme === 'dark' ? '#474747' : '#d5d5d5'}`,
+                    backgroundColor: theme === 'dark' ? '#222222' : '#f3f4f6',
+                    fontSize: '12px',
+                    opacity: 0.9,
+                    whiteSpace: 'pre-wrap',
+                  }}>
+                    {message.originalContent}
+                  </div>
+                )}
+                {editingMessageId === message.id ? (
+                  <div
+                    style={{
+                      marginBottom: '8px',
+                      position: 'relative',
+                      borderRadius: '6px',
+                      border: `1px solid ${theme === 'dark' ? '#4a4a4a' : '#d0d5dd'}`,
+                      backgroundColor: brighterBg,
+                    }}
+                  >
+                    <textarea
+                      ref={assistantMessageEditTextareaRef}
+                      value={editingMessageContent}
+                      onChange={(event) => setEditingMessageContent(event.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          void saveEditedAssistantMessage(message)
+                        }
+                      }}
+                      rows={10}
+                      style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        borderRadius: '6px',
+                        border: 'none',
+                        backgroundColor: 'transparent',
+                        color: textColor,
+                        padding: '8px 60px 40px 12px',
+                        lineHeight: 1.7,
+                        fontSize: '13px',
+                        fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", "Helvetica Neue", Arial, sans-serif',
+                        resize: 'vertical',
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      onClick={() => void saveEditedAssistantMessage(message)}
+                      style={{
+                        position: 'absolute',
+                        bottom: '8px',
+                        right: '36px',
+                        padding: '4px',
+                        backgroundColor: theme === 'dark' ? '#1f3b23' : '#e8f5e9',
+                        color: theme === 'dark' ? '#a4dba8' : '#2e7d32',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '24px',
+                        height: '24px',
+                      }}
+                      title="Save"
+                    >
+                      <CheckIcon style={{ fontSize: '18px' }} />
+                    </button>
+                    <button
+                      onClick={cancelEditingMessage}
+                      style={{
+                        position: 'absolute',
+                        bottom: '8px',
+                        right: '8px',
+                        padding: '4px',
+                        backgroundColor: theme === 'dark' ? '#3a2323' : '#ffebee',
+                        color: theme === 'dark' ? '#ef9a9a' : '#c62828',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: '24px',
+                        height: '24px',
+                      }}
+                      title="Cancel"
+                    >
+                      <CloseIcon style={{ fontSize: '18px' }} />
+                    </button>
+                  </div>
+                ) : (() => {
                   const contentLower = message.content.toLowerCase()
                   const isError = contentLower.includes('api quota exceeded') ||
                     contentLower.includes('rate limit exceeded') ||
@@ -3764,7 +4804,17 @@ Step 2 requirement:
                             <div style={{
                               width: '100%',
                               maxWidth: '100%',
-                              overflow: 'hidden'
+                              maxHeight: '200px',
+                              overflow: 'auto',
+                              overflowX: 'hidden',
+                              scrollBehavior: isStreamingCurrentAssistantMessage ? 'auto' : 'smooth'
+                            }}
+                            ref={(el) => {
+                              if (!el || !isStreamingCurrentAssistantMessage) return
+                              requestAnimationFrame(() => {
+                                if (!isStreamingCurrentAssistantMessage) return
+                                el.scrollTop = el.scrollHeight
+                              })
                             }}>
                               <SyntaxHighlighter
                                 language={language || 'text'}
@@ -3936,7 +4986,7 @@ Step 2 requirement:
                 </ReactMarkdown>
                 )}
                 {messageProposals.length > 0 && (
-                  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {messageProposals.map((proposal) => {
                       const isClickable = proposal.status === 'pending' && !!proposal.targetDocumentId
                       return (
@@ -3945,7 +4995,7 @@ Step 2 requirement:
                         onClick={() => isClickable && openAndFocusProposalDiff(proposal)}
                         style={{
                           border: `1px solid ${theme === 'dark' ? '#2d2d2d' : '#dadce0'}`,
-                          borderRadius: '8px',
+                          borderRadius: '6px',
                           overflow: 'hidden',
                           backgroundColor: theme === 'dark' ? '#171717' : '#fff',
                           cursor: isClickable ? 'pointer' : 'default',
@@ -3953,22 +5003,22 @@ Step 2 requirement:
                         }}
                       >
                         <div style={{
-                          padding: '8px 10px',
-                          fontSize: '12px',
+                          padding: '6px 8px',
+                          fontSize: '11px',
                           color: secondaryTextColor,
                           borderBottom: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#eceff1'}`,
                           position: 'relative',
-                          paddingRight: '78px'
+                          paddingRight: '70px'
                         }}>
                           {proposal.type === 'create_file' ? `Create ${proposal.fileName}` : `Edit ${proposal.fileName}`}
                           {proposal.status === 'pending' ? (
                             <div style={{
                               position: 'absolute',
-                              top: '10px',
-                              right: '14px',
+                              top: '6px',
+                              right: '10px',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '10px'
+                              gap: '6px'
                             }}>
                               <button
                                 onClick={(event) => {
@@ -3987,7 +5037,7 @@ Step 2 requirement:
                                 }}
                                 title="Refuse"
                               >
-                                <CloseIcon style={{ fontSize: '14px' }} />
+                                <CloseIcon style={{ fontSize: '12px' }} />
                               </button>
                               <button
                                 onClick={(event) => {
@@ -4006,14 +5056,14 @@ Step 2 requirement:
                                 }}
                                 title="Accept"
                               >
-                                <CheckIcon style={{ fontSize: '14px' }} />
+                                <CheckIcon style={{ fontSize: '12px' }} />
                               </button>
                             </div>
                           ) : (
                             <span style={{
                               position: 'absolute',
-                              top: '8px',
-                              right: '10px',
+                              top: '6px',
+                              right: '8px',
                               fontSize: '10px',
                               lineHeight: 1.2,
                               color: proposal.status === 'error'
@@ -4025,7 +5075,10 @@ Step 2 requirement:
                             </span>
                           )}
                         </div>
-                        <div style={{ maxHeight: '180px', overflow: 'auto', fontSize: '12px', lineHeight: 1.5 }}>
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ maxHeight: '80px', overflowY: 'auto', overflowX: 'hidden', fontSize: '11px', lineHeight: 1.4 }}
+                        >
                           {(() => {
                             const showOld = proposal.patchOldText || proposal.oldText
                             const showNew = proposal.patchNewText || proposal.content
@@ -4034,7 +5087,7 @@ Step 2 requirement:
                                 {showOld && (
                                   <pre style={{
                                     margin: 0,
-                                    padding: '8px 10px',
+                                    padding: '6px 8px',
                                     backgroundColor: theme === 'dark' ? 'rgba(239,68,68,0.14)' : 'rgba(254,226,226,0.9)',
                                     color: theme === 'dark' ? '#fca5a5' : '#991b1b',
                                     whiteSpace: 'pre-wrap',
@@ -4045,7 +5098,7 @@ Step 2 requirement:
                                 )}
                                 <pre style={{
                                   margin: 0,
-                                  padding: '8px 10px',
+                                  padding: '6px 8px',
                                   backgroundColor: theme === 'dark' ? 'rgba(34,197,94,0.14)' : 'rgba(220,252,231,0.9)',
                                   color: theme === 'dark' ? '#86efac' : '#166534',
                                   whiteSpace: 'pre-wrap'
@@ -4058,7 +5111,7 @@ Step 2 requirement:
                         </div>
                         {proposal.status === 'needs_target' && proposal.candidateTargets && proposal.candidateTargets.length > 0 && (
                           <div style={{
-                            padding: '8px 10px',
+                            padding: '6px 8px',
                             borderTop: `1px solid ${theme === 'dark' ? '#2a2a2a' : '#eceff1'}`,
                             display: 'flex',
                             flexDirection: 'column',
@@ -5466,7 +6519,7 @@ Step 2 requirement:
               
               {/* Send/Stop button with grey container */}
               <button
-                onClick={handleSend}
+                onClick={() => { void handleSend() }}
                 disabled={!isLoading && (!input.trim() && attachments.length === 0)}
                 style={{
                   padding: '4px 8px',

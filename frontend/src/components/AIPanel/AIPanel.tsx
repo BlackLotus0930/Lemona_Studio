@@ -16,6 +16,7 @@ import CloseIcon from '@mui/icons-material/Close'
 interface AIPanelProps {
   document: Document | null
   onClose?: () => void
+  getRealtimeDocumentContent?: (documentId: string) => string | undefined
 }
 
 interface Chat {
@@ -96,7 +97,7 @@ function saveOpenChatTabs(document: Document | null, chatIds: string[]): void {
   }
 }
 
-function AIPanel({ document, onClose }: AIPanelProps) {
+function AIPanel({ document, onClose, getRealtimeDocumentContent }: AIPanelProps) {
   const { theme } = useTheme()
   const [chats, setChats] = useState<Chat[]>([
     { id: 'chat_default', name: 'Chat 1', messages: [] }
@@ -155,6 +156,11 @@ function AIPanel({ document, onClose }: AIPanelProps) {
   const iconColor = theme === 'dark' ? '#858585' : '#9aa0a6'
 
   const documentContent = document?.content || undefined
+  const getRealtimeContentForActiveDocument = (): string | undefined => {
+    if (!document?.id) return documentContent
+    const realtime = getRealtimeDocumentContent?.(document.id)
+    return realtime || documentContent
+  }
 
   // Update chatsRef whenever chats change
   useEffect(() => {
@@ -1106,6 +1112,7 @@ function AIPanel({ document, onClose }: AIPanelProps) {
           projectId={document?.projectId}
           chatId={activeChatId}
           documentContent={documentContent}
+          getRealtimeDocumentContent={getRealtimeContentForActiveDocument}
           isStreaming={isStreaming}
           setIsStreaming={setIsStreaming}
           onFirstMessage={(message) => handleChatNameUpdate(activeChatId, message)}

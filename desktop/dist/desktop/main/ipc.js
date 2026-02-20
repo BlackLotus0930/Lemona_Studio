@@ -22,6 +22,23 @@ import { app } from 'electron';
 import fs from 'fs/promises';
 const { autoUpdater } = updater;
 const ZOOM_LEVEL_FILE = path.join(app.getPath('userData'), 'zoom-level.json');
+const AGENT_ACTION_BLOCK_NAME = 'lemona-actions';
+const MAX_AGENT_STREAM_BUFFER_CHARS = 240000;
+const MAX_AGENT_STREAM_ACTIONS_PER_RESPONSE = 60;
+function extractActionBlocks(content) {
+    if (!content || content.length === 0) {
+        return [];
+    }
+    const regex = new RegExp(`\\\`\\\`\\\`${AGENT_ACTION_BLOCK_NAME}\\s*([\\s\\S]*?)\\\`\\\`\\\``, 'gi');
+    const blocks = [];
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+        if (match[1]) {
+            blocks.push(match[1].trim());
+        }
+    }
+    return blocks;
+}
 export function setupIPC() {
     // Document operations
     ipcMain.handle('document:getAll', async () => {
@@ -136,9 +153,9 @@ export function setupIPC() {
             throw error;
         }
     });
-    ipcMain.handle('chat:updateMessage', async (_, documentId, chatId, messageId, content, reasoningMetadata) => {
+    ipcMain.handle('chat:updateMessage', async (_, documentId, chatId, messageId, content, reasoningMetadata, edits) => {
         try {
-            await chatHistoryService.updateMessage(documentId, chatId, messageId, content, reasoningMetadata);
+            await chatHistoryService.updateMessage(documentId, chatId, messageId, content, reasoningMetadata, edits);
             return { success: true };
         }
         catch (error) {
@@ -153,6 +170,16 @@ export function setupIPC() {
         }
         catch (error) {
             console.error('IPC chat:deleteChat error:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('chat:truncateChatAfterIndex', async (_, documentId, chatId, messageIndex) => {
+        try {
+            await chatHistoryService.truncateChatAfterIndex(documentId, chatId, messageIndex);
+            return { success: true };
+        }
+        catch (error) {
+            console.error('IPC chat:truncateChatAfterIndex error:', error);
             throw error;
         }
     });
@@ -189,9 +216,100 @@ export function setupIPC() {
             ;
             (async () => {
                 try {
-                    const stream = await modelGatewayService.streamChat(googleApiKey, openaiApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, modelName, attachments, style);
+                    let streamTextBuffer = '';
+                    let emittedActionBlocks = 0;
+                    let emittedPatchActions = 0;
+                    const stream = await modelGatewayService.streamChat(googleApiKey, openaiApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, modelName, attachments, style, (progressEvent) => {
+                        webContents.send('ai:streamEvent', streamId, progressEvent);
+                    });
                     for await (const chunk of stream) {
                         webContents.send('ai:streamChunk', streamId, chunk);
+                        // Incremental agent patch events: emit as soon as a fenced lemona-actions block closes.
+                        if (typeof chunk === 'string' && chunk.length > 0 && !chunk.includes('__METADATA__')) {
+                            streamTextBuffer += chunk;
+                            if (streamTextBuffer.length > MAX_AGENT_STREAM_BUFFER_CHARS) {
+                                streamTextBuffer = streamTextBuffer.slice(-MAX_AGENT_STREAM_BUFFER_CHARS);
+                            }
+                            const actionBlocks = extractActionBlocks(streamTextBuffer);
+                            if (actionBlocks.length > emittedActionBlocks) {
+                                const newBlocks = actionBlocks.slice(emittedActionBlocks);
+                                for (let blockOffset = 0; blockOffset < newBlocks.length; blockOffset++) {
+                                    const blockContent = newBlocks[blockOffset];
+                                    const blockIndex = emittedActionBlocks + blockOffset;
+                                    const blockStepId = `patch_block_${blockIndex}`;
+                                    webContents.send('ai:streamEvent', streamId, {
+                                        type: 'agent_patch_started',
+                                        stepId: blockStepId,
+                                        action: 'patch',
+                                        status: 'started',
+                                        label: `Patch block ${blockIndex + 1}`,
+                                        timestamp: new Date().toISOString(),
+                                    });
+                                    try {
+                                        const parsed = JSON.parse(blockContent);
+                                        const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
+                                        for (let i = 0; i < actions.length; i++) {
+                                            if (emittedPatchActions >= MAX_AGENT_STREAM_ACTIONS_PER_RESPONSE) {
+                                                webContents.send('ai:streamEvent', streamId, {
+                                                    type: 'agent_patch_error',
+                                                    stepId: `${blockStepId}_limit`,
+                                                    action: 'patch',
+                                                    status: 'failed',
+                                                    label: 'Patch action limit reached',
+                                                    summary: `Reached max ${MAX_AGENT_STREAM_ACTIONS_PER_RESPONSE} actions for one response`,
+                                                    timestamp: new Date().toISOString(),
+                                                });
+                                                break;
+                                            }
+                                            const action = actions[i];
+                                            const patchId = `${streamId}_patch_${blockIndex}_${i}`;
+                                            webContents.send('ai:streamEvent', streamId, {
+                                                type: 'agent_patch_chunk',
+                                                stepId: patchId,
+                                                action: 'patch',
+                                                status: 'note',
+                                                label: `Patch ${emittedPatchActions + 1}`,
+                                                summary: typeof action?.type === 'string' ? action.type : 'action',
+                                                timestamp: new Date().toISOString(),
+                                                meta: {
+                                                    patchId,
+                                                    actionIndex: i,
+                                                    blockIndex,
+                                                    action,
+                                                },
+                                            });
+                                            webContents.send('ai:streamEvent', streamId, {
+                                                type: 'agent_patch_finished',
+                                                stepId: patchId,
+                                                action: 'patch',
+                                                status: 'finished',
+                                                label: `Patch ${emittedPatchActions + 1} ready`,
+                                                timestamp: new Date().toISOString(),
+                                                meta: {
+                                                    patchId,
+                                                    actionIndex: i,
+                                                    blockIndex,
+                                                    action,
+                                                },
+                                            });
+                                            emittedPatchActions += 1;
+                                        }
+                                    }
+                                    catch (parseError) {
+                                        webContents.send('ai:streamEvent', streamId, {
+                                            type: 'agent_patch_error',
+                                            stepId: `${blockStepId}_parse`,
+                                            action: 'patch',
+                                            status: 'failed',
+                                            label: `Patch block ${blockIndex + 1} parse failed`,
+                                            summary: parseError?.message || 'Invalid action block JSON',
+                                            timestamp: new Date().toISOString(),
+                                        });
+                                    }
+                                }
+                                emittedActionBlocks = actionBlocks.length;
+                            }
+                        }
                     }
                     webContents.send('ai:streamEnd', streamId);
                 }

@@ -1,9 +1,11 @@
 // Desktop Gemini Service - Uses Google Generative AI
 import { GoogleGenerativeAI, GenerativeModel, Part } from '@google/generative-ai'
-import { AIChatMessage, AIQuestion, AutocompleteSuggestion, ChatAttachment } from '../../../shared/types.js'
+import { AIChatMessage, AIQuestion, AutocompleteSuggestion, ChatAttachment, AgentProgressEvent } from '../../../shared/types.js'
 import { projectService } from './projectService.js'
 import { documentService } from './documentService.js'
 import { searchLibraryWithMentions } from './semanticSearchService.js'
+import { parseIntegrationFileId } from './integrationTypes.js'
+import { integrationStore } from './integrationStore.js'
 
 // Store API key instances per API key to allow multiple users
 const genAICache: Map<string, GoogleGenerativeAI> = new Map()
@@ -159,8 +161,9 @@ async function buildContext(
   apiKey?: string,
   userMessage?: string,
   openaiApiKey?: string,
-  style?: string
-): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: { actions?: { [key: string]: { fileCount: number; fileIds?: string[] } } } }> {
+  style?: string,
+  onProgress?: (event: AgentProgressEvent) => void
+): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: AIChatMessage['reasoningMetadata'] }> {
   const isAgentMode = userMessage?.includes('You are in AGENT MODE') ?? false
 
   let systemInstruction: string
@@ -304,7 +307,7 @@ Use rich markdown formatting to make information visually clear:
   }
 
   // 4️⃣ Add search results using reasoning service (system-controlled retrieval)
-  let reasoningMetadata: { actions?: { [key: string]: { fileCount: number; fileIds?: string[] } } } | undefined = undefined
+  let reasoningMetadata: AIChatMessage['reasoningMetadata'] | undefined = undefined
   
   if (userMessage && (apiKey || openaiApiKey)) {
     try {
@@ -314,16 +317,18 @@ Use rich markdown formatting to make information visually clear:
       } else {
         // Use reasoning service for intelligent retrieval
         // System controls the flow, AI evaluates relevance
-        const { reason } = await import('./aiReasoningService.js')
-        const reasoningResult = await reason(
+        const { orchestrateRetrieval } = await import('./aiReasoningService.js')
+        const reasoningResult = await orchestrateRetrieval(
           userMessage,
           projectId,
           apiKey, // geminiApiKey
           openaiApiKey,
-          10 // max steps
+          10, // max steps
+          undefined,
+          { onProgress }
         )
 
-        // Collect metadata: actions and file counts
+        // Collect metadata: actions, reasoning chain, and data sources
         const actions: { [key: string]: { fileCount: number; fileIds?: string[] } } = {}
         const searchedFiles = new Set<string>()
         
@@ -345,9 +350,65 @@ Use rich markdown formatting to make information visually clear:
         if (reasoningResult.libraryRequestedNoResults) {
           actions['Library search'] = { fileCount: 0 }
         }
-        
-        if (Object.keys(actions).length > 0) {
-          reasoningMetadata = { actions }
+
+        const serializedSteps = reasoningResult.steps.map((step) => ({
+          step: step.step,
+          action: step.action,
+          query: step.query,
+          relevanceScore: step.relevanceScore,
+          informationGap: step.informationGap,
+          budgetRemaining: step.budgetRemaining,
+          chunkRefs: (step.results || []).map((result) => ({
+            chunkId: result.chunk.id,
+            fileId: result.chunk.fileId,
+            score: result.score,
+          })),
+        }))
+
+        const sourceByChunkId = new Map<
+          string,
+          {
+            chunkId: string
+            fileId: string
+            excerpt: string
+            sourceType?: string
+            sourceId?: string
+            sourceName?: string
+          }
+        >()
+        for (const result of reasoningResult.finalResults) {
+          if (!sourceByChunkId.has(result.chunk.id)) {
+            const parsedIntegration = parseIntegrationFileId(result.chunk.fileId)
+            let sourceName: string | undefined
+            if (parsedIntegration && projectId) {
+              try {
+                const source = await integrationStore.getSourceById(projectId, parsedIntegration.sourceId)
+                sourceName = source?.displayName
+              } catch {
+                // Ignore lookup errors and keep fallback metadata.
+              }
+            }
+            sourceByChunkId.set(result.chunk.id, {
+              chunkId: result.chunk.id,
+              fileId: result.chunk.fileId,
+              excerpt: result.chunk.text.slice(0, 200),
+              sourceType: parsedIntegration?.sourceType,
+              sourceId: parsedIntegration?.sourceId,
+              sourceName,
+            })
+          }
+        }
+
+        reasoningMetadata = {
+          complexityLevel: reasoningResult.complexityLevel,
+          actions: Object.keys(actions).length > 0 ? actions : undefined,
+          reasoningChain: {
+            steps: serializedSteps,
+            stoppedReason: reasoningResult.stoppedReason,
+            totalStepsUsed: reasoningResult.totalStepsUsed,
+          },
+          plan: reasoningResult.plan,
+          dataSources: Array.from(sourceByChunkId.values()),
         }
 
         if (reasoningResult.libraryRequestedNoResults) {
@@ -538,10 +599,11 @@ export const geminiService = {
     modelName?: string,
     attachments?: ChatAttachment[],
     style?: string,
-    openaiApiKey?: string
+    openaiApiKey?: string,
+    onProgress?: (event: AgentProgressEvent) => void
   ): AsyncGenerator<string> {
     const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview')
-    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey, style)
+    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey, style, onProgress)
     
     // Send metadata first (if available) as a special chunk
     if (reasoningMetadata) {

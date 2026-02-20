@@ -33,33 +33,33 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
     {
       type: 'orderedList',
       content: [
-        {
-          type: 'listItem',
-          content: [
-            { 
-              type: 'paragraph', 
-              content: [
-                { type: 'text', text: '🌍 World Lab' }
-              ] 
-            },
-            {
-              type: 'bulletList',
-              content: [
                 {
                   type: 'listItem',
                   content: [
                     { 
                       type: 'paragraph', 
                       content: [
-                        { type: 'text', text: 'A playground for exploring and developing your ideas.' }
+                        { type: 'text', text: '🌍 World Lab' }
                       ] 
+                    },
+                    {
+                      type: 'bulletList',
+                      content: [
+                        {
+                          type: 'listItem',
+                          content: [
+                            { 
+                              type: 'paragraph', 
+                              content: [
+                                { type: 'text', text: 'A canvas for nodes and edges.' }
+                              ] 
+                            },
+                          ],
+                        },
+                      ],
                     },
                   ],
                 },
-              ],
-            },
-          ],
-        },
         {
           type: 'listItem',
           content: [

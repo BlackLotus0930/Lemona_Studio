@@ -1,6 +1,8 @@
 // Desktop Gemini Service - Uses Google Generative AI
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { projectService } from './projectService.js';
+import { parseIntegrationFileId } from './integrationTypes.js';
+import { integrationStore } from './integrationStore.js';
 // Store API key instances per API key to allow multiple users
 const genAICache = new Map();
 // Get max output tokens for a model (8K for all models)
@@ -130,7 +132,7 @@ function getCurrentEditingContext(documentContent, cursorPosition, maxTokens = 1
         return documentContent.slice(0, maxTokens * 4);
     }
 }
-async function buildContext(documentContent, projectId, chatHistory, cursorPosition, apiKey, userMessage, openaiApiKey, style) {
+async function buildContext(documentContent, projectId, chatHistory, cursorPosition, apiKey, userMessage, openaiApiKey, style, onProgress) {
     const isAgentMode = userMessage?.includes('You are in AGENT MODE') ?? false;
     let systemInstruction;
     if (isAgentMode) {
@@ -272,11 +274,11 @@ Use rich markdown formatting to make information visually clear:
             else {
                 // Use reasoning service for intelligent retrieval
                 // System controls the flow, AI evaluates relevance
-                const { reason } = await import('./aiReasoningService.js');
-                const reasoningResult = await reason(userMessage, projectId, apiKey, // geminiApiKey
-                openaiApiKey, 10 // max steps
-                );
-                // Collect metadata: actions and file counts
+                const { orchestrateRetrieval } = await import('./aiReasoningService.js');
+                const reasoningResult = await orchestrateRetrieval(userMessage, projectId, apiKey, // geminiApiKey
+                openaiApiKey, 10, // max steps
+                undefined, { onProgress });
+                // Collect metadata: actions, reasoning chain, and data sources
                 const actions = {};
                 const searchedFiles = new Set();
                 // Count files searched
@@ -295,9 +297,54 @@ Use rich markdown formatting to make information visually clear:
                 if (reasoningResult.libraryRequestedNoResults) {
                     actions['Library search'] = { fileCount: 0 };
                 }
-                if (Object.keys(actions).length > 0) {
-                    reasoningMetadata = { actions };
+                const serializedSteps = reasoningResult.steps.map((step) => ({
+                    step: step.step,
+                    action: step.action,
+                    query: step.query,
+                    relevanceScore: step.relevanceScore,
+                    informationGap: step.informationGap,
+                    budgetRemaining: step.budgetRemaining,
+                    chunkRefs: (step.results || []).map((result) => ({
+                        chunkId: result.chunk.id,
+                        fileId: result.chunk.fileId,
+                        score: result.score,
+                    })),
+                }));
+                const sourceByChunkId = new Map();
+                for (const result of reasoningResult.finalResults) {
+                    if (!sourceByChunkId.has(result.chunk.id)) {
+                        const parsedIntegration = parseIntegrationFileId(result.chunk.fileId);
+                        let sourceName;
+                        if (parsedIntegration && projectId) {
+                            try {
+                                const source = await integrationStore.getSourceById(projectId, parsedIntegration.sourceId);
+                                sourceName = source?.displayName;
+                            }
+                            catch {
+                                // Ignore lookup errors and keep fallback metadata.
+                            }
+                        }
+                        sourceByChunkId.set(result.chunk.id, {
+                            chunkId: result.chunk.id,
+                            fileId: result.chunk.fileId,
+                            excerpt: result.chunk.text.slice(0, 200),
+                            sourceType: parsedIntegration?.sourceType,
+                            sourceId: parsedIntegration?.sourceId,
+                            sourceName,
+                        });
+                    }
                 }
+                reasoningMetadata = {
+                    complexityLevel: reasoningResult.complexityLevel,
+                    actions: Object.keys(actions).length > 0 ? actions : undefined,
+                    reasoningChain: {
+                        steps: serializedSteps,
+                        stoppedReason: reasoningResult.stoppedReason,
+                        totalStepsUsed: reasoningResult.totalStepsUsed,
+                    },
+                    plan: reasoningResult.plan,
+                    dataSources: Array.from(sourceByChunkId.values()),
+                };
                 if (reasoningResult.libraryRequestedNoResults) {
                     systemInstruction += `\n\n## LIBRARY SEARCH NOTICE\n\nThe user explicitly requested Library context, but no matching library excerpts were found. In your response, briefly say this and suggest checking that the Library has indexed files or refining the query.`;
                 }
@@ -458,9 +505,9 @@ export const geminiService = {
             throw new Error(`Failed to generate response: ${error.message || 'Unknown error'}`);
         }
     },
-    async *streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, style, openaiApiKey) {
+    async *streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, style, openaiApiKey, onProgress) {
         const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview');
-        const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey, style);
+        const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey, style, onProgress);
         // Send metadata first (if available) as a special chunk
         if (reasoningMetadata) {
             // Add web_search action if enabled

@@ -1,7 +1,7 @@
 import { aiProviderStore } from './aiProviderStore.js'
 import { geminiService } from './geminiService.js'
 import { openaiService } from './openaiService.js'
-import type { AIChatMessage, ChatAttachment } from '../../../shared/types.js'
+import type { AIChatMessage, ChatAttachment, AgentProgressEvent } from '../../../shared/types.js'
 
 function hasKey(value?: string): boolean {
   return !!(value && value.trim().length > 0)
@@ -18,7 +18,8 @@ export const modelGatewayService = {
     useWebSearch?: boolean,
     modelName?: string,
     attachments?: ChatAttachment[],
-    style?: string
+    style?: string,
+    onProgress?: (event: AgentProgressEvent) => void
   ): Promise<AsyncGenerator<string>> {
     const active = await aiProviderStore.getActiveChatProfile()
 
@@ -39,7 +40,8 @@ export const modelGatewayService = {
         attachments,
         style,
         googleApiKey,
-        active.baseUrl
+        active.baseUrl,
+        onProgress
       )
     }
 
@@ -58,7 +60,9 @@ export const modelGatewayService = {
         modelName || active.chatModel || 'gpt-4.1-nano',
         attachments,
         style,
-        googleApiKey
+        googleApiKey,
+        undefined,
+        onProgress
       )
     }
 
@@ -77,7 +81,8 @@ export const modelGatewayService = {
         modelName || active.chatModel || 'gemini-3-flash-preview',
         attachments,
         style,
-        openaiApiKey
+        openaiApiKey,
+        onProgress
       )
     }
 
@@ -99,7 +104,8 @@ export const modelGatewayService = {
           'gemini-3-flash-preview',
           attachments,
           style,
-          openaiApiKey
+          openaiApiKey,
+          onProgress
         )
       }
       if (!hasOpenaiKey) {
@@ -115,7 +121,9 @@ export const modelGatewayService = {
         modelName,
         attachments,
         style,
-        googleApiKey
+        googleApiKey,
+        undefined,
+        onProgress
       )
     }
 
@@ -131,7 +139,9 @@ export const modelGatewayService = {
           'gpt-4.1-nano',
           attachments,
           style,
-          googleApiKey
+          googleApiKey,
+          undefined,
+          onProgress
         )
       }
       if (!hasGoogleKey) {
@@ -147,7 +157,8 @@ export const modelGatewayService = {
         modelName,
         attachments,
         style,
-        openaiApiKey
+        openaiApiKey,
+        onProgress
       )
     }
 
@@ -162,7 +173,8 @@ export const modelGatewayService = {
         modelName || 'gemini-3-flash-preview',
         attachments,
         style,
-        openaiApiKey
+        openaiApiKey,
+        onProgress
       )
     }
     if (hasOpenaiKey) {
@@ -176,7 +188,9 @@ export const modelGatewayService = {
         modelName || 'gpt-4.1-nano',
         attachments,
         style,
-        googleApiKey
+        googleApiKey,
+        undefined,
+        onProgress
       )
     }
     throw new Error('No API key configured. Please add an API key in Settings > API Keys.')

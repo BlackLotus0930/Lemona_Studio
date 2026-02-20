@@ -25,13 +25,68 @@ import { fetchDbSchemaItems } from './integrations/dbSchemaConnector.js'
 import { indexIntegrationContent } from './indexingService.js'
 import { getProjectLockManager, getVectorStore } from './vectorStore.js'
 import { integrationTokenStore } from './integrationTokenStore.js'
-import { getOAuthConfigStatus, refreshQuickBooksToken, saveOAuthConfig, startOAuthFlow } from './oauthService.js'
+import { getOAuthConfigStatus, refreshGithubToken, refreshGitlabToken, refreshQuickBooksToken, refreshSlackToken, saveOAuthConfig, startOAuthFlow } from './oauthService.js'
 import { BrowserWindow } from 'electron'
 import { aiProviderStore, buildEmbeddingIndexKey } from './aiProviderStore.js'
 
 async function resolveActiveIndexKey() {
   const config = await aiProviderStore.getActiveEmbeddingConfig()
   return buildEmbeddingIndexKey(config)
+}
+
+type StoredOAuthTokenPayload = {
+  accessToken?: string
+  refreshToken?: string
+  expiresAt?: number
+}
+
+function parseStoredOAuthToken(tokenPayload: string): StoredOAuthTokenPayload | null {
+  try {
+    return JSON.parse(tokenPayload) as StoredOAuthTokenPayload
+  } catch {
+    return null
+  }
+}
+
+async function refreshOAuthAccessToken(
+  sourceType: 'github' | 'gitlab' | 'slack' | 'quickbooks',
+  refreshToken: string
+): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+  if (sourceType === 'github') return refreshGithubToken(refreshToken)
+  if (sourceType === 'gitlab') return refreshGitlabToken(refreshToken)
+  if (sourceType === 'slack') return refreshSlackToken(refreshToken)
+  return refreshQuickBooksToken(refreshToken)
+}
+
+async function resolveOAuthAccessToken(
+  sourceType: 'github' | 'gitlab' | 'slack' | 'quickbooks',
+  sourceId: string,
+  disconnectedMessage: string
+): Promise<string> {
+  const tokenPayload = await integrationTokenStore.getToken(sourceId)
+  if (!tokenPayload) {
+    throw new Error(disconnectedMessage)
+  }
+  const parsed = parseStoredOAuthToken(tokenPayload)
+  if (parsed?.accessToken && parsed.refreshToken) {
+    const expiresAt = parsed.expiresAt ?? 0
+    const nowSec = Math.floor(Date.now() / 1000)
+    if (expiresAt - nowSec < 300) {
+      const refreshed = await refreshOAuthAccessToken(sourceType, parsed.refreshToken)
+      const newExpiresAt = Math.floor(Date.now() / 1000) + refreshed.expiresIn
+      await integrationTokenStore.saveToken(
+        sourceId,
+        JSON.stringify({
+          accessToken: refreshed.accessToken,
+          refreshToken: refreshed.refreshToken,
+          expiresAt: newExpiresAt,
+        })
+      )
+      return refreshed.accessToken
+    }
+    return parsed.accessToken
+  }
+  return tokenPayload
 }
 
 async function clearSourceFromIndex(projectId: string, source: IntegrationSource): Promise<number> {
@@ -55,24 +110,15 @@ async function fetchItems(source: IntegrationSource) {
     return fetchRssItems(source)
   }
   if (source.sourceType === 'github') {
-    const token = await integrationTokenStore.getToken(source.id)
-    if (!token) {
-      throw new Error('GitHub source is not connected. Please reconnect.')
-    }
+    const token = await resolveOAuthAccessToken('github', source.id, 'GitHub source is not connected. Please reconnect.')
     return fetchGithubItems(source, token)
   }
   if (source.sourceType === 'gitlab') {
-    const token = await integrationTokenStore.getToken(source.id)
-    if (!token) {
-      throw new Error('GitLab source is not connected. Please reconnect.')
-    }
+    const token = await resolveOAuthAccessToken('gitlab', source.id, 'GitLab source is not connected. Please reconnect.')
     return fetchGitlabItems(source, token)
   }
   if (source.sourceType === 'slack') {
-    const token = await integrationTokenStore.getToken(source.id)
-    if (!token) {
-      throw new Error('Slack source is not connected. Please reconnect.')
-    }
+    const token = await resolveOAuthAccessToken('slack', source.id, 'Slack source is not connected. Please reconnect.')
     return fetchSlackItems(source, token)
   }
   if (source.sourceType === 'notion') {
@@ -83,37 +129,7 @@ async function fetchItems(source: IntegrationSource) {
     return fetchNotionItems(source, token)
   }
   if (source.sourceType === 'quickbooks') {
-    const tokenPayload = await integrationTokenStore.getToken(source.id)
-    if (!tokenPayload) {
-      throw new Error('QuickBooks source is not connected. Please reconnect.')
-    }
-    let accessToken: string
-    try {
-      const parsed = JSON.parse(tokenPayload) as { accessToken?: string; refreshToken?: string; expiresAt?: number }
-      if (parsed.accessToken && parsed.refreshToken) {
-        const expiresAt = parsed.expiresAt ?? 0
-        const nowSec = Math.floor(Date.now() / 1000)
-        if (expiresAt - nowSec < 300) {
-          const refreshed = await refreshQuickBooksToken(parsed.refreshToken)
-          const newExpiresAt = Math.floor(Date.now() / 1000) + refreshed.expiresIn
-          await integrationTokenStore.saveToken(
-            source.id,
-            JSON.stringify({
-              accessToken: refreshed.accessToken,
-              refreshToken: refreshed.refreshToken,
-              expiresAt: newExpiresAt,
-            })
-          )
-          accessToken = refreshed.accessToken
-        } else {
-          accessToken = parsed.accessToken
-        }
-      } else {
-        accessToken = typeof tokenPayload === 'string' ? tokenPayload : parsed.accessToken || ''
-      }
-    } catch {
-      accessToken = tokenPayload
-    }
+    const accessToken = await resolveOAuthAccessToken('quickbooks', source.id, 'QuickBooks source is not connected. Please reconnect.')
     if (!accessToken) {
       throw new Error('QuickBooks source is not connected. Please reconnect.')
     }
@@ -325,7 +341,7 @@ export const integrationService = {
 
     if (existingSource) {
       const tokenToSave =
-        sourceType === 'quickbooks' && oauth.refreshToken && oauth.expiresIn != null
+        oauth.refreshToken && oauth.expiresIn != null
           ? JSON.stringify({
               accessToken: oauth.accessToken,
               refreshToken: oauth.refreshToken,
@@ -396,7 +412,7 @@ export const integrationService = {
             : oauth.login || defaultName
     )
     const tokenToSave =
-      sourceType === 'quickbooks' && oauth.refreshToken && oauth.expiresIn != null
+      oauth.refreshToken && oauth.expiresIn != null
         ? JSON.stringify({
             accessToken: oauth.accessToken,
             refreshToken: oauth.refreshToken,
@@ -416,7 +432,14 @@ export const integrationService = {
     if (!source) {
       return { success: false, removedChunks: 0 }
     }
-    const removedChunks = await clearSourceFromIndex(projectId, source)
+    let removedChunks = 0
+    try {
+      removedChunks = await clearSourceFromIndex(projectId, source)
+    } catch (error) {
+      // Disconnect should still succeed even if vector index cleanup fails
+      // (e.g. legacy/invalid index directory on Windows).
+      console.warn('[IntegrationService] removeSource: failed to clear source chunks, continuing with source removal:', error)
+    }
     const success = await integrationStore.removeSource(projectId, sourceId)
     await integrationTokenStore.removeToken(sourceId)
     return { success, removedChunks }
@@ -456,10 +479,7 @@ export const integrationService = {
     if (!source || source.sourceType !== 'github') {
       throw new Error('GitHub source not found')
     }
-    const token = await integrationTokenStore.getToken(sourceId)
-    if (!token) {
-      throw new Error('GitHub source is not connected. Please reconnect.')
-    }
+    const token = await resolveOAuthAccessToken('github', sourceId, 'GitHub source is not connected. Please reconnect.')
     return fetchGithubRepos(token)
   },
 
@@ -543,10 +563,7 @@ export const integrationService = {
     if (!source || source.sourceType !== 'gitlab') {
       throw new Error('GitLab source not found')
     }
-    const token = await integrationTokenStore.getToken(sourceId)
-    if (!token) {
-      throw new Error('GitLab source is not connected. Please reconnect.')
-    }
+    const token = await resolveOAuthAccessToken('gitlab', sourceId, 'GitLab source is not connected. Please reconnect.')
     return fetchGitlabRepos(token)
   },
 
@@ -630,10 +647,7 @@ export const integrationService = {
     if (!source || source.sourceType !== 'slack') {
       throw new Error('Slack source not found')
     }
-    const token = await integrationTokenStore.getToken(sourceId)
-    if (!token) {
-      throw new Error('Slack source is not connected. Please reconnect.')
-    }
+    const token = await resolveOAuthAccessToken('slack', sourceId, 'Slack source is not connected. Please reconnect.')
     return fetchSlackChannels(token)
   },
 

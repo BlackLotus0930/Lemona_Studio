@@ -22,7 +22,17 @@ export const chatHistoryService = {
    * Get all chat history for a project (via documentId)
    */
   async getChatHistory(documentId: string): Promise<{ [chatId: string]: AIChatMessage[] }> {
-    const projectId = await this.getProjectIdFromDocument(documentId)
+    let projectId: string | null = null
+    try {
+      projectId = await this.getProjectIdFromDocument(documentId)
+    } catch (error) {
+      // Read path should be resilient during document/project transitions.
+      console.warn('[chatHistoryService] getChatHistory: document lookup failed, returning empty history', {
+        documentId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return {}
+    }
     if (!projectId) {
       // Document has no project, return empty history
       return {}
@@ -30,7 +40,12 @@ export const chatHistoryService = {
 
     const project = await projectService.getById(projectId)
     if (!project) {
-      throw new Error('Project not found')
+      // Project may have been deleted while UI still references a document.
+      console.warn('[chatHistoryService] getChatHistory: project missing, returning empty history', {
+        documentId,
+        projectId,
+      })
+      return {}
     }
     return project.chatHistory || {}
   },
@@ -82,7 +97,8 @@ export const chatHistoryService = {
     chatId: string,
     messageId: string,
     content: string,
-    reasoningMetadata?: AIChatMessage['reasoningMetadata']
+    reasoningMetadata?: AIChatMessage['reasoningMetadata'],
+    edits?: Pick<AIChatMessage, 'editedByUser' | 'originalContent' | 'editedAt'>
   ): Promise<void> {
     const projectId = await this.getProjectIdFromDocument(documentId)
     if (!projectId) {
@@ -114,7 +130,51 @@ export const chatHistoryService = {
       messages[messageIndex].reasoningMetadata = reasoningMetadata
     }
 
+    // Preserve explicit edit provenance fields when provided
+    if (edits !== undefined) {
+      if (edits.editedByUser !== undefined) {
+        messages[messageIndex].editedByUser = edits.editedByUser
+      }
+      if (edits.originalContent !== undefined) {
+        messages[messageIndex].originalContent = edits.originalContent
+      }
+      if (edits.editedAt !== undefined) {
+        messages[messageIndex].editedAt = edits.editedAt
+      }
+    }
+
     // Save the updated chat history
+    await this.saveChatHistory(projectId, project.chatHistory)
+  },
+
+  /**
+   * Truncate a chat thread after the given message index (inclusive)
+   */
+  async truncateChatAfterIndex(
+    documentId: string,
+    chatId: string,
+    messageIndex: number
+  ): Promise<void> {
+    const projectId = await this.getProjectIdFromDocument(documentId)
+    if (!projectId) {
+      throw new Error('Document must belong to a project to update chat history')
+    }
+
+    const project = await projectService.getById(projectId)
+    if (!project) {
+      throw new Error('Project not found')
+    }
+
+    if (!project.chatHistory || !project.chatHistory[chatId]) {
+      throw new Error('Chat thread not found')
+    }
+
+    const messages = project.chatHistory[chatId]
+    if (messageIndex < 0 || messageIndex >= messages.length) {
+      throw new Error('Invalid message index')
+    }
+
+    project.chatHistory[chatId] = messages.slice(0, messageIndex + 1)
     await this.saveChatHistory(projectId, project.chatHistory)
   },
 

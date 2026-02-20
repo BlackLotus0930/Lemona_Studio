@@ -179,6 +179,17 @@ export const aiApi = {
               }
             }
           }
+
+          const onEvent = (receivedStreamId: string, event: unknown) => {
+            if (receivedStreamId === streamId && !isStreamClosed) {
+              try {
+                const sseData = `data: ${JSON.stringify({ event })}\n\n`
+                controller.enqueue(new TextEncoder().encode(sseData))
+              } catch (error) {
+                console.warn('[Desktop API] Failed to enqueue event (stream may be closed):', error)
+              }
+            }
+          }
           
           const onEnd = (receivedStreamId: string) => {
             if (receivedStreamId === streamId && !isStreamClosed) {
@@ -206,10 +217,11 @@ export const aiApi = {
           
           // Store cleanup functions returned by on() - these properly remove the listeners
           const cleanupChunk = window.electron!.on('ai:streamChunk', onChunk)
+          const cleanupEvent = window.electron!.on('ai:streamEvent', onEvent)
           const cleanupEnd = window.electron!.on('ai:streamEnd', onEnd)
           const cleanupError = window.electron!.on('ai:streamError', onError)
           
-          cleanupFns = [cleanupChunk, cleanupEnd, cleanupError]
+          cleanupFns = [cleanupChunk, cleanupEvent, cleanupEnd, cleanupError]
           
           // If stream was cancelled before listeners were registered, clean them up now
           if (isStreamClosed) {
@@ -262,9 +274,18 @@ export const chatApi = {
   getChat: (documentId: string, chatId: string) => invokeOrFetch('chat:getChat', documentId, chatId),
   addMessage: (documentId: string, chatId: string, message: AIChatMessage) =>
     invokeOrFetch('chat:addMessage', documentId, chatId, message),
-  updateMessage: (documentId: string, chatId: string, messageId: string, content: string, reasoningMetadata?: AIChatMessage['reasoningMetadata']) =>
-    invokeOrFetch('chat:updateMessage', documentId, chatId, messageId, content, reasoningMetadata),
+  updateMessage: (
+    documentId: string,
+    chatId: string,
+    messageId: string,
+    content: string,
+    reasoningMetadata?: AIChatMessage['reasoningMetadata'],
+    edits?: Pick<AIChatMessage, 'editedByUser' | 'originalContent' | 'editedAt'>
+  ) =>
+    invokeOrFetch('chat:updateMessage', documentId, chatId, messageId, content, reasoningMetadata, edits),
   deleteChat: (documentId: string, chatId: string) => invokeOrFetch('chat:deleteChat', documentId, chatId),
+  truncateChatAfterIndex: (documentId: string, chatId: string, messageIndex: number) =>
+    invokeOrFetch('chat:truncateChatAfterIndex', documentId, chatId, messageIndex),
 }
 
 export const projectApi = {

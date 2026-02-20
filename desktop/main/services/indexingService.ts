@@ -1545,6 +1545,7 @@ export async function indexIntegrationContent(
     }
 
     const chunks: Chunk[] = []
+    const indexedAt = new Date().toISOString()
     for (const item of toAddItems) {
       const itemId = item.id || item.externalId
       if (!itemId) continue
@@ -1552,6 +1553,9 @@ export async function indexIntegrationContent(
       const text = buildIntegrationIndexText(item)
       if (!text) continue
       const itemChunks = chunkText(text, itemFileId, DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP)
+      for (const chunk of itemChunks) {
+        chunk.indexedAt = indexedAt
+      }
       chunks.push(...itemChunks)
     }
 

@@ -41,11 +41,8 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
     setMetabaseUrl,
     hubspotApiKey,
     setHubspotApiKey,
-    oauthClientId,
-    setOauthClientId,
-    oauthClientSecret,
-    setOauthClientSecret,
-    oauthStatus,
+    oauthCredentialsByProvider,
+    setOauthCredentials,
     canAdd,
     canAddLinear,
     canAddStripe,
@@ -102,10 +99,6 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
     indexedNotionPages,
     selectedNotionPages,
     setSelectedNotionPages,
-    gitlabOauthStatus,
-    slackOauthStatus,
-    notionOauthStatus,
-    quickbooksOauthStatus,
     isConnectingGitlab,
     isSavingGitlabRepos,
     isConnectingSlack,
@@ -467,21 +460,21 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
       ? [
           'Go to GitHub → Settings → Developer settings → OAuth Apps → New OAuth App.',
           'Application name: any name (e.g. Lemona). Homepage URL: use https://github.com or https://localhost — any valid URL works.',
-          'Authorization callback URL: http://127.0.0.1/oauth/callback (Lemona uses a dynamic port; if Connect fails, check the error for the exact URL).',
+          'Authorization callback URL: https://127.0.0.1:38473/oauth/callback',
           'If you see Webhook URL, you\'re on GitHub Apps — use OAuth Apps instead. Copy Client ID and Client Secret, paste below, then Save.',
           'Click Connect to authorize. Select repos and click Save and Index.',
         ]
       : isGitlab
         ? [
             'Go to GitLab → Preferences → Applications → create an application.',
-            'Name: any (e.g. Lemona). Redirect URI: http://127.0.0.1/oauth/callback (Lemona uses a dynamic port; if Connect fails, check the error for the exact URL).',
+            'Name: any (e.g. Lemona). Redirect URI: https://127.0.0.1:38473/oauth/callback',
             'Scopes: read_api, read_repository, read_user. Copy Application ID and Secret, paste below, then Save.',
             'Click Connect to authorize. Select projects and click Save and Index.',
           ]
         : isSlack
           ? [
               'Go to api.slack.com/apps → Create New App → From scratch. Name it (e.g. Lemona).',
-              'OAuth & Permissions → Redirect URLs: add http://127.0.0.1/oauth/callback (Lemona uses a dynamic port; if Connect fails, check the error for the exact URL).',
+              'OAuth & Permissions → Redirect URLs: add https://127.0.0.1:38473/oauth/callback',
               'Scopes: channels:read, channels:history, groups:read, groups:history (Bot Token Scopes). Copy Client ID and Client Secret, paste below, then Save.',
               'Click Connect to authorize. Invite the app to channels you want to index (e.g. /invite @YourApp in each channel). Select channels and click Save and Index.',
             ]
@@ -489,12 +482,12 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
             ? [
                 'Go to notion.so/my-integrations → New integration. Name it (e.g. Lemona).',
                 'Capabilities: read content, read user info. Copy OAuth domain and credentials (Client ID, Client Secret).',
-                'Redirect URL: http://127.0.0.1/oauth/callback (Lemona uses a dynamic port; if Connect fails, check the error for the exact URL). Paste below, then Save.',
+                'Redirect URL: https://127.0.0.1:38473/oauth/callback. Paste below, then Save.',
                 'Click Connect to authorize. Share pages with the integration (⋯ → Add connections). Select pages and click Save and Index.',
               ]
             : isQuickbooks
               ? [
-                  'Go to developer.intuit.com → Create an app → Keys & OAuth. Add redirect URI: http://127.0.0.1/oauth/callback (Lemona uses a dynamic port; if Connect fails, check the error for the exact URL).',
+                  'Go to developer.intuit.com → Create an app → Keys & OAuth. Add redirect URI: https://127.0.0.1:38473/oauth/callback',
                   'Scopes: Accounting (com.intuit.quickbooks.accounting). Copy Client ID and Client Secret.',
                   'Paste below, then Save. Click Connect to authorize and select your company.',
                   'Click Sync to index customers and invoices for AI context.',
@@ -663,7 +656,7 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
           <input
             value={posthogHost}
             onChange={e => setPosthogHost(e.target.value)}
-            placeholder="Host"
+            placeholder="Host (e.g. https://us.posthog.com or US Cloud)"
             style={inputStyle}
           />
           <input
@@ -742,12 +735,13 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
         </div>
       ) : isSlack ? (
         <>
-          {!slackOauthStatus?.configured && (
+          {!slackSource && (
             <div style={{ marginBottom: 16, maxWidth: 400 }}>
-              <input value={oauthClientId} onChange={e => setOauthClientId(e.target.value)} placeholder="Client ID" style={inputStyle} />
+              <div style={{ fontSize: 12, color: subTextColor, marginBottom: 6 }}>OAuth app credentials (edit and retry if connect failed)</div>
+              <input value={oauthCredentialsByProvider.slack.clientId} onChange={e => setOauthCredentials('slack', { clientId: e.target.value })} placeholder="Client ID" style={inputStyle} />
               <input
-                value={oauthClientSecret}
-                onChange={e => setOauthClientSecret(e.target.value)}
+                value={oauthCredentialsByProvider.slack.clientSecret}
+                onChange={e => setOauthCredentials('slack', { clientSecret: e.target.value })}
                 placeholder="Client Secret"
                 type="password"
                 style={inputStyle}
@@ -789,12 +783,12 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
               )}
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {btn(
                 isConnectingSlack ? 'Connecting...' : 'Connect',
                 handleConnectSlack,
                 true,
-                isConnectingSlack || (!slackOauthStatus?.configured && (!oauthClientId.trim() || !oauthClientSecret.trim()))
+                isConnectingSlack || (!oauthCredentialsByProvider.slack.clientId.trim() || !oauthCredentialsByProvider.slack.clientSecret.trim())
               )}
               {isConnectingSlack && btn('Cancel', cancelConnectSlack, false)}
             </div>
@@ -802,12 +796,13 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
         </>
       ) : isNotion ? (
         <>
-          {!notionOauthStatus?.configured && (
+          {!notionSource && (
             <div style={{ marginBottom: 16, maxWidth: 400 }}>
-              <input value={oauthClientId} onChange={e => setOauthClientId(e.target.value)} placeholder="Client ID" style={inputStyle} />
+              <div style={{ fontSize: 12, color: subTextColor, marginBottom: 6 }}>OAuth app credentials (edit and retry if connect failed)</div>
+              <input value={oauthCredentialsByProvider.notion.clientId} onChange={e => setOauthCredentials('notion', { clientId: e.target.value })} placeholder="Client ID" style={inputStyle} />
               <input
-                value={oauthClientSecret}
-                onChange={e => setOauthClientSecret(e.target.value)}
+                value={oauthCredentialsByProvider.notion.clientSecret}
+                onChange={e => setOauthCredentials('notion', { clientSecret: e.target.value })}
                 placeholder="Client Secret"
                 type="password"
                 style={inputStyle}
@@ -848,12 +843,12 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
               )}
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {btn(
                 isConnectingNotion ? 'Connecting...' : 'Connect',
                 handleConnectNotion,
                 true,
-                isConnectingNotion || (!notionOauthStatus?.configured && (!oauthClientId.trim() || !oauthClientSecret.trim()))
+                isConnectingNotion || (!oauthCredentialsByProvider.notion.clientId.trim() || !oauthCredentialsByProvider.notion.clientSecret.trim())
               )}
               {isConnectingNotion && btn('Cancel', cancelConnectNotion, false)}
             </div>
@@ -861,12 +856,13 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
         </>
       ) : isQuickbooks ? (
         <>
-          {!quickbooksOauthStatus?.configured && (
+          {!quickbooksSource && (
             <div style={{ marginBottom: 16, maxWidth: 400 }}>
-              <input value={oauthClientId} onChange={e => setOauthClientId(e.target.value)} placeholder="Client ID" style={inputStyle} />
+              <div style={{ fontSize: 12, color: subTextColor, marginBottom: 6 }}>OAuth app credentials (edit and retry if connect failed)</div>
+              <input value={oauthCredentialsByProvider.quickbooks.clientId} onChange={e => setOauthCredentials('quickbooks', { clientId: e.target.value })} placeholder="Application ID" style={inputStyle} />
               <input
-                value={oauthClientSecret}
-                onChange={e => setOauthClientSecret(e.target.value)}
+                value={oauthCredentialsByProvider.quickbooks.clientSecret}
+                onChange={e => setOauthCredentials('quickbooks', { clientSecret: e.target.value })}
                 placeholder="Client Secret"
                 type="password"
                 style={inputStyle}
@@ -887,12 +883,12 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
               <p style={{ margin: 0, fontSize: 12, color: subTextColor }}>Click Sync to index customers and invoices.</p>
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {btn(
                 isConnectingQuickbooks ? 'Connecting...' : 'Connect',
                 handleConnectQuickbooks,
                 true,
-                isConnectingQuickbooks || (!quickbooksOauthStatus?.configured && (!oauthClientId.trim() || !oauthClientSecret.trim()))
+                isConnectingQuickbooks || (!oauthCredentialsByProvider.quickbooks.clientId.trim() || !oauthCredentialsByProvider.quickbooks.clientSecret.trim())
               )}
               {isConnectingQuickbooks && btn('Cancel', cancelConnectQuickbooks, false)}
             </div>
@@ -900,12 +896,13 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
         </>
       ) : isGitlab ? (
         <>
-          {!gitlabOauthStatus?.configured && (
+          {!gitlabSource && (
             <div style={{ marginBottom: 16, maxWidth: 400 }}>
-              <input value={oauthClientId} onChange={e => setOauthClientId(e.target.value)} placeholder="Application ID" style={inputStyle} />
+              <div style={{ fontSize: 12, color: subTextColor, marginBottom: 6 }}>OAuth app credentials (edit and retry if connect failed)</div>
+              <input value={oauthCredentialsByProvider.gitlab.clientId} onChange={e => setOauthCredentials('gitlab', { clientId: e.target.value })} placeholder="Application ID" style={inputStyle} />
               <input
-                value={oauthClientSecret}
-                onChange={e => setOauthClientSecret(e.target.value)}
+                value={oauthCredentialsByProvider.gitlab.clientSecret}
+                onChange={e => setOauthCredentials('gitlab', { clientSecret: e.target.value })}
                 placeholder="Secret"
                 type="password"
                 style={inputStyle}
@@ -946,12 +943,12 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
               )}
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {btn(
                 isConnectingGitlab ? 'Connecting...' : 'Connect',
                 handleConnectGitlab,
                 true,
-                isConnectingGitlab || (!gitlabOauthStatus?.configured && (!oauthClientId.trim() || !oauthClientSecret.trim()))
+                isConnectingGitlab || (!oauthCredentialsByProvider.gitlab.clientId.trim() || !oauthCredentialsByProvider.gitlab.clientSecret.trim())
               )}
               {isConnectingGitlab && btn('Cancel', cancelConnectGitlab, false)}
             </div>
@@ -959,12 +956,13 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
         </>
       ) : (
         <>
-          {!oauthStatus?.configured && (
+          {!githubSource && (
             <div style={{ marginBottom: 16, maxWidth: 400 }}>
-              <input value={oauthClientId} onChange={e => setOauthClientId(e.target.value)} placeholder="Client ID" style={inputStyle} />
+              <div style={{ fontSize: 12, color: subTextColor, marginBottom: 6 }}>OAuth app credentials (edit and retry if connect failed)</div>
+              <input value={oauthCredentialsByProvider.github.clientId} onChange={e => setOauthCredentials('github', { clientId: e.target.value })} placeholder="Client ID" style={inputStyle} />
               <input
-                value={oauthClientSecret}
-                onChange={e => setOauthClientSecret(e.target.value)}
+                value={oauthCredentialsByProvider.github.clientSecret}
+                onChange={e => setOauthCredentials('github', { clientSecret: e.target.value })}
                 placeholder="Client Secret"
                 type="password"
                 style={inputStyle}
@@ -1005,12 +1003,12 @@ export default function IntegrationDetailView({ tab }: { tab: IntegrationTabItem
               )}
             </div>
           ) : (
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {btn(
                 isConnectingGithub ? 'Connecting...' : 'Connect',
                 handleConnectGithub,
                 true,
-                isConnectingGithub || (!oauthStatus?.configured && (!oauthClientId.trim() || !oauthClientSecret.trim()))
+                isConnectingGithub || (!oauthCredentialsByProvider.github.clientId.trim() || !oauthCredentialsByProvider.github.clientSecret.trim())
               )}
               {isConnectingGithub && btn('Cancel', cancelConnectGithub, false)}
             </div>

@@ -234,7 +234,7 @@ type RootFolderMeta = { id: 'worldlab' | 'library' | 'project'; name: string; hi
 
 function loadProjectRootFolderMeta(): Record<'worldlab' | 'library' | 'project', RootFolderMeta> {
   const defaults: Record<'worldlab' | 'library' | 'project', RootFolderMeta> = {
-    worldlab: { id: 'worldlab', name: 'worldlab', hidden: true },
+    worldlab: { id: 'worldlab', name: 'World Lab', hidden: false },
     library: { id: 'library', name: 'library' },
     project: { id: 'project', name: 'workspace' },
   }
@@ -243,11 +243,12 @@ function loadProjectRootFolderMeta(): Record<'worldlab' | 'library' | 'project',
     if (stored) {
       const parsed = JSON.parse(stored)
       if (parsed && typeof parsed === 'object') {
-        return {
-          worldlab: { ...defaults.worldlab, ...(parsed.worldlab || {}) },
+        const merged = {
+          worldlab: { ...defaults.worldlab, ...(parsed.worldlab || {}), hidden: false },
           library: { ...defaults.library, ...(parsed.library || {}) },
           project: { ...defaults.project, ...(parsed.project || {}) },
         }
+        return merged
       }
     }
   } catch (error) {
@@ -695,6 +696,20 @@ export default function Layout(): JSX.Element {
     }
     return null
   }
+
+  const getRealtimeDocumentContent = useCallback((docId: string): string | undefined => {
+    const editor = getEditor(docId)
+    if (editor) {
+      try {
+        return JSON.stringify(editor.getJSON())
+      } catch (error) {
+        console.warn('[Layout] Failed to serialize editor content for AI context:', error)
+      }
+    }
+    if (document?.id === docId) return document.content || undefined
+    const docFromList = documents.find(item => item.id === docId)
+    return docFromList?.content || undefined
+  }, [document, documents])
 
   // Track last checked document to avoid duplicate logs
   const lastCheckedDocRef = useRef<{ id: string; result: boolean } | null>(null)
@@ -1795,6 +1810,37 @@ export default function Layout(): JSX.Element {
       window.removeEventListener('lemona:documents-refresh-request', handleDocumentsRefreshRequest as EventListener)
     }
   }, [document?.projectId])
+
+  useEffect(() => {
+    const handleDocumentContentUpdated = (event: Event) => {
+      const customEvent = event as CustomEvent<{ documentId?: string; content?: string }>
+      const targetDocumentId = customEvent.detail?.documentId
+      const content = customEvent.detail?.content
+      if (!targetDocumentId || typeof content !== 'string') return
+
+      const updatedAt = new Date().toISOString()
+      setDocuments(prev =>
+        prev.map(doc => (
+          doc.id === targetDocumentId ? { ...doc, content, updatedAt } : doc
+        ))
+      )
+      setOpenTabs(prev =>
+        prev.map(tab => (
+          tab.id === targetDocumentId ? { ...tab, content, updatedAt } : tab
+        ))
+      )
+      setDocument(prevDoc =>
+        prevDoc?.id === targetDocumentId
+          ? { ...prevDoc, content, updatedAt }
+          : prevDoc
+      )
+    }
+
+    window.addEventListener('lemona:document-content-updated', handleDocumentContentUpdated as EventListener)
+    return () => {
+      window.removeEventListener('lemona:document-content-updated', handleDocumentContentUpdated as EventListener)
+    }
+  }, [])
 
   useEffect(() => {
     const handleOpenDocumentFromAIDiff = (event: Event) => {
@@ -7430,7 +7476,11 @@ export default function Layout(): JSX.Element {
                   undoRedoHandlers={worldLabUndoRedo}
                 />
               ) : (
-                <AIPanel document={document} onClose={handleAIPanelClose} />
+                <AIPanel
+                  document={document}
+                  onClose={handleAIPanelClose}
+                  getRealtimeDocumentContent={getRealtimeDocumentContent}
+                />
               )}
             </Panel>
           </>

@@ -22,6 +22,7 @@ export interface Chunk {
   startChar: number // Start character position in original text
   endChar: number // End character position in original text
   tokenCount: number // Estimated token count
+  indexedAt?: string // Optional chunk indexing timestamp (ISO)
 }
 
 /**

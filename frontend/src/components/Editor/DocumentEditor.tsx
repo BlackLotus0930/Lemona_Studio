@@ -273,6 +273,18 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     previewAppliedRef.current = false
   }
 
+  const plainTextToTipTapNodes = (text: string): Array<{ type: string; content?: unknown[] }> => {
+    const normalized = (text || '').replace(/\r\n/g, '\n')
+    const paras = normalized.split(/\n\n+/)
+    return paras.map((para) => {
+      const line = para.replace(/\n/g, ' ')
+      return {
+        type: 'paragraph',
+        content: line.length > 0 ? [{ type: 'text', text: line }] : [{ type: 'text', text: '' }],
+      }
+    })
+  }
+
   const applyAgentTextPatch = (
     oldSegment: string,
     newSegment: string,
@@ -284,7 +296,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
     if (typeof oldSegment !== 'string' || typeof newSegment !== 'string') return false
     if (oldSegment === newSegment) return true
 
-    const needle = oldSegment
+    const needle = oldSegment.replace(/\r\n/g, '\n')
     let foundRange: { from: number; to: number } | null = null
 
     if (needle.length === 0) {
@@ -317,10 +329,41 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
         return true
       })
 
-      if (candidates.length > 0) {
-        const bestScore = Math.max(...candidates.map(c => c.score))
+      if (candidates.length === 0) {
+        const blockSep = '\n\n'
+        type Block = { startPos: number; endPos: number; charStart: number; text: string }
+        const blocks: Block[] = []
+        let charOffset = 0
+        editor.state.doc.descendants((node, pos) => {
+          if (!node.isTextblock) return true
+          const text = node.textBetween(0, node.content.size, '\n')
+          const charStart = charOffset
+          charOffset += text.length + blockSep.length
+          blocks.push({
+            startPos: pos,
+            endPos: pos + node.nodeSize - 1,
+            charStart,
+            text,
+          })
+          return true
+        })
+        const fullText = blocks.map((b) => b.text).join(blockSep)
+        const idx = fullText.indexOf(needle)
+        if (idx >= 0) {
+          const startChar = idx
+          const endChar = idx + needle.length
+          const startBlock = blocks.find((b) => startChar >= b.charStart && startChar < b.charStart + b.text.length)
+          const endBlock = blocks.find((b) => endChar > b.charStart && endChar <= b.charStart + b.text.length)
+          if (startBlock && endBlock) {
+            const from = startBlock.startPos + 1 + (startChar - startBlock.charStart)
+            const to = endBlock.startPos + 1 + (endChar - endBlock.charStart)
+            foundRange = { from, to }
+          }
+        }
+      } else {
+        const bestScore = Math.max(...candidates.map((c) => c.score))
         if (bestScore > 0) {
-          const anchored = candidates.filter(c => c.score === bestScore)
+          const anchored = candidates.filter((c) => c.score === bestScore)
           const idx = Math.max(0, Math.min(occurrenceIndex, anchored.length - 1))
           foundRange = { from: anchored[idx].from, to: anchored[idx].to }
         } else {
@@ -334,10 +377,11 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
       return false
     }
 
+    const content = plainTextToTipTapNodes(newSegment)
     editor
       .chain()
       .focus()
-      .insertContentAt(foundRange, newSegment)
+      .insertContentAt(foundRange, content)
       .run()
 
     return true
@@ -506,18 +550,59 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
             }
 
             // Process patches from bottom to top so spliced green nodes don't shift indices
-            const patchTargets: Array<{ nodeIndex: number; charIdx: number; patch: AgentDiffPatch }> = []
+            type PatchTarget = { nodeIndex: number; charIdx: number; patch: AgentDiffPatch; endNodeIndex?: number; endCharLen?: number }
+            const patchTargets: PatchTarget[] = []
             if (previewJSON.content && Array.isArray(previewJSON.content)) {
               for (const patch of patches) {
                 const oldSnippet = (patch.oldText || '').replace(/\r\n/g, '\n')
-                for (let i = 0; i < previewJSON.content.length; i++) {
+                let found: PatchTarget | null = null
+                for (let i = 0; i < previewJSON.content.length && !found; i++) {
                   const nodeText = getNodeText(previewJSON.content[i])
                   const idx = nodeText.indexOf(oldSnippet)
                   if (idx >= 0) {
-                    patchTargets.push({ nodeIndex: i, charIdx: idx, patch })
+                    found = { nodeIndex: i, charIdx: idx, patch }
                     break
                   }
                 }
+                if (!found) {
+                  let acc = ''
+                  for (let i = 0; i < previewJSON.content.length && !found; i++) {
+                    acc += (i > 0 ? '\n\n' : '') + getNodeText(previewJSON.content[i])
+                    const idx = acc.indexOf(oldSnippet)
+                    if (idx >= 0) {
+                      const startInAcc = idx
+                      const endInAcc = idx + oldSnippet.length
+                      let run = 0
+                      for (let j = 0; j <= i; j++) {
+                        const blockText = getNodeText(previewJSON.content[j])
+                        const blockStart = run
+                        const blockEnd = run + blockText.length
+                        if (startInAcc >= blockStart && startInAcc < blockEnd && j < i) {
+                          let endRun = 0
+                          for (let k = 0; k <= i; k++) {
+                            const bt = getNodeText(previewJSON.content[k])
+                            const bEnd = endRun + bt.length
+                            if (endInAcc - 1 >= endRun && endInAcc - 1 < bEnd) {
+                              found = {
+                                nodeIndex: j,
+                                charIdx: startInAcc - blockStart,
+                                patch,
+                                endNodeIndex: i,
+                                endCharLen: endInAcc - endRun,
+                              }
+                              break
+                            }
+                            endRun = bEnd + (k < i ? 2 : 0)
+                          }
+                          break
+                        }
+                        run = blockEnd + (j < i ? 2 : 0)
+                      }
+                      break
+                    }
+                  }
+                }
+                if (found) patchTargets.push(found)
               }
               // Sort by nodeIndex descending so we insert from bottom to top
               patchTargets.sort((a, b) => b.nodeIndex - a.nodeIndex)
@@ -526,21 +611,39 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                 const node = previewJSON.content[target.nodeIndex]
                 const oldSnippet = (target.patch.oldText || '').replace(/\r\n/g, '\n')
                 const newSnippet = (target.patch.newText || '').replace(/\r\n/g, '\n')
+                const firstNodeText = getNodeText(node)
+                const isCrossBlock = target.endNodeIndex != null && target.endNodeIndex > target.nodeIndex
 
-                // Add red highlight to matched text
-                if (node.content && Array.isArray(node.content)) {
+                if (isCrossBlock && target.endNodeIndex != null && target.endCharLen != null) {
+                  const lenInFirst = firstNodeText.length - target.charIdx
+                  if (node.content && Array.isArray(node.content)) {
+                    node.content = spliceHighlight(node.content, target.charIdx, lenInFirst, redMark)
+                  }
+                  for (let ni = target.nodeIndex + 1; ni < target.endNodeIndex!; ni++) {
+                    const midNode = previewJSON.content[ni]
+                    const midText = getNodeText(midNode)
+                    if (midNode.content && Array.isArray(midNode.content)) {
+                      midNode.content = spliceHighlight(midNode.content, 0, midText.length, redMark)
+                    }
+                  }
+                  const lastNode = previewJSON.content[target.endNodeIndex!]
+                  if (lastNode.content && Array.isArray(lastNode.content) && target.endCharLen! > 0) {
+                    lastNode.content = spliceHighlight(lastNode.content, 0, target.endCharLen!, redMark)
+                  }
+                } else if (node.content && Array.isArray(node.content)) {
                   node.content = spliceHighlight(node.content, target.charIdx, oldSnippet.length, redMark)
                 }
-                // Insert green paragraphs right after this node
+
                 if (newSnippet.length > 0) {
-                  const greenParas = newSnippet.split('\n').map((line: string) => {
-                    if (!line) return { type: 'paragraph' }
-                    return {
-                      type: 'paragraph',
-                      content: [{ type: 'text', text: line, marks: [greenMark] }],
-                    }
+                  const greenParas = newSnippet.split(/\n\n+/).map((para: string) => {
+                    const line = para.replace(/\n/g, ' ')
+                    return line
+                      ? { type: 'paragraph', content: [{ type: 'text', text: line, marks: [greenMark] }] }
+                      : { type: 'paragraph' }
                   })
-                  previewJSON.content.splice(target.nodeIndex + 1, 0, ...greenParas)
+                  if (greenParas.length > 0) {
+                    previewJSON.content.splice(target.nodeIndex + 1, 0, ...greenParas)
+                  }
                 }
                 anyFound = true
                 console.info('[AgentFlow] patch_preview_applied', {
@@ -548,6 +651,7 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
                   nodeIndex: target.nodeIndex,
                   charIdx: target.charIdx,
                   oldLen: oldSnippet.length,
+                  crossBlock: isCrossBlock,
                 })
               }
             }
@@ -663,6 +767,18 @@ const DocumentEditor = forwardRef<DocumentEditorSearchHandle, DocumentEditorProp
             }
           }))
           return
+        }
+
+        try {
+          const syncedContent = JSON.stringify(editor.getJSON())
+          window.dispatchEvent(new CustomEvent('lemona:document-content-updated', {
+            detail: {
+              documentId: document.id,
+              content: syncedContent,
+            }
+          }))
+        } catch (syncError) {
+          console.warn('[DocumentEditor] Failed to sync document content after patch apply:', syncError)
         }
 
         window.dispatchEvent(new CustomEvent('lemona:agent-patch-applied', {

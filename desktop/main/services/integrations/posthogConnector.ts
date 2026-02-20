@@ -33,6 +33,23 @@ interface PosthogInsight {
   query?: Record<string, unknown>
 }
 
+const POSTHOG_HOST_ALIASES: Record<string, string> = {
+  'us cloud': 'https://us.posthog.com',
+  'eu cloud': 'https://eu.posthog.com',
+  'us.posthog.com': 'https://us.posthog.com',
+  'eu.posthog.com': 'https://eu.posthog.com',
+}
+
+function normalizePosthogHost(raw: string): string {
+  const trimmed = raw.trim().replace(/\/$/, '')
+  const lower = trimmed.toLowerCase()
+  const alias = POSTHOG_HOST_ALIASES[lower]
+  if (alias) return alias
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed
+  if (trimmed.length > 0) return `https://${trimmed}`
+  return DEFAULT_POSTHOG_HOST
+}
+
 function requirePosthogConfig(source: IntegrationSource): { apiKey: string; host: string; projectId: string } {
   const cfg = source.config as { apiKey?: unknown; host?: unknown; projectId?: unknown }
   const apiKey = typeof cfg.apiKey === 'string' ? cfg.apiKey.trim() : ''
@@ -43,9 +60,10 @@ function requirePosthogConfig(source: IntegrationSource): { apiKey: string; host
   if (!projectId) {
     throw new Error('PostHog project ID is required. Reconnect PostHog and try again.')
   }
-  const host = typeof cfg.host === 'string' && cfg.host.trim().length > 0
-    ? cfg.host.trim().replace(/\/$/, '')
-    : DEFAULT_POSTHOG_HOST
+  const host =
+    typeof cfg.host === 'string' && cfg.host.trim().length > 0
+      ? normalizePosthogHost(cfg.host)
+      : DEFAULT_POSTHOG_HOST
   return { apiKey, host, projectId }
 }
 

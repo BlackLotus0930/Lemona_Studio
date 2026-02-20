@@ -520,7 +520,7 @@ export default function IntegrationsPanel({ projectId }: IntegrationsPanelProps)
                     setupSteps={[
                       'Go to GitHub → Settings → Developer settings → OAuth Apps → New OAuth App.',
                       'Application name: any name (e.g. Lemona). Homepage URL: use https://github.com or https://localhost — any valid URL works.',
-                      'Authorization callback URL: http://127.0.0.1/oauth/callback (Lemona uses a dynamic port; if Connect fails, check the error for the exact URL).',
+                      'Authorization callback URL: https://127.0.0.1:38473/oauth/callback',
                       'If you see Webhook URL, you\'re on GitHub Apps — use OAuth Apps instead. Copy Client ID and Client Secret, paste below, then Save.',
                       'Click Connect to authorize. Select repos and click Save and Index.',
                     ]}

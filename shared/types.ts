@@ -60,6 +60,35 @@ export interface ChatAttachment {
   mimeType?: string; // for images: image/png, image/jpeg, etc.
 }
 
+export interface AgentPlanStep {
+  action: 'search' | 'read' | 'browse';
+  query?: string;
+  chunkId?: string;
+  sourceTypes?: Array<'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks' | 'hubspot' | 'linear' | 'stripe' | 'sentry' | 'posthog' | 'metabase' | 'db-schema'>;
+  rationale?: string;
+}
+
+export interface AgentProgressEvent {
+  type:
+    | 'agent_step_started'
+    | 'agent_step_finished'
+    | 'agent_step_failed'
+    | 'agent_note'
+    | 'agent_metrics'
+    | 'agent_patch_started'
+    | 'agent_patch_chunk'
+    | 'agent_patch_finished'
+    | 'agent_patch_error';
+  stepId: string;
+  action: 'classify' | 'plan' | 'search' | 'read' | 'browse' | 'orchestrate' | 'patch';
+  status?: 'started' | 'finished' | 'failed' | 'note';
+  label?: string;
+  summary?: string;
+  durationMs?: number;
+  timestamp: string;
+  meta?: Record<string, unknown>;
+}
+
 export interface AIChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -67,13 +96,54 @@ export interface AIChatMessage {
   timestamp: string;
   attachments?: ChatAttachment[]; // Optional attachments (images or PDFs)
   choices?: Array<{id: string; label: string; text: string}>; // Multiple choice options (A, B, C, etc.)
+  editedByUser?: boolean; // Whether assistant output was manually edited by user
+  originalContent?: string; // Snapshot of assistant content before first manual edit
+  editedAt?: string; // ISO timestamp of latest manual edit
   reasoningMetadata?: {
+    complexityLevel?: 'simple' | 'complex';
     actions?: {
       [action: string]: {
         fileCount: number; // Number of files accessed by this action
         fileIds?: string[]; // File IDs accessed by this action
       };
     };
+    reasoningChain?: {
+      steps: Array<{
+        step: number;
+        action: 'search' | 'read' | 'browse';
+        query?: string;
+        relevanceScore?: number;
+        informationGap?: string;
+        budgetRemaining?: number;
+        chunkRefs: Array<{
+          chunkId: string;
+          fileId: string;
+          score: number;
+        }>;
+      }>;
+      stoppedReason?: 'budget_exhausted' | 'sufficient_context' | 'no_more_info';
+      totalStepsUsed?: number;
+    };
+    plan?: AgentPlanStep[];
+    dataSources?: Array<{
+      chunkId: string;
+      fileId: string;
+      excerpt: string;
+      sourceType?: string;
+      sourceId?: string;
+      sourceName?: string;
+    }>;
+    agentActions?: Array<{
+      actionId?: string;
+      type: 'create_file' | 'edit_file' | 'edit_block';
+      fileName?: string;
+      targetDocumentId?: string;
+      targetBlockId?: string;
+      content?: string;
+      oldContent?: string;
+      newContent?: string;
+    }>;
+    agentActionStatuses?: Record<string, 'accepted' | 'rejected'>;
   };
 }
 

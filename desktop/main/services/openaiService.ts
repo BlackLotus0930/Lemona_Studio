@@ -1,11 +1,13 @@
 // Desktop OpenAI Service - Uses OpenAI API
 import OpenAI from 'openai'
-import { AIChatMessage, AutocompleteSuggestion, ChatAttachment } from '../../../shared/types.js'
+import { AIChatMessage, AutocompleteSuggestion, ChatAttachment, AgentProgressEvent } from '../../../shared/types.js'
 import { projectService } from './projectService.js'
 import { documentService } from './documentService.js'
 import { createRequire } from 'module'
 import { pathToFileURL } from 'url'
 import { searchLibraryWithMentions } from './semanticSearchService.js'
+import { parseIntegrationFileId } from './integrationTypes.js'
+import { integrationStore } from './integrationStore.js'
 
 // Import pdfjs-dist for PDF text extraction
 const require = createRequire(import.meta.url)
@@ -237,7 +239,7 @@ async function getReadmeContent(projectId: string): Promise<string | null> {
   }
 }
 
-async function buildContext(documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], style?: string, cursorPosition?: number, apiKey?: string, userMessage?: string, geminiApiKey?: string): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: { actions?: { [key: string]: { fileCount: number; fileIds?: string[] } } } }> {
+async function buildContext(documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], style?: string, cursorPosition?: number, apiKey?: string, userMessage?: string, geminiApiKey?: string, onProgress?: (event: AgentProgressEvent) => void): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: AIChatMessage['reasoningMetadata'] }> {
   const isAgentMode = userMessage?.includes('You are in AGENT MODE') ?? false
 
   let systemInstruction: string
@@ -381,7 +383,7 @@ Use rich markdown formatting to make information visually clear:
   }
 
   // 4️⃣ Add search results using reasoning service (system-controlled retrieval)
-  let reasoningMetadata: { actions?: { [key: string]: { fileCount: number; fileIds?: string[] } } } | undefined = undefined
+  let reasoningMetadata: AIChatMessage['reasoningMetadata'] | undefined = undefined
   
   if (userMessage && (geminiApiKey || apiKey)) {
     try {
@@ -391,16 +393,18 @@ Use rich markdown formatting to make information visually clear:
       } else {
         // Use reasoning service for intelligent retrieval
         // System controls the flow, AI evaluates relevance
-        const { reason } = await import('./aiReasoningService.js')
-        const reasoningResult = await reason(
+        const { orchestrateRetrieval } = await import('./aiReasoningService.js')
+        const reasoningResult = await orchestrateRetrieval(
           userMessage,
           projectId,
           geminiApiKey, // Prefer Gemini
           apiKey, // Fallback to OpenAI
-          10 // max steps
+          10, // max steps
+          undefined,
+          { onProgress }
         )
 
-        // Collect metadata: actions and file counts
+        // Collect metadata: actions, reasoning chain, and data sources
         const actions: { [key: string]: { fileCount: number; fileIds?: string[] } } = {}
         const searchedFiles = new Set<string>()
         
@@ -422,9 +426,65 @@ Use rich markdown formatting to make information visually clear:
         if (reasoningResult.libraryRequestedNoResults) {
           actions['Library search'] = { fileCount: 0 }
         }
-        
-        if (Object.keys(actions).length > 0) {
-          reasoningMetadata = { actions }
+
+        const serializedSteps = reasoningResult.steps.map((step) => ({
+          step: step.step,
+          action: step.action,
+          query: step.query,
+          relevanceScore: step.relevanceScore,
+          informationGap: step.informationGap,
+          budgetRemaining: step.budgetRemaining,
+          chunkRefs: (step.results || []).map((result) => ({
+            chunkId: result.chunk.id,
+            fileId: result.chunk.fileId,
+            score: result.score,
+          })),
+        }))
+
+        const sourceByChunkId = new Map<
+          string,
+          {
+            chunkId: string
+            fileId: string
+            excerpt: string
+            sourceType?: string
+            sourceId?: string
+            sourceName?: string
+          }
+        >()
+        for (const result of reasoningResult.finalResults) {
+          if (!sourceByChunkId.has(result.chunk.id)) {
+            const parsedIntegration = parseIntegrationFileId(result.chunk.fileId)
+            let sourceName: string | undefined
+            if (parsedIntegration && projectId) {
+              try {
+                const source = await integrationStore.getSourceById(projectId, parsedIntegration.sourceId)
+                sourceName = source?.displayName
+              } catch {
+                // Ignore lookup errors and keep fallback metadata.
+              }
+            }
+            sourceByChunkId.set(result.chunk.id, {
+              chunkId: result.chunk.id,
+              fileId: result.chunk.fileId,
+              excerpt: result.chunk.text.slice(0, 200),
+              sourceType: parsedIntegration?.sourceType,
+              sourceId: parsedIntegration?.sourceId,
+              sourceName,
+            })
+          }
+        }
+
+        reasoningMetadata = {
+          complexityLevel: reasoningResult.complexityLevel,
+          actions: Object.keys(actions).length > 0 ? actions : undefined,
+          reasoningChain: {
+            steps: serializedSteps,
+            stoppedReason: reasoningResult.stoppedReason,
+            totalStepsUsed: reasoningResult.totalStepsUsed,
+          },
+          plan: reasoningResult.plan,
+          dataSources: Array.from(sourceByChunkId.values()),
         }
 
         if (reasoningResult.libraryRequestedNoResults) {
@@ -730,11 +790,12 @@ export const openaiService = {
     attachments?: ChatAttachment[],
     style?: string,
     geminiApiKey?: string,
-    baseUrl?: string
+    baseUrl?: string,
+    onProgress?: (event: AgentProgressEvent) => void
   ): AsyncGenerator<string> {
     const client = getClient(apiKey, baseUrl)
     const model = getModelName(modelName || 'gpt-4.1-nano', attachments && attachments.length > 0)
-    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey)
+    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey, onProgress)
     
     // Send metadata first (if available) as a special chunk
     if (reasoningMetadata) {

@@ -1,6 +1,7 @@
 import { shell } from 'electron'
-import http from 'http'
+import https from 'https'
 import crypto from 'crypto'
+import selfsigned from 'selfsigned'
 import { oauthConfigStore } from './oauthConfigStore.js'
 
 type OAuthSourceType = 'github' | 'gitlab' | 'slack' | 'notion' | 'quickbooks'
@@ -20,6 +21,8 @@ interface OAuthStartResult {
 
 interface GithubTokenResponse {
   access_token?: string
+  refresh_token?: string
+  expires_in?: number
   error?: string
   error_description?: string
 }
@@ -47,6 +50,11 @@ interface OAuthConfigStatus {
 }
 
 const OAUTH_TIMEOUT_MS = 2 * 60 * 1000
+/** Fixed port for OAuth callback so redirect_uri matches provider config (e.g. Slack requires exact match) */
+const OAUTH_CALLBACK_PORT = 38473
+const OAUTH_CALLBACK_HOST = '127.0.0.1'
+const OAUTH_CALLBACK_SCHEME = 'https'
+const OAUTH_CALLBACK_REDIRECT_PATH = '/oauth/callback'
 const GITHUB_OAUTH_HOST = 'https://github.com'
 const GITHUB_API_HOST = 'https://api.github.com'
 const GITLAB_OAUTH_HOST = 'https://gitlab.com'
@@ -55,6 +63,27 @@ const SLACK_OAUTH_HOST = 'https://slack.com'
 const NOTION_OAUTH_HOST = 'https://api.notion.com'
 const INTUIT_OAUTH_HOST = 'https://appcenter.intuit.com/connect/oauth2'
 const INTUIT_TOKEN_HOST = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer'
+
+async function createLocalHttpsCertificate(): Promise<{ key: string; cert: string }> {
+  const cert = await selfsigned.generate(
+    [{ name: 'commonName', value: OAUTH_CALLBACK_HOST }],
+    {
+      algorithm: 'sha256',
+      keySize: 2048,
+      notAfterDate: new Date(Date.now() + 3650 * 24 * 60 * 60 * 1000),
+      extensions: [
+        {
+          name: 'subjectAltName',
+          altNames: [
+            { type: 2, value: 'localhost' },
+            { type: 7, ip: '127.0.0.1' },
+          ],
+        },
+      ],
+    }
+  )
+  return { key: cert.private, cert: cert.cert }
+}
 
 async function getGithubClientConfig(): Promise<{ clientId: string; clientSecret: string }> {
   const saved = await oauthConfigStore.getGithubConfig()
@@ -168,64 +197,73 @@ function createCallbackServer(expectedState: string, successTitle = 'Connected')
       callbackReject = rejectPromise
     })
 
-    const server = http.createServer((req, res) => {
-      try {
-        const url = new URL(req.url || '/', 'http://127.0.0.1')
-        if (url.pathname !== '/oauth/callback') {
-          res.statusCode = 404
-          res.end('Not found')
-          return
+    createLocalHttpsCertificate().then(tls => {
+      const server = https.createServer({ key: tls.key, cert: tls.cert }, (req, res) => {
+        try {
+          const url = new URL(req.url || '/', `${OAUTH_CALLBACK_SCHEME}://${OAUTH_CALLBACK_HOST}`)
+          if (url.pathname !== OAUTH_CALLBACK_REDIRECT_PATH) {
+            res.statusCode = 404
+            res.end('Not found')
+            return
+          }
+
+          const code = url.searchParams.get('code') || ''
+          const state = url.searchParams.get('state') || ''
+          if (!code) {
+            res.statusCode = 400
+            res.end('Missing code')
+            callbackReject?.(new Error('Missing OAuth code'))
+            return
+          }
+
+          if (state !== expectedState) {
+            res.statusCode = 400
+            res.end('Invalid state')
+            callbackReject?.(new Error('OAuth state mismatch'))
+            return
+          }
+
+          res.statusCode = 200
+          res.setHeader('Content-Type', 'text/html; charset=utf-8')
+          res.end(`<html><body><h3>${successTitle}. You can close this window.</h3></body></html>`)
+          const realmId = url.searchParams.get('realmId') || undefined
+          callbackResolve?.({ code, state, realmId })
+        } catch (error) {
+          res.statusCode = 500
+          res.end('OAuth callback parse error')
+          callbackReject?.(error)
         }
-
-        const code = url.searchParams.get('code') || ''
-        const state = url.searchParams.get('state') || ''
-        if (!code) {
-          res.statusCode = 400
-          res.end('Missing code')
-          callbackReject?.(new Error('Missing OAuth code'))
-          return
-        }
-
-        if (state !== expectedState) {
-          res.statusCode = 400
-          res.end('Invalid state')
-          callbackReject?.(new Error('OAuth state mismatch'))
-          return
-        }
-
-        res.statusCode = 200
-        res.setHeader('Content-Type', 'text/html; charset=utf-8')
-        res.end(`<html><body><h3>${successTitle}. You can close this window.</h3></body></html>`)
-        const realmId = url.searchParams.get('realmId') || undefined
-        callbackResolve?.({ code, state, realmId })
-      } catch (error) {
-        res.statusCode = 500
-        res.end('OAuth callback parse error')
-        callbackReject?.(error)
-      }
-    })
-
-    server.on('error', error => reject(error))
-
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address()
-      if (!address || typeof address === 'string') {
-        reject(new Error('Failed to start OAuth callback server'))
-        return
-      }
-      const redirectUri = `http://127.0.0.1:${address.port}/oauth/callback`
-      resolve({
-        waitForCallback,
-        close: async () => {
-          await new Promise<void>((closeResolve) => server.close(() => closeResolve()))
-        },
-        redirectUri,
       })
-    })
+
+      server.on('error', error => {
+        const err = error as NodeJS.ErrnoException
+        if (err?.code === 'EADDRINUSE') {
+          reject(new Error(`OAuth callback port ${OAUTH_CALLBACK_PORT} is in use. Close other apps using that port and try again.`))
+        } else {
+          reject(error)
+        }
+      })
+
+      server.listen(OAUTH_CALLBACK_PORT, OAUTH_CALLBACK_HOST, () => {
+        const address = server.address()
+        if (!address || typeof address === 'string') {
+          reject(new Error('Failed to start OAuth callback server'))
+          return
+        }
+        const redirectUri = `${OAUTH_CALLBACK_SCHEME}://${OAUTH_CALLBACK_HOST}:${address.port}${OAUTH_CALLBACK_REDIRECT_PATH}`
+        resolve({
+          waitForCallback,
+          close: async () => {
+            await new Promise<void>((closeResolve) => server.close(() => closeResolve()))
+          },
+          redirectUri,
+        })
+      })
+    }).catch(error => reject(error))
   })
 }
 
-async function exchangeGithubCodeForToken(code: string, redirectUri: string): Promise<string> {
+async function exchangeGithubCodeForToken(code: string, redirectUri: string): Promise<OAuthStartResult> {
   const { clientId, clientSecret } = await getGithubClientConfig()
   const response = await fetch(`${GITHUB_OAUTH_HOST}/login/oauth/access_token`, {
     method: 'POST',
@@ -248,7 +286,11 @@ async function exchangeGithubCodeForToken(code: string, redirectUri: string): Pr
   if (!payload.access_token) {
     throw new Error(payload.error_description || payload.error || 'No access_token returned from GitHub')
   }
-  return payload.access_token
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    expiresIn: payload.expires_in,
+  }
 }
 
 async function fetchGithubLogin(accessToken: string): Promise<string | undefined> {
@@ -294,6 +336,8 @@ async function buildGithubAuthUrl(redirectUri: string, state: string): Promise<s
 
 interface GitlabTokenResponse {
   access_token?: string
+  refresh_token?: string
+  expires_in?: number
   error?: string
   error_description?: string
 }
@@ -302,7 +346,7 @@ interface GitlabUserResponse {
   username?: string
 }
 
-async function exchangeGitlabCodeForToken(code: string, redirectUri: string): Promise<string> {
+async function exchangeGitlabCodeForToken(code: string, redirectUri: string): Promise<OAuthStartResult> {
   const { clientId, clientSecret } = await getGitlabClientConfig()
   const response = await fetch(`${GITLAB_OAUTH_HOST}/oauth/token`, {
     method: 'POST',
@@ -326,7 +370,11 @@ async function exchangeGitlabCodeForToken(code: string, redirectUri: string): Pr
   if (!payload.access_token) {
     throw new Error(payload.error_description || payload.error || 'No access_token returned from GitLab')
   }
-  return payload.access_token
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    expiresIn: payload.expires_in,
+  }
 }
 
 async function fetchGitlabLogin(accessToken: string): Promise<string | undefined> {
@@ -350,7 +398,7 @@ async function buildGitlabAuthUrl(redirectUri: string, state: string): Promise<s
     redirect_uri: redirectUri,
     response_type: 'code',
     state,
-    scope: 'read_api read_repository read_user',
+    scope: 'read_api read_repository read_user offline_access',
   })
   return `${GITLAB_OAUTH_HOST}/oauth/authorize?${params.toString()}`
 }
@@ -373,6 +421,8 @@ async function getSlackClientConfig(): Promise<{ clientId: string; clientSecret:
 interface SlackTokenResponse {
   ok?: boolean
   access_token?: string
+  refresh_token?: string
+  expires_in?: number
   error?: string
   team?: { id?: string; name?: string }
   authed_user?: { id?: string }
@@ -403,6 +453,8 @@ async function exchangeSlackCodeForToken(code: string, redirectUri: string): Pro
   }
   return {
     accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    expiresIn: payload.expires_in,
     login: payload.authed_user?.id,
     teamName: payload.team?.name,
     teamId: payload.team?.id,
@@ -597,6 +649,98 @@ export async function refreshQuickBooksToken(refreshToken: string): Promise<{ ac
   }
 }
 
+export async function refreshGithubToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+  const { clientId, clientSecret } = await getGithubClientConfig()
+  const response = await fetch(`${GITHUB_OAUTH_HOST}/login/oauth/access_token`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'Lemona-Desktop',
+    },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    }).toString(),
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`GitHub token refresh failed (${response.status}): ${text}`)
+  }
+  const payload = (await response.json()) as GithubTokenResponse
+  if (!payload.access_token || !payload.refresh_token) {
+    throw new Error(payload.error_description || payload.error || 'Invalid response from GitHub token refresh')
+  }
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    expiresIn: payload.expires_in ?? 28800,
+  }
+}
+
+export async function refreshGitlabToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+  const { clientId, clientSecret } = await getGitlabClientConfig()
+  const response = await fetch(`${GITLAB_OAUTH_HOST}/oauth/token`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'Lemona-Desktop',
+    },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    }).toString(),
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`GitLab token refresh failed (${response.status}): ${text}`)
+  }
+  const payload = (await response.json()) as GitlabTokenResponse
+  if (!payload.access_token || !payload.refresh_token) {
+    throw new Error(payload.error_description || payload.error || 'Invalid response from GitLab token refresh')
+  }
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    expiresIn: payload.expires_in ?? 7200,
+  }
+}
+
+export async function refreshSlackToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+  const { clientId, clientSecret } = await getSlackClientConfig()
+  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
+  const response = await fetch(`${SLACK_OAUTH_HOST}/api/oauth.v2.access`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${basicAuth}`,
+      'User-Agent': 'Lemona-Desktop',
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    }).toString(),
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`Slack token refresh failed (${response.status}): ${text}`)
+  }
+  const payload = (await response.json()) as SlackTokenResponse
+  if (!payload.ok || !payload.access_token || !payload.refresh_token) {
+    throw new Error(payload.error || 'Invalid response from Slack token refresh')
+  }
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    expiresIn: payload.expires_in ?? 43200,
+  }
+}
+
 async function buildQuickBooksAuthUrl(redirectUri: string, state: string): Promise<string> {
   const { clientId } = await getQuickBooksClientConfig()
   const params = new URLSearchParams({
@@ -611,14 +755,14 @@ async function buildQuickBooksAuthUrl(redirectUri: string, state: string): Promi
 
 async function exchangeCodeForToken(sourceType: OAuthSourceType, code: string, redirectUri: string, realmId?: string): Promise<OAuthStartResult> {
   if (sourceType === 'github') {
-    const accessToken = await exchangeGithubCodeForToken(code, redirectUri)
-    const login = await fetchGithubLogin(accessToken)
-    return { accessToken, login }
+    const token = await exchangeGithubCodeForToken(code, redirectUri)
+    const login = await fetchGithubLogin(token.accessToken)
+    return { ...token, login }
   }
   if (sourceType === 'gitlab') {
-    const accessToken = await exchangeGitlabCodeForToken(code, redirectUri)
-    const login = await fetchGitlabLogin(accessToken)
-    return { accessToken, login }
+    const token = await exchangeGitlabCodeForToken(code, redirectUri)
+    const login = await fetchGitlabLogin(token.accessToken)
+    return { ...token, login }
   }
   if (sourceType === 'slack') {
     return exchangeSlackCodeForToken(code, redirectUri)
