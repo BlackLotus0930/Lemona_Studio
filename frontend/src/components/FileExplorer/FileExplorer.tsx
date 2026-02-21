@@ -22,15 +22,15 @@ interface FileExplorerProps {
   customFolders?: Array<{ id: string; name: string; parentId?: string | null; order?: number }>
   projectFileFolderMap?: Record<string, string | null>
   onProjectFileFolderChange?: (documentId: string, folderId: string | null) => void
-  rootFolderOrder?: Array<'worldlab' | 'library' | 'project'>
-  onReorderRootFolders?: (sourceId: 'worldlab' | 'library' | 'project', targetId: 'worldlab' | 'library' | 'project', position: 'above' | 'below') => void
-  rootFolderMeta?: Record<'worldlab' | 'library' | 'project', { id: 'worldlab' | 'library' | 'project'; name: string; hidden?: boolean }>
-  onRootFolderRename?: (folderId: 'worldlab' | 'library' | 'project', newName: string) => void
-  onRootFolderDelete?: (folderId: 'worldlab' | 'library' | 'project') => void
+  rootFolderOrder?: Array<'library' | 'project'>
+  onReorderRootFolders?: (sourceId: 'library' | 'project', targetId: 'library' | 'project', position: 'above' | 'below') => void
+  rootFolderMeta?: Record<'library' | 'project', { id: 'library' | 'project'; name: string; hidden?: boolean }>
+  onRootFolderRename?: (folderId: 'library' | 'project', newName: string) => void
+  onRootFolderDelete?: (folderId: 'library' | 'project') => void
   onFolderRename?: (folderId: string, newName: string) => void
   onFolderDelete?: (folderId: string) => void
   projectName?: string // Project name for the ProjectName folder
-  onSelectedFolderChange?: (folderId: 'library' | 'project' | 'worldlab' | null) => void // Callback when folder selection changes
+  onSelectedFolderChange?: (folderId: 'library' | 'project' | null) => void // Callback when folder selection changes
   onSelectedProjectFolderChange?: (folderId: string | null) => void
   newlyCreatedFolderId?: string | null
   onNewlyCreatedFolderHandled?: () => void
@@ -42,7 +42,7 @@ interface FileExplorerProps {
   searchQueryProp?: string // External search query to sync with local state
   onDocumentsUpdated?: () => void // Callback when documents are updated (e.g., after replace all)
   onDocumentChange?: (doc: Document | null) => void // Callback to update current document in editor
-  onDocumentFolderChange?: (documentId: string, folder: 'library' | 'project' | 'worldlab') => void // Callback for optimistic folder updates
+  onDocumentFolderChange?: (documentId: string, folder: 'library' | 'project' | 'worldlab') => void // Callback for optimistic folder updates (worldlab for legacy docs, displayed as project)
   currentProjectId?: string | null
 }
 
@@ -64,10 +64,9 @@ function FileExplorer({
   customFolders = [],
   projectFileFolderMap = {},
   onProjectFileFolderChange,
-  rootFolderOrder = ['worldlab', 'library', 'project'],
+  rootFolderOrder = ['library', 'project'],
   onReorderRootFolders,
   rootFolderMeta = {
-    worldlab: { id: 'worldlab', name: 'worldlab', hidden: false },
     library: { id: 'library', name: 'library', hidden: false },
     project: { id: 'project', name: 'workspace', hidden: false },
   },
@@ -94,7 +93,7 @@ function FileExplorer({
   const { theme } = useTheme()
   
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [_selectedFolderId, setSelectedFolderId] = useState<'library' | 'project' | 'worldlab' | null>(null)
+  const [_selectedFolderId, setSelectedFolderId] = useState<'library' | 'project' | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number; item: FileItem } | null>(null)
@@ -107,10 +106,10 @@ function FileExplorer({
   const [folderDropTargetId, setFolderDropTargetId] = useState<string | null>(null)
   const [folderDropPosition, setFolderDropPosition] = useState<'above' | 'below' | null>(null)
   const [isExplorerHovered, setIsExplorerHovered] = useState(false)
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['worldlab', 'library', 'project'])) // Default all folders expanded
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['library', 'project'])) // Default all folders expanded
   
   // Upload queue state - use ref to avoid re-renders and manage queue properly
-  const uploadQueueRef = useRef<Array<{ file: File; folderId: 'library' | 'project' | 'worldlab' }>>([])
+  const uploadQueueRef = useRef<Array<{ file: File; folderId: 'library' | 'project' }>>([])
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; currentFile: string } | null>(null)
   const [uploadQueueTrigger, setUploadQueueTrigger] = useState(0) // Trigger to re-run useEffect when queue changes
   const processingRef = useRef(false)
@@ -555,10 +554,9 @@ function FileExplorer({
   const dropdownTextColor = theme === 'dark' ? '#b8b8bd' : '#505356' // Commit-name style: softer than #D6D6DD / #202124
   const dropdownHoverBg = theme === 'dark' ? '#3e3e42' : '#f8f9fa'
 
-  // Build folder structure: Library and ProjectName folders
-  const worldlabDocs = documents.filter(doc => doc.folder === 'worldlab')
+  // Build folder structure: Library and Project (project includes former worldlab docs)
   const libraryDocs = documents.filter(doc => doc.folder === 'library')
-  const projectDocs = documents.filter(doc => (!doc.folder || doc.folder === 'project'))
+  const projectDocs = documents.filter(doc => !doc.folder || doc.folder === 'project' || doc.folder === 'worldlab')
   
   // Sort documents by order if available, otherwise by creation time
   const sortDocuments = (docs: Document[]) => {
@@ -569,13 +567,6 @@ function FileExplorer({
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
     })
   }
-
-  const worldlabFiles: FileItem[] = sortDocuments(worldlabDocs).map(doc => ({
-    id: doc.id,
-    name: doc.title,
-    type: 'file' as const,
-    document: doc,
-  }))
 
   const libraryFiles: FileItem[] = sortDocuments(libraryDocs).map(doc => ({
     id: doc.id,
@@ -619,11 +610,11 @@ function FileExplorer({
       }))
   }
 
-  const resolveRootFolderId = (folderId: string): 'library' | 'worldlab' | 'project' => {
+  const resolveRootFolderId = (folderId: string): 'library' | 'project' => {
     let currentId: string | null = folderId
     const visited = new Set<string>()
     while (currentId) {
-      if (currentId === 'library' || currentId === 'worldlab' || currentId === 'project') {
+      if (currentId === 'library' || currentId === 'project') {
         return currentId
       }
       if (visited.has(currentId)) break
@@ -650,7 +641,6 @@ function FileExplorer({
   }
 
   const rootFolderNodesMap = {
-    worldlab: buildFolderNode('worldlab', rootFolderMeta.worldlab?.name || 'worldlab', worldlabFiles, 'worldlab'),
     library: buildFolderNode('library', rootFolderMeta.library?.name || 'library', libraryFiles, 'library'),
     project: buildFolderNode('project', rootFolderMeta.project?.name || 'workspace', rootProjectFiles, 'project'),
   }
@@ -680,11 +670,9 @@ function FileExplorer({
       // Select folder when clicking on folder name
       const folderId = item.id === 'library'
         ? 'library'
-        : item.id === 'worldlab'
-          ? 'worldlab'
-          : item.id === 'project'
-            ? 'project'
-            : resolveRootFolderId(item.id)
+        : item.id === 'project'
+          ? 'project'
+          : resolveRootFolderId(item.id)
       toggleFolder(item.id)
       setSelectedFolderId(folderId)
       setSelectedId(item.id) // Also set selectedId for visual feedback
@@ -736,9 +724,9 @@ function FileExplorer({
       if (item.type === 'file' && item.document && onDocumentRename) {
         onDocumentRename(item.document.id, trimmed)
       } else if (item.type === 'folder' &&
-        (item.id === 'library' || item.id === 'worldlab' || item.id === 'project') &&
+        (item.id === 'library' || item.id === 'project') &&
         onRootFolderRename) {
-        onRootFolderRename(item.id as 'worldlab' | 'library' | 'project', trimmed)
+        onRootFolderRename(item.id as 'library' | 'project', trimmed)
       }
       setRenamingId(null)
       setRenameValue('')
@@ -828,7 +816,7 @@ function FileExplorer({
             const document = await documentApi.uploadFile(
               finalFilePath,
               file.name,
-              folderId as 'library' | 'project' | 'worldlab',
+              folderId as 'library' | 'project',
               uploadProjectId
             )
             const isPdf = file.name.toLowerCase().endsWith('.pdf')
@@ -893,7 +881,7 @@ function FileExplorer({
   }, [uploadQueueTrigger, onFileUploaded, currentProjectId, documents, currentDocumentId])
 
   // Handle file drop on folder
-  const handleFolderDrop = async (e: React.DragEvent, folderId: 'library' | 'project' | 'worldlab') => {
+  const handleFolderDrop = async (e: React.DragEvent, folderId: 'library' | 'project') => {
     e.preventDefault()
     e.stopPropagation()
     setDragOverFileItemId(null)
@@ -918,7 +906,7 @@ function FileExplorer({
     supportedFiles.forEach(file => {
       // CRITICAL: PDF files always go to library folder, regardless of drop target
       const isPDF = file.name.toLowerCase().endsWith('.pdf')
-      const targetFolderId: 'library' | 'project' | 'worldlab' = isPDF ? 'library' : folderId
+      const targetFolderId: 'library' | 'project' = isPDF ? 'library' : folderId
       uploadQueueRef.current.push({ file, folderId: targetFolderId })
     })
     
@@ -962,7 +950,7 @@ function FileExplorer({
     const isFolder = item.type === 'folder'
     const isExpanded = isFolder && expandedFolders.has(item.id)
     const isCustomFolder = isFolder && item.id.startsWith('folder-')
-    const isRootFolder = item.id === 'library' || item.id === 'worldlab' || item.id === 'project'
+    const isRootFolder = item.id === 'library' || item.id === 'project'
     const indentBase = 10
     const indentStep = 10
     const fileExtraIndent = 10
@@ -1144,8 +1132,8 @@ function FileExplorer({
             if ((isCustomFolder || isRootFolder) && draggedFolderId && draggedFolderId !== item.id) {
               e.preventDefault()
               e.stopPropagation()
-              if (onReorderRootFolders && (draggedFolderId === 'worldlab' || draggedFolderId === 'library' || draggedFolderId === 'project') &&
-                (item.id === 'worldlab' || item.id === 'library' || item.id === 'project')) {
+              if (onReorderRootFolders && (draggedFolderId === 'library' || draggedFolderId === 'project') &&
+                (item.id === 'library' || item.id === 'project')) {
                 onReorderRootFolders(
                   draggedFolderId,
                   item.id,
@@ -1158,7 +1146,7 @@ function FileExplorer({
                   folderDropPosition || 'below'
                 )
               } else if (onReorderProjectFolders && draggedFolderId.startsWith('folder-') &&
-                (item.id === 'worldlab' || item.id === 'library' || item.id === 'project')) {
+                (item.id === 'library' || item.id === 'project')) {
                 onReorderProjectFolders(
                   draggedFolderId,
                   item.id,
@@ -1172,7 +1160,7 @@ function FileExplorer({
             }
             if (isFolder) {
               // Handle drop on folder
-              const folderId = item.id === 'library' ? 'library' : item.id === 'worldlab' ? 'worldlab' : 'project'
+              const folderId = item.id === 'library' ? 'library' : 'project'
               
               // Check if dropping external files
               if (e.dataTransfer.types.includes('Files')) {
@@ -1512,7 +1500,7 @@ function FileExplorer({
             onDrop={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              const folderId = item.id === 'library' ? 'library' : item.id === 'worldlab' ? 'worldlab' : 'project'
+              const folderId = item.id === 'library' ? 'library' : 'project'
               
               // Check if dropping external files
               if (e.dataTransfer.types.includes('Files')) {
@@ -2019,7 +2007,6 @@ function FileExplorer({
           {((contextMenuPos.item.type === 'file' && contextMenuPos.item.document) ||
             (contextMenuPos.item.type === 'folder' && (contextMenuPos.item.id.startsWith('folder-') ||
               contextMenuPos.item.id === 'library' ||
-              contextMenuPos.item.id === 'worldlab' ||
               contextMenuPos.item.id === 'project'))) && (
             <button
               onClick={(e) => {
@@ -2059,18 +2046,16 @@ function FileExplorer({
           {contextMenuPos.item.type === 'folder' &&
             (contextMenuPos.item.id.startsWith('folder-') ||
               contextMenuPos.item.id === 'library' ||
-              contextMenuPos.item.id === 'worldlab' ||
               contextMenuPos.item.id === 'project') &&
             ((contextMenuPos.item.id.startsWith('folder-') && onFolderDelete) ||
               ((contextMenuPos.item.id === 'library' ||
-                contextMenuPos.item.id === 'worldlab' ||
                 contextMenuPos.item.id === 'project') && onRootFolderDelete)) && (
             <button
               onClick={(e) => {
                 if (contextMenuPos.item.id.startsWith('folder-')) {
                   onFolderDelete?.(contextMenuPos.item.id)
                 } else {
-                  onRootFolderDelete?.(contextMenuPos.item.id as 'worldlab' | 'library' | 'project')
+                  onRootFolderDelete?.(contextMenuPos.item.id as 'library' | 'project')
                 }
                 setContextMenuPos(null)
                 // Blur the button to prevent focus outline flash

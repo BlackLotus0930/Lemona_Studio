@@ -243,3 +243,136 @@ export async function fetchStripeItems(source: IntegrationSource): Promise<Integ
 
   return items
 }
+
+/** Params for structured metric queries */
+export interface StripeMetricParams {
+  startDate?: string
+  endDate?: string
+  timeRange?: string
+}
+
+/** Result from Stripe metric fetch */
+export interface StripeMetricResult {
+  metric: string
+  value: number
+  formatted: string
+  currency?: string
+  subscriptionCount?: number
+  executedAt: string
+  timeWindow: string
+}
+
+/**
+ * Compute date range from params.
+ * timeRange: past_7_days | past_30_days | past_90_days | last_week | last_month
+ */
+function parseTimeRange(params?: StripeMetricParams): { start: number; end: number; label: string } {
+  const now = Date.now() / 1000
+  const day = 24 * 60 * 60
+  let start: number
+  let end = now
+  let label: string
+  const range = params?.timeRange || 'past_30_days'
+  switch (range) {
+    case 'past_7_days':
+      start = now - 7 * day
+      label = 'Past 7 days'
+      break
+    case 'past_30_days':
+    case 'last_month':
+      start = now - 30 * day
+      label = 'Past 30 days'
+      break
+    case 'past_90_days':
+      start = now - 90 * day
+      label = 'Past 90 days'
+      break
+    case 'last_week':
+      start = now - 7 * day
+      label = 'Last week'
+      break
+    default:
+      start = now - 30 * day
+      label = 'Past 30 days'
+  }
+  if (params?.startDate && params?.endDate) {
+    start = new Date(params.startDate).getTime() / 1000
+    end = new Date(params.endDate).getTime() / 1000
+    label = `${params.startDate} to ${params.endDate}`
+  }
+  return { start, end, label }
+}
+
+/**
+ * Fetch MRR (Monthly Recurring Revenue) from active subscriptions.
+ * Sums active subscription amounts, normalized to monthly.
+ */
+export async function fetchStripeMRR(
+  source: IntegrationSource,
+  params?: StripeMetricParams
+): Promise<StripeMetricResult> {
+  const apiKey = requireStripeApiKey(source)
+  const { start, end, label } = parseTimeRange(params)
+
+  const subscriptions = await stripeListAll<StripeSubscription>(apiKey, 'subscriptions')
+  let totalMonthlyCents = 0
+  let activeCount = 0
+
+  for (const s of subscriptions) {
+    if (s.status !== 'active' && s.status !== 'trialing') continue
+    const created = s.created
+    if (created > end) continue
+    if (s.current_period_end && s.current_period_end < start) continue
+
+    const item = s.items?.data?.[0]
+    const amount = item?.price?.unit_amount ?? 0
+    const quantity = item?.quantity ?? 1
+    const interval = item?.price?.recurring?.interval ?? 'month'
+    const currency = item?.price?.currency ?? 'usd'
+
+    let monthlyCents = amount * quantity
+    if (interval === 'year') monthlyCents /= 12
+    else if (interval === 'week') monthlyCents *= 4.33
+
+    totalMonthlyCents += monthlyCents
+    activeCount += 1
+  }
+
+  const value = totalMonthlyCents / 100
+  return {
+    metric: 'mrr',
+    value,
+    formatted: formatAmount(Math.round(totalMonthlyCents), 'usd') + '/mo',
+    currency: 'usd',
+    subscriptionCount: activeCount,
+    executedAt: new Date().toISOString(),
+    timeWindow: label,
+  }
+}
+
+/**
+ * Fetch subscription count for a time range.
+ */
+export async function fetchStripeSubscriptionCount(
+  source: IntegrationSource,
+  params?: StripeMetricParams
+): Promise<StripeMetricResult> {
+  const apiKey = requireStripeApiKey(source)
+  const { start, end, label } = parseTimeRange(params)
+
+  const subscriptions = await stripeListAll<StripeSubscription>(apiKey, 'subscriptions')
+  let count = 0
+  for (const s of subscriptions) {
+    if (s.status !== 'active' && s.status !== 'trialing') continue
+    if (s.created <= end) count += 1
+  }
+
+  return {
+    metric: 'subscription_count',
+    value: count,
+    formatted: String(count),
+    executedAt: new Date().toISOString(),
+    timeWindow: label,
+    subscriptionCount: count,
+  }
+}

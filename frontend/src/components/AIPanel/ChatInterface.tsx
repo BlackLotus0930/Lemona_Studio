@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { AIChatMessage, ChatAttachment, Document, IndexingStatus, AgentProgressEvent } from '@shared/types'
 import { aiApi, chatApi, documentApi, projectApi, settingsApi } from '../../services/api'
-import { indexingApi } from '../../services/desktop-api'
+import { indexingApi, integrationApi, type IntegrationSource } from '../../services/desktop-api'
 import { useAiSettings } from '../AISettings/AiSettingsContext'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -102,9 +102,11 @@ interface AgentFileProposal {
 }
 
 type MentionOption = {
-  type: 'library' | 'file' | 'folder'
+  type: 'library' | 'file' | 'folder' | 'integration'
   id?: string
   name: string
+  mentionToken?: string
+  sourceType?: IntegrationSource['sourceType']
   folder?: string
   fileType?: 'pdf' | 'docx'
 }
@@ -180,6 +182,57 @@ const ONBOARDING_DOCUMENT_TITLE = 'Lemona'
 const ONBOARDING_USER_MESSAGE = 'What can you do to help me?'
 const PROJECT_FOLDERS_STORAGE_KEY = 'projectFolders'
 const PROJECT_ROOT_FOLDER_META_KEY = 'projectRootFolderMeta'
+const SUPPORTED_INTEGRATION_SOURCE_TYPES: IntegrationSource['sourceType'][] = [
+  'github',
+  'gitlab',
+  'slack',
+  'notion',
+  'quickbooks',
+  'hubspot',
+  'linear',
+  'stripe',
+  'sentry',
+  'posthog',
+  'metabase',
+  'db-schema',
+]
+const INTEGRATION_SOURCE_LABELS: Record<IntegrationSource['sourceType'], string> = {
+  github: 'GitHub',
+  gitlab: 'GitLab',
+  slack: 'Slack',
+  notion: 'Notion',
+  quickbooks: 'QuickBooks',
+  hubspot: 'HubSpot',
+  linear: 'Linear',
+  stripe: 'Stripe',
+  sentry: 'Sentry',
+  posthog: 'PostHog',
+  metabase: 'Metabase',
+  'db-schema': 'DB Schema',
+  rss: 'RSS',
+}
+
+const parseIntegrationSourceMentions = (text: string): IntegrationSource['sourceType'][] => {
+  if (!text || typeof text !== 'string') return []
+  const mentionPattern = /(^|\s)@\s*("([^"]+)"|'([^']+)'|([^\s@]+))/g
+  const found = new Set<IntegrationSource['sourceType']>()
+  const matches = Array.from(text.matchAll(mentionPattern))
+  for (const match of matches) {
+    const rawMention = (match[3] || match[4] || match[5] || '').trim().toLowerCase().replace(/[.,:;!?]+$/, '')
+    if (!rawMention) continue
+    if (rawMention === 'integration') {
+      for (const sourceType of SUPPORTED_INTEGRATION_SOURCE_TYPES) {
+        found.add(sourceType)
+      }
+      continue
+    }
+    if (SUPPORTED_INTEGRATION_SOURCE_TYPES.includes(rawMention as IntegrationSource['sourceType'])) {
+      found.add(rawMention as IntegrationSource['sourceType'])
+    }
+  }
+  return Array.from(found)
+}
+
 const ONBOARDING_ASSISTANT_MESSAGE = [
   "Welcome to Lemona! I'm your writing copilot. I use semantic search to find the most relevant context from your project, keeping my suggestions grounded in your work. It's faster, more accurate, and more efficient than uploading full documents to AI models.",
   '',
@@ -345,6 +398,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [libraryDocuments, setLibraryDocuments] = useState<Document[]>([])
   const [allDocuments, setAllDocuments] = useState<Document[]>([])
+  const [integrationSources, setIntegrationSources] = useState<IntegrationSource[]>([])
   const [isLibraryIndexed, setIsLibraryIndexed] = useState<boolean>(false)
   const [libraryFileIndexingStatuses, setLibraryFileIndexingStatuses] = useState<Map<string, IndexingStatus | null>>(new Map())
   const [documentTitleCache, setDocumentTitleCache] = useState<Map<string, string>>(new Map()) // Cache for document titles
@@ -1405,9 +1459,6 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     if (workspaceDocs.length !== 1) return null
     const onlyDoc = workspaceDocs[0]
     if (!onlyDoc || onlyDoc.id !== documentId || onlyDoc.title !== ONBOARDING_DOCUMENT_TITLE) return null
-    const worldLabDocs = projectDocuments.filter(doc => doc.folder === 'worldlab')
-    if (worldLabDocs.length > 1) return null
-
     const now = new Date().toISOString()
     const userMessage: AIChatMessage = {
       id: generateMessageId(),
@@ -1532,6 +1583,20 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
   }
 
+  const loadIntegrationMentionSources = async () => {
+    if (!projectId) {
+      setIntegrationSources([])
+      return
+    }
+    try {
+      const sources = await integrationApi.getSources(projectId)
+      setIntegrationSources(Array.isArray(sources) ? sources : [])
+    } catch (error) {
+      console.error('Failed to load integration sources for mentions:', error)
+      setIntegrationSources([])
+    }
+  }
+
   // Fetch indexing statuses for uploaded files (PDF, DOCX)
   useEffect(() => {
     const libraryDocs = allDocuments.filter(doc => {
@@ -1577,9 +1642,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   useEffect(() => {
     if (projectId) {
       loadMentionDocuments()
+      loadIntegrationMentionSources()
       checkLibraryIndexStatus()
     } else {
       setLibraryDocuments([])
+      setIntegrationSources([])
       setIsLibraryIndexed(false)
     }
   }, [projectId])
@@ -1588,6 +1655,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
   useEffect(() => {
     if (showMentionDropdown && projectId) {
       loadMentionDocuments()
+      loadIntegrationMentionSources()
       checkLibraryIndexStatus()
     }
   }, [showMentionDropdown, projectId])
@@ -3056,6 +3124,37 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
         folder: 'project',
       })
     })
+
+    const normalizedQuery = query.replace(/^@/, '')
+    const includeIntegrationAll = !normalizedQuery || 'integration'.includes(normalizedQuery)
+    if (includeIntegrationAll) {
+      mentions.push({
+        type: 'integration',
+        id: 'integration-all',
+        name: 'Integration (All Apps)',
+        mentionToken: '@integration',
+      })
+    }
+
+    const seenSourceTypes = new Set<IntegrationSource['sourceType']>()
+    integrationSources.forEach((source) => {
+      const sourceType = source.sourceType
+      if (!SUPPORTED_INTEGRATION_SOURCE_TYPES.includes(sourceType)) return
+      if (seenSourceTypes.has(sourceType)) return
+      const label = INTEGRATION_SOURCE_LABELS[sourceType] || sourceType
+      const matchesQuery = !normalizedQuery
+        || label.toLowerCase().includes(normalizedQuery)
+        || sourceType.toLowerCase().includes(normalizedQuery)
+      if (!matchesQuery) return
+      seenSourceTypes.add(sourceType)
+      mentions.push({
+        type: 'integration',
+        id: source.id,
+        name: label,
+        mentionToken: `@${sourceType}`,
+        sourceType,
+      })
+    })
     
     // Only show uploaded files (PDF/DOCX) if indexed
     if (isLibraryIndexed) {
@@ -3161,7 +3260,11 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     }
     
     // Build the mention text (ensure space after)
-    const mentionText = mention.type === 'library' ? '@Library' : `@${mention.name}`
+    const mentionText = mention.type === 'library'
+      ? '@Library'
+      : (mention.type === 'integration'
+        ? (mention.mentionToken || `@${mention.name.toLowerCase()}`)
+        : `@${mention.name}`)
     
     // Replace the @query with the mention (always add space after)
     const newValue = 
@@ -3482,6 +3585,7 @@ ${listedBlocks}`
               undefined,
               'Concise',
               projectId,
+              undefined,
               googleApiKey,
               openaiApiKey
             )
@@ -3548,6 +3652,7 @@ Step 2 requirement:
       const contentForModel = chatMode === 'agent'
         ? `${AGENT_PROMPT_PREFIX}\n\n${buildAgentAvailableFilesContext(projectScopedDocs)}${targetBlockInstruction}${referencedSnippetsInstruction}\n\nUser request:\n${userMessage.content}`
         : `${userMessage.content}${referencedSnippetsInstruction}`
+      const sourceTypes = parseIntegrationSourceMentions(userMessage.content || '')
       const response = await aiApi.streamChat(
         contentForModel,
         effectiveDocumentContent,
@@ -3558,6 +3663,7 @@ Step 2 requirement:
         effectiveAttachments.length > 0 ? effectiveAttachments : undefined,
         selectedStyle,
         projectId,
+        sourceTypes,
         googleApiKey,
         openaiApiKey
       )
@@ -5419,11 +5525,15 @@ Step 2 requirement:
                     
                     while ((match = mentionRegex.exec(text)) !== null) {
                       const mentionName = match[1]
+                      const mentionNameNormalized = mentionName.toLowerCase()
+                      const isLibrary = mentionName === 'Library'
+                      const isIntegration = mentionNameNormalized === 'integration'
+                        || SUPPORTED_INTEGRATION_SOURCE_TYPES.includes(mentionNameNormalized as IntegrationSource['sourceType'])
                       const mentionStart = match.index
                       let mentionEnd = match.index + match[0].length
                       
                       // Check if this is a prefix of a document title (like "file" -> "file (2).pdf")
-                      if (mentionName !== 'Library') {
+                      if (!isLibrary && !isIntegration) {
                         const textAfterMention = text.slice(mentionEnd)
                         
                         // Find documents that start with the mention name (case-insensitive)
@@ -5463,6 +5573,18 @@ Step 2 requirement:
                       const trailingLineRange = text.slice(mentionEnd).match(/^ \(\d+-\d+\)/)
                       if (trailingLineRange) {
                         mentionEnd += trailingLineRange[0].length
+                      }
+
+                      const textAfterHighlight = text.slice(mentionEnd)
+                      const isFollowedBySpaceOrEnd = textAfterHighlight.length === 0 || /^\s/.test(textAfterHighlight)
+                      const allMentionableDocs = isLibraryIndexed
+                        ? [...libraryDocuments, ...allDocuments.filter(doc => isUploadedFile(doc) && doc.projectId === projectId)]
+                        : libraryDocuments
+                      const exactDocMatch = allMentionableDocs.some(doc => doc.title === mentionName || doc.id === mentionName)
+                      const exactFolderMatch = projectFolderMentions.some(folderName => folderName === mentionName)
+                      const isConfirmedMention = isFollowedBySpaceOrEnd && (isLibrary || isIntegration || exactFolderMatch || exactDocMatch)
+                      if (!isConfirmedMention) {
+                        continue
                       }
 
                       // Check if cursor is at the start, end, or within the mention
@@ -5540,7 +5662,7 @@ Step 2 requirement:
           {/* Persistent Mention Highlighting Overlay - Backgrounds only */}
           {input && (() => {
             const mentionRegex = /@\s*(Library|[^\s@]+)/g
-            const highlights: Array<{ start: number, end: number, text: string, isLibrary: boolean, isFile: boolean, isFolder: boolean }> = []
+            const highlights: Array<{ start: number, end: number, text: string, isLibrary: boolean, isFile: boolean, isFolder: boolean, isIntegration: boolean }> = []
             let match
             const projectFolderMentions = getFilteredMentions()
               .filter(item => item.type === 'folder')
@@ -5550,6 +5672,9 @@ Step 2 requirement:
             while ((match = mentionRegex.exec(input)) !== null) {
               const mentionName = match[1]
               const isLibrary = mentionName === 'Library'
+              const mentionNameNormalized = mentionName.toLowerCase()
+              const isIntegration = mentionNameNormalized === 'integration'
+                || SUPPORTED_INTEGRATION_SOURCE_TYPES.includes(mentionNameNormalized as IntegrationSource['sourceType'])
               
               // Check for exact match first in both workspace files and library files (if indexed)
               const allMentionableDocs = isLibraryIndexed 
@@ -5599,7 +5724,7 @@ Step 2 requirement:
                 }
               }
               
-              const isFile = !!matchedDoc || (!isLibrary && allMentionableDocs.some(doc => doc.title === mentionName || doc.id === mentionName))
+              const isFile = !!matchedDoc || (!isLibrary && !isIntegration && allMentionableDocs.some(doc => doc.title === mentionName || doc.id === mentionName))
               const isFolder = !!matchedFolder
               
               // Include trailing line range like " (12-24)" in highlighted mention.
@@ -5615,7 +5740,7 @@ Step 2 requirement:
               // 2. AND it matches a valid document (Library or a matched file)
               const textAfterHighlight = input.slice(highlightEnd)
               const isFollowedBySpaceOrEnd = textAfterHighlight.length === 0 || /^\s/.test(textAfterHighlight)
-              const matchesValidDocument = isLibrary || !!matchedDoc || !!matchedFolder // Must have an exact match (Library, folder, or matchedDoc)
+              const matchesValidDocument = isLibrary || isIntegration || !!matchedDoc || !!matchedFolder
               const isComplete = isFollowedBySpaceOrEnd && matchesValidDocument
               
               // Only add highlight if mention is complete/confirmed
@@ -5626,7 +5751,8 @@ Step 2 requirement:
                   text: highlightText,
                   isLibrary,
                   isFile,
-                  isFolder
+                  isFolder,
+                  isIntegration,
                 })
               }
             }
@@ -5675,7 +5801,7 @@ Step 2 requirement:
                         style={{
                           backgroundColor: theme === 'dark' 
                             ? (highlight.isLibrary ? '#2d4a5c' : highlight.isFolder ? '#2f3f2f' : highlight.isFile ? '#3d2d4a' : '#3d3d3d')
-                            : (highlight.isLibrary ? '#e8f0fe' : highlight.isFolder ? '#e8f5e9' : highlight.isFile ? '#e3f2fd' : '#f1f3f4'),
+                            : (highlight.isLibrary ? '#e8f0fe' : highlight.isIntegration ? '#fff1d6' : highlight.isFolder ? '#e8f5e9' : highlight.isFile ? '#e3f2fd' : '#f1f3f4'),
                           color: theme === 'dark' ? '#ffffff' : textColor, // Normal text color
                           borderRadius: '3px',
                           fontWeight: 'normal', // Same weight as regular text
@@ -5859,6 +5985,8 @@ Step 2 requirement:
                       }}>
                         {mention.type === 'library' || mention.type === 'folder' ? (
                           <FolderIcon style={{ fontSize: '14px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
+                        ) : mention.type === 'integration' ? (
+                          <AlternateEmailIcon style={{ fontSize: '14px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
                         ) : mention.fileType === 'pdf' ? (
                           <PictureAsPdfIcon style={{ fontSize: '14px', color: theme === 'dark' ? '#9aa0a6' : '#5f6368' }} />
                         ) : (

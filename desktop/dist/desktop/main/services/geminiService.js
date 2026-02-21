@@ -132,7 +132,7 @@ function getCurrentEditingContext(documentContent, cursorPosition, maxTokens = 1
         return documentContent.slice(0, maxTokens * 4);
     }
 }
-async function buildContext(documentContent, projectId, chatHistory, cursorPosition, apiKey, userMessage, openaiApiKey, style, onProgress) {
+async function buildContext(documentContent, projectId, chatHistory, cursorPosition, apiKey, userMessage, openaiApiKey, style, sourceTypes, onProgress) {
     const isAgentMode = userMessage?.includes('You are in AGENT MODE') ?? false;
     let systemInstruction;
     if (isAgentMode) {
@@ -277,7 +277,7 @@ Use rich markdown formatting to make information visually clear:
                 const { orchestrateRetrieval } = await import('./aiReasoningService.js');
                 const reasoningResult = await orchestrateRetrieval(userMessage, projectId, apiKey, // geminiApiKey
                 openaiApiKey, 10, // max steps
-                undefined, { onProgress });
+                undefined, sourceTypes, { onProgress });
                 // Collect metadata: actions, reasoning chain, and data sources
                 const actions = {};
                 const searchedFiles = new Set();
@@ -362,7 +362,7 @@ Use rich markdown formatting to make information visually clear:
             try {
                 if (projectId) {
                     const { searchLibraryWithMentions } = await import('./semanticSearchService.js');
-                    const searchResult = await searchLibraryWithMentions(userMessage, projectId, apiKey, openaiApiKey, 6);
+                    const searchResult = await searchLibraryWithMentions(userMessage, projectId, apiKey, openaiApiKey, 6, sourceTypes);
                     // Collect metadata from fallback search
                     if (searchResult.results.length > 0) {
                         const searchedFiles = new Set();
@@ -505,9 +505,9 @@ export const geminiService = {
             throw new Error(`Failed to generate response: ${error.message || 'Unknown error'}`);
         }
     },
-    async *streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, style, openaiApiKey, onProgress) {
+    async *streamChat(apiKey, message, documentContent, projectId, chatHistory, useWebSearch, modelName, attachments, style, openaiApiKey, sourceTypes, onProgress) {
         const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview');
-        const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey, style, onProgress);
+        const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey, style, sourceTypes, onProgress);
         // Send metadata first (if available) as a special chunk
         if (reasoningMetadata) {
             // Add web_search action if enabled

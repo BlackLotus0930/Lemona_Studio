@@ -562,7 +562,8 @@ ${chunk.text}
 async function resolveSearchContext(
   query: string,
   projectId: string,
-  initialFileIds?: string[]
+  initialFileIds?: string[],
+  forcedSourceMentions?: SourceMention[]
 ): Promise<{
   mentions: ReturnType<typeof parseMentions>
   searchQuery: string
@@ -577,6 +578,10 @@ async function resolveSearchContext(
   if (mentions.fileMentions.length > 0) {
     const resolved = await resolveFileMentionsAll(mentions.fileMentions, projectId)
     currentFileIds = useLibraryOnly ? resolved.libraryIds : [...resolved.workspaceIds, ...resolved.libraryIds]
+  }
+
+  if (forcedSourceMentions && forcedSourceMentions.length > 0) {
+    mentions.sourceMentions = forcedSourceMentions
   }
 
   const effectiveFileIds = currentFileIds && currentFileIds.length > 0 ? currentFileIds : undefined
@@ -1153,6 +1158,7 @@ export async function reasonSimple(
   openaiApiKey?: string,
   maxSteps: number = 10,
   initialFileIds?: string[],
+  forcedSourceMentions?: SourceMention[],
   options?: ReasoningExecutionOptions
 ): Promise<ReasoningResult> {
   const stepId = `search_1`
@@ -1164,7 +1170,7 @@ export async function reasonSimple(
     status: 'started',
     label: 'Searching for relevant context',
   })
-  const context = await resolveSearchContext(query, projectId, initialFileIds)
+  const context = await resolveSearchContext(query, projectId, initialFileIds, forcedSourceMentions)
   const budgetRemaining = Math.max(0, maxSteps - 1)
 
   let initialResults: SearchResult[] = []
@@ -1237,9 +1243,10 @@ export async function reasonWithPlan(
   openaiApiKey?: string,
   maxSteps: number = 10,
   initialFileIds?: string[],
+  forcedSourceMentions?: SourceMention[],
   options?: ReasoningExecutionOptions
 ): Promise<ReasoningResult> {
-  const context = await resolveSearchContext(query, projectId, initialFileIds)
+  const context = await resolveSearchContext(query, projectId, initialFileIds, forcedSourceMentions)
   const executablePlan = plan.slice(0, Math.max(1, Math.min(maxSteps, 6)))
   const steps: ReasoningStep[] = []
   let budgetRemaining = maxSteps
@@ -1255,9 +1262,11 @@ export async function reasonWithPlan(
     const effectiveQuery = (planStep.query && planStep.query.trim().length > 0)
       ? planStep.query.trim()
       : context.searchQuery
-    const sourceMentions = planStep.sourceTypes && planStep.sourceTypes.length > 0
-      ? planStep.sourceTypes
-      : context.mentions.sourceMentions
+    const sourceMentions = forcedSourceMentions && forcedSourceMentions.length > 0
+      ? forcedSourceMentions
+      : (planStep.sourceTypes && planStep.sourceTypes.length > 0
+        ? planStep.sourceTypes
+        : context.mentions.sourceMentions)
     const progressStepId = `${planStep.action}_${stepNumber}`
     const progressStartedAt = Date.now()
     emitProgress(options?.onProgress, {
@@ -1514,6 +1523,7 @@ export async function orchestrateRetrieval(
   openaiApiKey?: string,
   maxSteps: number = 10,
   initialFileIds?: string[],
+  forcedSourceTypes?: string[],
   options?: ReasoningExecutionOptions
 ): Promise<ReasoningResult> {
   const orchestrateStart = Date.now()
@@ -1527,13 +1537,14 @@ export async function orchestrateRetrieval(
   const sources = await integrationStore.getSourcesForProject(projectId).catch(() => [])
   const availableSources = Array.from(new Set(sources.map(source => source.sourceType)))
 
+  const normalizedForcedSources = normalizeSourceTypes(forcedSourceTypes)
   const complexity = await classifyQueryComplexity(query, availableSources, geminiApiKey, openaiApiKey, options)
   let result: ReasoningResult
   if (complexity === 'simple') {
-    result = await reasonSimple(query, projectId, geminiApiKey, openaiApiKey, maxSteps, initialFileIds, options)
+    result = await reasonSimple(query, projectId, geminiApiKey, openaiApiKey, maxSteps, initialFileIds, normalizedForcedSources, options)
   } else {
     const plan = await planQuery(query, availableSources, geminiApiKey, openaiApiKey, options)
-    result = await reasonWithPlan(query, projectId, plan, geminiApiKey, openaiApiKey, maxSteps, initialFileIds, options)
+    result = await reasonWithPlan(query, projectId, plan, geminiApiKey, openaiApiKey, maxSteps, initialFileIds, normalizedForcedSources, options)
   }
 
   const orchestratorTotalMs = Date.now() - orchestrateStart
@@ -1577,9 +1588,10 @@ export async function reason(
   openaiApiKey?: string,
   maxSteps: number = 10,
   initialFileIds?: string[],
+  forcedSourceTypes?: string[],
   options?: ReasoningExecutionOptions
 ): Promise<ReasoningResult> {
-  return orchestrateRetrieval(query, projectId, geminiApiKey, openaiApiKey, maxSteps, initialFileIds, options)
+  return orchestrateRetrieval(query, projectId, geminiApiKey, openaiApiKey, maxSteps, initialFileIds, forcedSourceTypes, options)
 }
 
 export const aiReasoningService = {

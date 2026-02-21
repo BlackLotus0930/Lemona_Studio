@@ -192,3 +192,148 @@ export async function fetchPosthogItems(source: IntegrationSource): Promise<Inte
 
   return items
 }
+
+/** Params for PostHog metric queries */
+export interface PosthogMetricParams {
+  startDate?: string
+  endDate?: string
+  timeRange?: string
+  /** Optional event filter for DAU (e.g. '$pageview') */
+  eventFilter?: string
+}
+
+/** Result from PostHog metric fetch */
+export interface PosthogMetricResult {
+  metric: string
+  value: number
+  formatted: string
+  executedAt: string
+  timeWindow: string
+}
+
+function parsePosthogTimeRange(params?: PosthogMetricParams): { start: string; end: string; label: string } {
+  const now = new Date()
+  const range = params?.timeRange || 'past_7_days'
+  let start: Date
+  let label: string
+  switch (range) {
+    case 'past_7_days':
+    case 'last_week':
+      start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      label = 'Past 7 days'
+      break
+    case 'past_30_days':
+    case 'last_month':
+      start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+      label = 'Past 30 days'
+      break
+    case 'past_90_days':
+      start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+      label = 'Past 90 days'
+      break
+    default:
+      start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      label = 'Past 7 days'
+  }
+  if (params?.startDate && params?.endDate) {
+    label = `${params.startDate} to ${params.endDate}`
+    return { start: params.startDate, end: params.endDate, label }
+  }
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: now.toISOString().slice(0, 10),
+    label,
+  }
+}
+
+/**
+ * Fetch DAU (Daily Active Users) via HogQL query.
+ * Uses PostHog Query API: count distinct person_id per day, then avg.
+ */
+export async function fetchPosthogDAU(
+  source: IntegrationSource,
+  params?: PosthogMetricParams
+): Promise<PosthogMetricResult> {
+  const { apiKey, host, projectId } = requirePosthogConfig(source)
+  const { start, end, label } = parsePosthogTimeRange(params)
+  const eventFilter = params?.eventFilter ? ` AND event = '${params.eventFilter.replace(/'/g, "''")}'` : ''
+
+  const queryUrl = `${host}/api/projects/${encodeURIComponent(projectId)}/query/`
+  const hogql = `SELECT uniqExact(person_id) as daily_users FROM events WHERE timestamp >= '${start}' AND timestamp < toStartOfDay(toDateTime('${end}')) + INTERVAL 1 DAY${eventFilter} GROUP BY toStartOfDay(timestamp)`
+  const body = {
+    query: { kind: 'HogQLQuery', query: hogql },
+    name: 'dau_evidence_query',
+  }
+
+  const response = await fetch(queryUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`PostHog query failed (${response.status}): ${text}`)
+  }
+
+  const data = (await response.json()) as { results?: Array<{ daily_users?: number }> }
+  const rows = Array.isArray(data.results) ? data.results : []
+  const values = rows.map(r => r?.daily_users ?? 0).filter(v => v > 0)
+  const avgDau = values.length > 0 ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : 0
+
+  return {
+    metric: 'dau',
+    value: avgDau,
+    formatted: String(avgDau),
+    executedAt: new Date().toISOString(),
+    timeWindow: label,
+  }
+}
+
+/**
+ * Fetch unique user count for a time range.
+ */
+export async function fetchPosthogUniqueUsers(
+  source: IntegrationSource,
+  params?: PosthogMetricParams
+): Promise<PosthogMetricResult> {
+  const { apiKey, host, projectId } = requirePosthogConfig(source)
+  const { start, end, label } = parsePosthogTimeRange(params)
+  const eventFilter = params?.eventFilter ? ` AND event = '${params.eventFilter.replace(/'/g, "''")}'` : ''
+
+  const queryUrl = `${host}/api/projects/${encodeURIComponent(projectId)}/query/`
+  const hogql = `SELECT uniqExact(person_id) as cnt FROM events WHERE timestamp >= '${start}' AND timestamp < toStartOfDay(toDateTime('${end}')) + INTERVAL 1 DAY${eventFilter}`
+  const body = {
+    query: { kind: 'HogQLQuery', query: hogql },
+    name: 'unique_users_evidence_query',
+  }
+
+  const response = await fetch(queryUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`PostHog query failed (${response.status}): ${text}`)
+  }
+
+  const data = (await response.json()) as { results?: Array<{ cnt?: number }> }
+  const rows = Array.isArray(data.results) ? data.results : []
+  const value = rows[0]?.cnt ?? 0
+
+  return {
+    metric: 'unique_users',
+    value,
+    formatted: String(value),
+    executedAt: new Date().toISOString(),
+    timeWindow: label,
+  }
+}

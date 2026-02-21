@@ -162,6 +162,7 @@ async function buildContext(
   userMessage?: string,
   openaiApiKey?: string,
   style?: string,
+  sourceTypes?: string[],
   onProgress?: (event: AgentProgressEvent) => void
 ): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: AIChatMessage['reasoningMetadata'] }> {
   const isAgentMode = userMessage?.includes('You are in AGENT MODE') ?? false
@@ -325,6 +326,7 @@ Use rich markdown formatting to make information visually clear:
           openaiApiKey,
           10, // max steps
           undefined,
+          sourceTypes,
           { onProgress }
         )
 
@@ -435,7 +437,8 @@ Use rich markdown formatting to make information visually clear:
             projectId,
             apiKey,
             openaiApiKey,
-            6
+            6,
+            sourceTypes as any
           )
 
           // Collect metadata from fallback search
@@ -600,10 +603,11 @@ export const geminiService = {
     attachments?: ChatAttachment[],
     style?: string,
     openaiApiKey?: string,
+    sourceTypes?: string[],
     onProgress?: (event: AgentProgressEvent) => void
   ): AsyncGenerator<string> {
     const aiModel = getModel(apiKey, modelName || 'gemini-3-flash-preview')
-    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey, style, onProgress)
+    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, undefined, apiKey, message, openaiApiKey, style, sourceTypes, onProgress)
     
     // Send metadata first (if available) as a special chunk
     if (reasoningMetadata) {

@@ -15,8 +15,8 @@ import { parseDocx, splitDocxIntoChapters } from './services/docxParser.js';
 import { saveApiKeys, getApiKeys } from './services/apiKeyStore.js';
 import { aiProviderStore } from './services/aiProviderStore.js';
 import { modelGatewayService } from './services/modelGatewayService.js';
-import { worldLabService } from './services/worldLabService.js';
 import { integrationService } from './services/integrationService.js';
+import { runEvidenceQuery } from './services/evidenceQueryService.js';
 import path from 'path';
 import { app } from 'electron';
 import fs from 'fs/promises';
@@ -202,7 +202,7 @@ export function setupIPC() {
     });
     // Stream chat - uses webContents.send to stream chunks
     // Chat always uses Gemini (not Ollama)
-    ipcMain.handle('ai:streamChat', async (event, googleApiKey, openaiApiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, attachments, style, projectId) => {
+    ipcMain.handle('ai:streamChat', async (event, googleApiKey, openaiApiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, attachments, style, projectId, sourceTypes) => {
         const webContents = event.sender;
         const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         try {
@@ -219,7 +219,7 @@ export function setupIPC() {
                     let streamTextBuffer = '';
                     let emittedActionBlocks = 0;
                     let emittedPatchActions = 0;
-                    const stream = await modelGatewayService.streamChat(googleApiKey, openaiApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, modelName, attachments, style, (progressEvent) => {
+                    const stream = await modelGatewayService.streamChat(googleApiKey, openaiApiKey, message, documentContent, finalProjectId, chatHistory, useWebSearch, modelName, attachments, style, sourceTypes, (progressEvent) => {
                         webContents.send('ai:streamEvent', streamId, progressEvent);
                     });
                     for await (const chunk of stream) {
@@ -1527,166 +1527,27 @@ Rewritten text:`;
             throw error;
         }
     });
-    // WorldLab operations
-    ipcMain.handle('worldlab:load', async (_, labName, projectId) => {
+    ipcMain.handle('evidence:runQuery', async (_, projectId, queryText, sourceTypes, geminiApiKey, openaiApiKey) => {
         try {
-            return await worldLabService.load(labName, projectId);
+            const keys = getApiKeys();
+            const gemini = geminiApiKey || keys.geminiApiKey;
+            const openai = openaiApiKey || keys.openaiApiKey;
+            return await runEvidenceQuery(projectId, { text: queryText, sourceTypes: sourceTypes }, gemini, openai);
         }
         catch (error) {
-            console.error('IPC worldlab:load error:', error);
+            console.error('IPC evidence:runQuery error:', error);
             throw error;
         }
     });
-    ipcMain.handle('worldlab:loadNodes', async (_, labName, projectId) => {
+    ipcMain.handle('evidence:runEvidenceQuery', async (_, projectId, queryParams, geminiApiKey, openaiApiKey) => {
         try {
-            return await worldLabService.loadNodes(labName, projectId);
+            const keys = getApiKeys();
+            const gemini = geminiApiKey || keys.geminiApiKey;
+            const openai = openaiApiKey || keys.openaiApiKey;
+            return await runEvidenceQuery(projectId, queryParams, gemini, openai);
         }
         catch (error) {
-            console.error('IPC worldlab:loadNodes error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:loadEdges', async (_, labName, projectId) => {
-        try {
-            return await worldLabService.loadEdges(labName, projectId);
-        }
-        catch (error) {
-            console.error('IPC worldlab:loadEdges error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:loadMetadata', async (_, labName, projectId) => {
-        try {
-            return await worldLabService.loadMetadata(labName, projectId);
-        }
-        catch (error) {
-            console.error('IPC worldlab:loadMetadata error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:loadNodeContent', async (_, labName, nodeId, projectId) => {
-        try {
-            return await worldLabService.loadNodeContent(labName, nodeId, projectId);
-        }
-        catch (error) {
-            console.error('IPC worldlab:loadNodeContent error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:loadMetadataContent', async (_, labName, projectId) => {
-        try {
-            return await worldLabService.loadMetadataContent(labName, projectId);
-        }
-        catch (error) {
-            console.error('IPC worldlab:loadMetadataContent error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:saveNode', async (_, labName, nodeId, content, projectId) => {
-        try {
-            return await worldLabService.saveNode(labName, nodeId, content, projectId);
-        }
-        catch (error) {
-            console.error('IPC worldlab:saveNode error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:saveEdges', async (_, labName, edges, projectId, nodePositions, nodeMetadata) => {
-        try {
-            // Convert nodePositions from object to Map if provided
-            let positionsMap;
-            if (nodePositions && typeof nodePositions === 'object') {
-                positionsMap = new Map();
-                Object.entries(nodePositions).forEach(([nodeId, pos]) => {
-                    if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
-                        positionsMap.set(nodeId, { x: pos.x, y: pos.y });
-                    }
-                });
-            }
-            // Convert nodeMetadata from object to Map if provided
-            let metadataMap;
-            if (nodeMetadata && typeof nodeMetadata === 'object') {
-                metadataMap = new Map();
-                Object.entries(nodeMetadata).forEach(([nodeId, meta]) => {
-                    if (meta && typeof meta === 'object') {
-                        metadataMap.set(nodeId, {
-                            label: typeof meta.label === 'string' ? meta.label : undefined,
-                            category: typeof meta.category === 'string' ? meta.category : undefined,
-                            elementName: typeof meta.elementName === 'string' ? meta.elementName : undefined,
-                        });
-                    }
-                });
-            }
-            return await worldLabService.saveEdges(labName, edges, projectId, positionsMap, metadataMap);
-        }
-        catch (error) {
-            console.error('IPC worldlab:saveEdges error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:saveNodePositions', async (_, labName, nodes, projectId) => {
-        try {
-            return await worldLabService.saveNodePositions(labName, nodes, projectId);
-        }
-        catch (error) {
-            console.error('IPC worldlab:saveNodePositions error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:createNode', async (_, labName, nodeId, projectId, content) => {
-        try {
-            return await worldLabService.createNode(labName, nodeId, projectId, content);
-        }
-        catch (error) {
-            console.error('IPC worldlab:createNode error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:deleteNode', async (_, labName, nodeId, projectId) => {
-        console.log(`[IPC] worldlab:deleteNode called - labName: ${labName}, nodeId: ${nodeId}, projectId: ${projectId}`);
-        try {
-            const result = await worldLabService.deleteNode(labName, nodeId, projectId);
-            console.log(`[IPC] worldlab:deleteNode result: ${result} for nodeId: ${nodeId}`);
-            return result;
-        }
-        catch (error) {
-            console.error(`[IPC] worldlab:deleteNode error for nodeId ${nodeId}:`, error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:saveMetadata', async (_, labName, metadata, projectId) => {
-        try {
-            return await worldLabService.saveMetadata(labName, metadata, projectId);
-        }
-        catch (error) {
-            console.error('IPC worldlab:saveMetadata error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:labExists', async (_, labName, projectId) => {
-        try {
-            return await worldLabService.labExists(labName, projectId);
-        }
-        catch (error) {
-            console.error('IPC worldlab:labExists error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:getAllLabNames', async (_, projectId) => {
-        try {
-            return await worldLabService.getAllLabNames(projectId);
-        }
-        catch (error) {
-            console.error('IPC worldlab:getAllLabNames error:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('worldlab:deleteLab', async (_, labName, projectId) => {
-        try {
-            return await worldLabService.deleteLab(labName, projectId);
-        }
-        catch (error) {
-            console.error('IPC worldlab:deleteLab error:', error);
+            console.error('IPC evidence:runEvidenceQuery error:', error);
             throw error;
         }
     });

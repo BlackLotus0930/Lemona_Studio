@@ -72,6 +72,26 @@ export function parseMentions(message: string): ParsedMentions {
     // Check for @Library mention
     if (mention === 'library') {
       result.hasLibraryMention = true
+    } else if (mention === 'integration') {
+      const allSources: ParsedMentions['sourceMentions'] = [
+        'github',
+        'gitlab',
+        'slack',
+        'notion',
+        'quickbooks',
+        'hubspot',
+        'linear',
+        'stripe',
+        'sentry',
+        'posthog',
+        'metabase',
+        'db-schema',
+      ]
+      for (const source of allSources) {
+        if (!result.sourceMentions.includes(source)) {
+          result.sourceMentions.push(source)
+        }
+      }
     } else if (mention === 'github' || mention === 'gitlab' || mention === 'slack' || mention === 'notion' || mention === 'quickbooks' || mention === 'hubspot' || mention === 'linear' || mention === 'stripe' || mention === 'sentry' || mention === 'posthog' || mention === 'metabase' || mention === 'db-schema') {
       if (!result.sourceMentions.includes(mention)) {
         result.sourceMentions.push(mention)
@@ -506,7 +526,8 @@ export async function searchLibraryWithMentions(
   projectId: string, // Required: Current project ID
   geminiApiKey?: string,
   openaiApiKey?: string,
-  k: number = 6
+  k: number = 6,
+  forcedSourceMentions?: ParsedMentions['sourceMentions']
 ): Promise<{
   results: SearchResult[]
   mentions: ParsedMentions
@@ -514,6 +535,9 @@ export async function searchLibraryWithMentions(
 }> {
   // Parse mentions
   const mentions = parseMentions(message)
+  const mergedSourceMentions = forcedSourceMentions && forcedSourceMentions.length > 0
+    ? Array.from(new Set([...(mentions.sourceMentions || []), ...forcedSourceMentions]))
+    : mentions.sourceMentions
 
   // If no library mention, return empty results
   if (!mentions.hasLibraryMention && mentions.fileMentions.length === 0) {
@@ -554,7 +578,7 @@ export async function searchLibraryWithMentions(
     openaiApiKey,
     fileIds,
     k,
-    mentions.sourceMentions
+    mergedSourceMentions
   )
 
   // Outer-layer existence validation for library-only searches

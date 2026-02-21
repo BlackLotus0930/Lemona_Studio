@@ -200,56 +200,13 @@ export interface DocumentSnapshot {
   content: string; // Full TipTap JSON content
 }
 
-// WorldLab Types
-export interface WorldLabMetadata {
-  author?: string;
-  theme?: string;
-  tags?: string[];
-  version?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  description?: string;
-  viewport?: {
-    x: number;
-    y: number;
-    zoom: number;
-  };
-}
-
-export interface WorldLabNode {
-  id: string; // Node ID (corresponds to filename without .md extension)
-  label: string; // Display label (usually elementName or extracted from file)
-  category?: string; // Category: 人物, 事件, 地点, 规则, 设定, 概念, 想法, etc.
-  elementName?: string; // Element name
-  position: { x: number; y: number }; // Position on canvas
-  data?: {
-    // Additional node data
-    description?: string;
-    content?: string; // File content preview or full content
-    [key: string]: any;
-  };
-}
-
-export interface WorldLabEdge {
-  id: string; // Edge ID
-  source: string; // Source node ID
-  target: string; // Target node ID
-  type?: string; // Edge type (default, smoothstep, step, etc.)
-  label?: string; // Optional edge label
-  animated?: boolean; // Whether edge is animated
-  style?: Record<string, any>; // Edge style
-  sourceHandle?: string; // Source handle ID (e.g., 'top-target', 'bottom-source', etc.)
-  targetHandle?: string; // Target handle ID (e.g., 'top-target', 'bottom-source', etc.)
-  data?: Record<string, any>; // Optional edge data (e.g., directed)
-}
-
-export interface WorldLab {
-  labPath: string; // Full path to the Lab directory
-  labName: string; // Lab name (folder name)
-  metadata: WorldLabMetadata;
-  nodes: WorldLabNode[];
-  edges: WorldLabEdge[];
-}
+/** Supported connector metrics - extend as more integrations add metrics */
+export type ConnectorMetricType =
+  | 'stripe:mrr'
+  | 'stripe:subscription_count'
+  | 'posthog:dau'
+  | 'posthog:unique_users'
+  | 'posthog:event_count'
 
 // AI Reasoning Types
 export interface ReasoningStep {

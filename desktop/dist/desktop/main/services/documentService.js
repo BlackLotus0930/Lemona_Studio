@@ -495,33 +495,6 @@ export const documentService = {
                         console.log(`[documentService.deleteUnsafe] Background: Associated file does not exist: ${associatedFilePath}`);
                     }
                 }
-                // If this is a WorldLab document, delete the WorldLab directory
-                if (document.folder === 'worldlab' || document.title.toLowerCase().endsWith('.lab') || document.title.toLowerCase().endsWith('.worldlab')) {
-                    try {
-                        // Extract lab name from document title (remove .lab or .worldlab extension)
-                        let labName = document.title;
-                        if (labName.toLowerCase().endsWith('.lab')) {
-                            labName = labName.slice(0, -4);
-                        }
-                        else if (labName.toLowerCase().endsWith('.worldlab')) {
-                            labName = labName.slice(0, -10);
-                        }
-                        // Import worldLabService dynamically to avoid circular dependency
-                        const { worldLabService } = await import('./worldLabService.js');
-                        const projectId = document.projectId || '';
-                        if (projectId) {
-                            await worldLabService.deleteLab(labName, projectId);
-                        }
-                        else {
-                            console.warn(`[documentService.deleteUnsafe] No projectId for WorldLab file, skipping directory deletion`);
-                        }
-                        console.log(`[documentService.deleteUnsafe] Background: Successfully deleted WorldLab directory: ${labName}`);
-                    }
-                    catch (labError) {
-                        console.error(`[documentService.deleteUnsafe] Background: Error deleting WorldLab directory:`, labError);
-                        // Don't throw - background cleanup failure shouldn't affect deletion
-                    }
-                }
             }
             catch (bgError) {
                 console.error(`[documentService.deleteUnsafe] Background: Error deleting files for ${id}:`, bgError);

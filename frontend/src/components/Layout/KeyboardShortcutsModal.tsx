@@ -126,18 +126,6 @@ export default function KeyboardShortcutsModal({
         { action: 'Reset zoom', keys: ['Ctrl', '0'] },
       ]
     },
-    {
-      category: 'WorldLab',
-      shortcuts: [
-        { action: 'Undo', keys: ['Ctrl', 'Z'] },
-        { action: 'Redo', keys: ['Ctrl', 'Shift', 'Z'] },
-        { action: 'Redo', keys: ['Ctrl', 'Y'] },
-        { action: 'Copy selected nodes and edges', keys: ['Ctrl', 'C'] },
-        { action: 'Paste copied nodes and edges', keys: ['Ctrl', 'V'] },
-        { action: 'Draw non-directional edge', keys: ['Left Mouse', '+', 'Drag'] },
-        { action: 'Draw directional edge', keys: ['Right Mouse', '+', 'Drag'] },
-      ]
-    }
   ]
 
   const dropdownBg = theme === 'dark' ? '#1a1a1a' : '#ffffff'

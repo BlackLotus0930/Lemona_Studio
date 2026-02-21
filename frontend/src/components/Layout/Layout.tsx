@@ -20,13 +20,11 @@ import AIPanel from '../AIPanel/AIPanel'
 import FileExplorer from '../FileExplorer/FileExplorer'
 import { DocumentEditorSkeleton } from '../Editor/DocumentEditorSkeleton'
 import FullScreenPDFViewer, { PDFViewerSearchHandle } from '../PDFViewer/FullScreenPDFViewer'
-import { Document, IndexingStatus, DocumentSnapshot, WorldLab } from '@shared/types'
+import { Document, IndexingStatus, DocumentSnapshot } from '@shared/types'
 import { documentApi, exportApi, projectApi } from '../../services/api'
-import { indexingApi, versionApi, worldLabApi } from '../../services/desktop-api'
+import { indexingApi, versionApi } from '../../services/desktop-api'
 import { endSession, track } from '../../services/telemetry'
 import { settingsApi } from '../../services/desktop-api'
-import WorldLabCanvas from '../WorldLab/WorldLabCanvas'
-import WorldLabTerminal from '../WorldLab/WorldLabTerminal'
 import { FontSize } from '../Editor/FontSize'
 import { FontFamily } from '../Editor/FontFamily'
 import { LineHeight } from '../Editor/LineHeight'
@@ -204,25 +202,25 @@ function saveProjectFileFolderMap(map: Record<string, string | null>) {
   }
 }
 
-function loadProjectRootFolderOrder(): Array<'worldlab' | 'library' | 'project'> {
+function loadProjectRootFolderOrder(): Array<'library' | 'project'> {
   try {
     const stored = localStorage.getItem(PROJECT_ROOT_FOLDER_ORDER_KEY)
     if (stored) {
       const parsed = JSON.parse(stored)
       if (Array.isArray(parsed)) {
-        const valid = parsed.filter((id) => id === 'worldlab' || id === 'library' || id === 'project')
-        if (valid.length === 3) {
-          return valid as Array<'worldlab' | 'library' | 'project'>
+        const valid = parsed.filter((id) => id === 'library' || id === 'project')
+        if (valid.length === 2) {
+          return valid as Array<'library' | 'project'>
         }
       }
     }
   } catch (error) {
     console.error('Failed to load root folder order:', error)
   }
-  return ['worldlab', 'library', 'project']
+  return ['library', 'project']
 }
 
-function saveProjectRootFolderOrder(order: Array<'worldlab' | 'library' | 'project'>) {
+function saveProjectRootFolderOrder(order: Array<'library' | 'project'>) {
   try {
     localStorage.setItem(PROJECT_ROOT_FOLDER_ORDER_KEY, JSON.stringify(order))
   } catch (error) {
@@ -230,11 +228,10 @@ function saveProjectRootFolderOrder(order: Array<'worldlab' | 'library' | 'proje
   }
 }
 
-type RootFolderMeta = { id: 'worldlab' | 'library' | 'project'; name: string; hidden?: boolean }
+type RootFolderMeta = { id: 'library' | 'project'; name: string; hidden?: boolean }
 
-function loadProjectRootFolderMeta(): Record<'worldlab' | 'library' | 'project', RootFolderMeta> {
-  const defaults: Record<'worldlab' | 'library' | 'project', RootFolderMeta> = {
-    worldlab: { id: 'worldlab', name: 'World Lab', hidden: false },
+function loadProjectRootFolderMeta(): Record<'library' | 'project', RootFolderMeta> {
+  const defaults: Record<'library' | 'project', RootFolderMeta> = {
     library: { id: 'library', name: 'library' },
     project: { id: 'project', name: 'workspace' },
   }
@@ -244,7 +241,6 @@ function loadProjectRootFolderMeta(): Record<'worldlab' | 'library' | 'project',
       const parsed = JSON.parse(stored)
       if (parsed && typeof parsed === 'object') {
         const merged = {
-          worldlab: { ...defaults.worldlab, ...(parsed.worldlab || {}), hidden: false },
           library: { ...defaults.library, ...(parsed.library || {}) },
           project: { ...defaults.project, ...(parsed.project || {}) },
         }
@@ -257,7 +253,7 @@ function loadProjectRootFolderMeta(): Record<'worldlab' | 'library' | 'project',
   return defaults
 }
 
-function saveProjectRootFolderMeta(meta: Record<'worldlab' | 'library' | 'project', RootFolderMeta>) {
+function saveProjectRootFolderMeta(meta: Record<'library' | 'project', RootFolderMeta>) {
   try {
     localStorage.setItem(PROJECT_ROOT_FOLDER_META_KEY, JSON.stringify(meta))
   } catch (error) {
@@ -570,17 +566,17 @@ export default function Layout(): JSX.Element {
     }
   }, [])
   const [fileExplorerSize, setFileExplorerSize] = useState<number>(() => loadFileExplorerSize()) // Track File Explorer size as state
-  const [selectedFolder, setSelectedFolder] = useState<'library' | 'project' | 'worldlab' | null>(null) // Track selected folder
+  const [selectedFolder, setSelectedFolder] = useState<'library' | 'project' | null>(null) // Track selected folder
   const [projectFolders, setProjectFolders] = useState<ProjectFolder[]>(() => loadProjectFolders())
   const [selectedProjectFolderId, setSelectedProjectFolderId] = useState<string | null>(null)
   const [newlyCreatedFolderId, setNewlyCreatedFolderId] = useState<string | null>(null)
   const [projectFileFolderMap, setProjectFileFolderMap] = useState<Record<string, string | null>>(
     () => loadProjectFileFolderMap()
   )
-  const [rootFolderOrder, setRootFolderOrder] = useState<Array<'worldlab' | 'library' | 'project'>>(
+  const [rootFolderOrder, setRootFolderOrder] = useState<Array<'library' | 'project'>>(
     () => loadProjectRootFolderOrder()
   )
-  const [rootFolderMeta, setRootFolderMeta] = useState<Record<'worldlab' | 'library' | 'project', RootFolderMeta>>(
+  const [rootFolderMeta, setRootFolderMeta] = useState<Record<'library' | 'project', RootFolderMeta>>(
     () => loadProjectRootFolderMeta()
   )
   const [isSearchMode, setIsSearchMode] = useState(() => {
@@ -625,20 +621,8 @@ export default function Layout(): JSX.Element {
   const [indexingCompletionNotifications, setIndexingCompletionNotifications] = useState<Map<string, { fileName: string; completedAt: number }>>(new Map()) // Track indexing completion notifications
   const [isSeparatorHovered, setIsSeparatorHovered] = useState(false) // Track AI panel separator hover state
   const [isFileExplorerSeparatorHovered, setIsFileExplorerSeparatorHovered] = useState(false) // Track file explorer separator hover state
-  // WorldLab state
-  const [isWorldLabMode, setIsWorldLabMode] = useState(false) // Track if current document is a WorldLab
-  const [worldLabData, setWorldLabData] = useState<WorldLab | null>(null) // WorldLab data
-  const [_editingNodeId, setEditingNodeId] = useState<string | null>(null) // Node ID currently being edited (setter used by WorldLabCanvas)
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null) // Currently selected node ID for Terminal
-  const [nodeDocumentContent, setNodeDocumentContent] = useState<string | null>(null) // Content for the floating node editor
   const lastContentRef = useRef<string>('') // Track last set content to avoid unnecessary updates
   const currentDocIdRef = useRef<string | null>(null) // Track current document ID
-  const [worldLabUndoRedo, setWorldLabUndoRedo] = useState<{
-    undo: () => void
-    redo: () => void
-    canUndo: () => boolean
-    canRedo: () => boolean
-  } | null>(null) // WorldLab undo/redo handlers
   const currentDocTitleRef = useRef<string | null>(null) // Track current document title for placeholder
   const isLoadingDocumentRef = useRef<boolean>(true) // Track loading state for placeholder
   const isNewlyCreatedDocRef = useRef<boolean>(false) // Track if document was just created (for auto-focus)
@@ -647,18 +631,6 @@ export default function Layout(): JSX.Element {
   const lastRestoredDocIdRef = useRef<string | null>(null) // Track last document ID we restored search state for
   // Store Editor instances for each document (multi-editor architecture)
   const editorsMapRef = useRef<Map<string, Editor>>(new Map())
-  
-  // Open AI panel by default for first-time users when entering WorldLab mode
-  useEffect(() => {
-    if (isWorldLabMode && !isAIPanelOpen) {
-      // Check if this is a first-time user (no stored AI panel state)
-      const stored = localStorage.getItem(AI_PANEL_STORAGE_KEY)
-      if (!stored) {
-        // First-time user: open the panel
-        setIsAIPanelOpen(true)
-      }
-    }
-  }, [isWorldLabMode]) // Only run when WorldLab mode changes
   
   // Helper function to check if document content is empty
   const isDocumentEmpty = (content: any): boolean => {
@@ -711,53 +683,6 @@ export default function Layout(): JSX.Element {
     return docFromList?.content || undefined
   }, [document, documents])
 
-  // Track last checked document to avoid duplicate logs
-  const lastCheckedDocRef = useRef<{ id: string; result: boolean } | null>(null)
-  
-  // Check if a document is a WorldLab file
-  const isWorldLabFile = useCallback((doc: Document | null): boolean => {
-    if (!doc) {
-      return false
-    }
-    
-    // Check if we already checked this document (avoid duplicate logs)
-    if (lastCheckedDocRef.current?.id === doc.id) {
-      return lastCheckedDocRef.current.result
-    }
-    
-    let result = false
-    
-    // Check if folder is 'worldlab'
-    if (doc.folder === 'worldlab') {
-      result = true
-    }
-    // Check if title ends with .worldlab or .lab extension
-    else if (doc.title.toLowerCase().endsWith('.worldlab') || doc.title.toLowerCase().endsWith('.lab')) {
-      result = true
-    }
-    
-    // Cache result and log only once per document
-    lastCheckedDocRef.current = { id: doc.id, result }
-    
-    if (result) {
-      console.log(`[WorldLab] ✓ Detected WorldLab file: id=${doc.id}, title="${doc.title}", folder=${doc.folder}`)
-    }
-    
-    return result
-  }, [])
-
-  // Extract lab name from document title
-  const extractLabName = useCallback((doc: Document): string => {
-    if (doc.title.toLowerCase().endsWith('.lab')) {
-      return doc.title.slice(0, -4) // Remove .lab extension
-    }
-    if (doc.title.toLowerCase().endsWith('.worldlab')) {
-      return doc.title.slice(0, -10) // Remove .worldlab extension (backward compatibility)
-    }
-    // If no extension, use title as-is (for folder-based detection)
-    return doc.title
-  }, [])
-  
   // Clear all search highlights (temporary highlights, not saved to document)
   const clearSearchHighlights = (editor: Editor) => {
     if (!editor) return
@@ -934,12 +859,7 @@ export default function Layout(): JSX.Element {
             saveTimeoutRef.current = null
           }
           
-          // Save WorldLab changes if in WorldLab mode
-          if (isWorldLabMode && worldLabData) {
-            saveWorldLabChangesImmediately(worldLabData)
-          } else {
-            saveDocumentImmediately(document.id)
-          }
+          saveDocumentImmediately(document.id)
         }
         
         // Clear search state in current editor before switching tabs
@@ -977,12 +897,7 @@ export default function Layout(): JSX.Element {
           saveTimeoutRef.current = null
         }
         
-        // Save WorldLab changes if in WorldLab mode
-        if (isWorldLabMode && worldLabData) {
-          saveWorldLabChangesImmediately(worldLabData)
-        } else {
-          saveDocumentImmediately(document.id)
-        }
+        saveDocumentImmediately(document.id)
       }
       
       // Clear search state when closing all tabs
@@ -1073,8 +988,6 @@ export default function Layout(): JSX.Element {
         // Set document first so PDF viewer can render
         if (id === docId) {
           setDocument(doc)
-          setIsWorldLabMode(false)
-          setWorldLabUndoRedo(null)
         }
         
         try {
@@ -1093,65 +1006,10 @@ export default function Layout(): JSX.Element {
           console.error('[PDF] Failed to extract PDF text:', extractionError)
           // Document is already set, extraction will retry on next load if needed
         }
-      } else if (isWorldLabFile(doc)) {
-        // WorldLab file - load Lab data
-        if (id === docId) {
-          setDocument(doc)
-          setIsWorldLabMode(true)
-          setEditingNodeId(null)
-          setNodeDocumentContent(null)
-          
-          try {
-            const labName = extractLabName(doc)
-            const projectId = doc.projectId || ''
-            console.log(`[WorldLab] → Loading Lab: "${labName}" in project: ${projectId}`)
-            
-            if (!projectId) {
-              console.warn(`[WorldLab] ⚠ No projectId for WorldLab file, cannot load`)
-              if (id === docId) {
-                setIsWorldLabMode(false)
-              }
-              return
-            }
-            
-            const worldLab = await worldLabApi.load(labName, projectId)
-            
-            if (worldLab && id === docId) {
-              setWorldLabData(worldLab)
-              console.log(`[WorldLab] ✓ Loaded: ${worldLab.nodes.length} nodes, ${worldLab.edges.length} edges`)
-            } else if (!worldLab && id === docId) {
-              console.warn(`[WorldLab] ⚠ Lab not found, using empty structure: ${labName}`)
-              // Even if Lab doesn't exist, we can still show empty canvas
-              // Create empty WorldLab data structure
-              const emptyWorldLab: WorldLab = {
-                labPath: '',
-                labName,
-                metadata: {
-                  createdAt: new Date().toISOString(),
-                  updatedAt: new Date().toISOString(),
-                },
-                nodes: [],
-                edges: [],
-              }
-              setWorldLabData(emptyWorldLab)
-            }
-          } catch (error) {
-            console.error('[WorldLab] ✗ Error loading Lab:', error)
-            if (id === docId) {
-              setIsWorldLabMode(false)
-            }
-          }
-        }
       } else {
-        // Not a PDF or WorldLab - regular document
-        // Only update document if this is still the current route
-        // This prevents race conditions when rapidly switching files
+        // Regular document (including former WorldLab .lab files - now opened as normal docs)
         if (id === docId) {
           setDocument(doc)
-          setIsWorldLabMode(false)
-          setWorldLabUndoRedo(null)
-          setEditingNodeId(null)
-          setNodeDocumentContent(null)
         }
       }
       
@@ -2139,320 +1997,6 @@ export default function Layout(): JSX.Element {
     })
   }
 
-  // Save WorldLab changes immediately (no debounce)
-  const saveWorldLabChangesImmediately = useCallback(async (labData: WorldLab) => {
-    if (!labData) return
-    
-    try {
-      // Convert nodes to positions and metadata maps
-      const nodePositions: Record<string, { x: number; y: number }> = {}
-      const nodeMetadata: Record<string, { label?: string; category?: string; elementName?: string }> = {}
-      
-      labData.nodes.forEach(node => {
-        nodePositions[node.id] = node.position
-        nodeMetadata[node.id] = {
-          label: node.label,
-          category: node.category,
-          elementName: node.elementName,
-        }
-      })
-      
-      // Save edges with current node positions and metadata
-      const projectId = document?.projectId || ''
-      if (projectId) {
-        await worldLabApi.saveEdges(labData.labName, labData.edges, projectId, nodePositions, nodeMetadata)
-      }
-      console.log('[WorldLab] ✓ Saved changes before switching')
-    } catch (error) {
-      console.error('[WorldLab] ✗ Failed to save changes:', error)
-    }
-  }, [])
-
-  // WorldLab node interaction handlers
-  const handleNodeSingleClick = useCallback((nodeId: string) => {
-    // Single click - update selected node for Terminal
-    setSelectedNodeId(nodeId)
-    console.log('[WorldLab] Node clicked:', nodeId)
-  }, [])
-
-  // Handle node selection from Terminal (focus on canvas)
-  const handleTerminalNodeSelect = useCallback((nodeId: string | null) => {
-    setSelectedNodeId(nodeId)
-    // TODO: Focus on the node in canvas (can be enhanced later)
-  }, [])
-
-  // Helper function to convert markdown text to TipTap JSON
-  const markdownToTipTap = (markdown: string): any => {
-    if (!markdown || !markdown.trim()) {
-      return {
-        type: 'doc',
-        content: [{ type: 'paragraph', content: [] }],
-      }
-    }
-
-    const lines = markdown.split('\n')
-    const content: any[] = []
-
-    for (const line of lines) {
-      if (line.trim() === '') {
-        content.push({ type: 'paragraph', content: [] })
-      } else if (line.startsWith('# ')) {
-        content.push({
-          type: 'heading',
-          attrs: { level: 1 },
-          content: [{ type: 'text', text: line.slice(2) }],
-        })
-      } else if (line.startsWith('## ')) {
-        content.push({
-          type: 'heading',
-          attrs: { level: 2 },
-          content: [{ type: 'text', text: line.slice(3) }],
-        })
-      } else if (line.startsWith('### ')) {
-        content.push({
-          type: 'heading',
-          attrs: { level: 3 },
-          content: [{ type: 'text', text: line.slice(4) }],
-        })
-      } else {
-        // Regular paragraph
-        const textNodes: any[] = []
-        let currentText = line
-        let pos = 0
-
-        // Simple markdown parsing for bold and italic
-        while (pos < currentText.length) {
-          if (currentText.slice(pos, pos + 3) === '***') {
-            // Bold italic
-            const end = currentText.indexOf('***', pos + 3)
-            if (end !== -1) {
-              const text = currentText.slice(pos + 3, end)
-              textNodes.push({
-                type: 'text',
-                text,
-                marks: [{ type: 'bold' }, { type: 'italic' }],
-              })
-              pos = end + 3
-            } else {
-              textNodes.push({ type: 'text', text: currentText.slice(pos) })
-              break
-            }
-          } else if (currentText.slice(pos, pos + 2) === '**') {
-            // Bold
-            const end = currentText.indexOf('**', pos + 2)
-            if (end !== -1) {
-              const text = currentText.slice(pos + 2, end)
-              textNodes.push({
-                type: 'text',
-                text,
-                marks: [{ type: 'bold' }],
-              })
-              pos = end + 2
-            } else {
-              textNodes.push({ type: 'text', text: currentText.slice(pos) })
-              break
-            }
-          } else if (currentText[pos] === '*' && pos + 1 < currentText.length && currentText[pos + 1] !== '*') {
-            // Italic
-            const end = currentText.indexOf('*', pos + 1)
-            if (end !== -1) {
-              const text = currentText.slice(pos + 1, end)
-              textNodes.push({
-                type: 'text',
-                text,
-                marks: [{ type: 'italic' }],
-              })
-              pos = end + 1
-            } else {
-              textNodes.push({ type: 'text', text: currentText.slice(pos) })
-              break
-            }
-          } else {
-            const nextBold = currentText.indexOf('**', pos)
-            const nextItalic = currentText.indexOf('*', pos)
-            let nextPos = currentText.length
-
-            if (nextBold !== -1 && nextBold < nextPos) nextPos = nextBold
-            if (nextItalic !== -1 && nextItalic < nextPos && (nextItalic === pos || currentText[nextItalic - 1] !== '*')) {
-              nextPos = nextItalic
-            }
-
-            if (nextPos < currentText.length) {
-              textNodes.push({ type: 'text', text: currentText.slice(pos, nextPos) })
-              pos = nextPos
-            } else {
-              textNodes.push({ type: 'text', text: currentText.slice(pos) })
-              break
-            }
-          }
-        }
-
-        content.push({
-          type: 'paragraph',
-          content: textNodes.length > 0 ? textNodes : [],
-        })
-      }
-    }
-
-    return {
-      type: 'doc',
-      content: content.length > 0 ? content : [{ type: 'paragraph', content: [] }],
-    }
-  }
-
-  const handleNodeDoubleClick = useCallback(async (nodeId: string) => {
-    // Double click - load node content for floating editor
-    if (!worldLabData) return
-
-    try {
-      const labName = worldLabData.labName
-      setEditingNodeId(nodeId)
-
-      // Load node.md file content
-      const projectId = document?.projectId || ''
-      if (!projectId) {
-        console.error('[WorldLab] No projectId available')
-        setEditingNodeId(null)
-        setNodeDocumentContent(null)
-        return
-      }
-      const nodeMarkdown = await worldLabApi.loadNodeContent(labName, nodeId, projectId)
-      const nodeContent = JSON.stringify(markdownToTipTap(nodeMarkdown || ''))
-      setNodeDocumentContent(nodeContent)
-    } catch (error) {
-      console.error('[WorldLab] Failed to load node content:', error)
-      setEditingNodeId(null)
-      setNodeDocumentContent(null)
-    }
-  }, [worldLabData])
-
-  // Handle closing Node Editor
-  const handleCloseNodeEditor = useCallback(() => {
-    setEditingNodeId(null)
-    setNodeDocumentContent(null)
-  }, [])
-  
-  // Handle saving node document content
-  const handleNodeDocumentSave = useCallback(async (nodeId: string, content: string) => {
-    if (!worldLabData) return
-    
-    try {
-      const labName = worldLabData.labName
-      // Convert TipTap JSON to markdown
-      const parsedContent = JSON.parse(content)
-      const markdown = tipTapToMarkdown(parsedContent)
-      const projectId = document?.projectId || ''
-      if (!projectId) {
-        console.error('[WorldLab] No projectId available')
-        return
-      }
-      await worldLabApi.saveNode(labName, nodeId, markdown, projectId)
-    } catch (error) {
-      console.error('[WorldLab] Failed to save node content:', error)
-    }
-  }, [worldLabData])
-
-  // Convert TipTap JSON to markdown
-  const tipTapToMarkdown = (node: any): string => {
-    if (!node || !node.content) return ''
-
-    const lines: string[] = []
-
-    const processNode = (n: any, indent: number = 0): void => {
-      if (!n) return
-
-      switch (n.type) {
-        case 'heading':
-          const level = n.attrs?.level || 1
-          const headingText = extractTextFromNode(n)
-          lines.push(`${'#'.repeat(level)} ${headingText}`)
-          break
-
-        case 'paragraph':
-          const paraText = extractTextFromNode(n)
-          if (paraText.trim()) {
-            lines.push(paraText)
-          } else {
-            lines.push('')
-          }
-          break
-
-        case 'codeBlock':
-          const codeText = extractTextFromNode(n)
-          const language = n.attrs?.language || ''
-          lines.push('```' + language)
-          lines.push(codeText)
-          lines.push('```')
-          break
-
-        case 'bulletList':
-        case 'orderedList':
-          if (n.content) {
-            n.content.forEach((item: any) => {
-              processNode(item, indent)
-            })
-          }
-          break
-
-        case 'listItem':
-          const itemText = extractTextFromNode(n)
-          if (itemText.trim()) {
-            lines.push(`${'  '.repeat(indent)}- ${itemText}`)
-          }
-          if (n.content) {
-            n.content.forEach((child: any) => {
-              if (child.type !== 'paragraph') {
-                processNode(child, indent + 1)
-              }
-            })
-          }
-          break
-
-        case 'blockquote':
-          const quoteText = extractTextFromNode(n)
-          quoteText.split('\n').forEach((line: string) => {
-            lines.push(`> ${line}`)
-          })
-          break
-
-        default:
-          if (n.content && Array.isArray(n.content)) {
-            n.content.forEach((child: any) => processNode(child, indent))
-          }
-      }
-    }
-
-    const extractTextFromNode = (n: any): string => {
-      if (n.type === 'text') {
-        let text = n.text || ''
-        // Apply marks
-        if (n.marks) {
-          n.marks.forEach((mark: any) => {
-            if (mark.type === 'bold') {
-              text = `**${text}**`
-            } else if (mark.type === 'italic') {
-              text = `*${text}*`
-            } else if (mark.type === 'code') {
-              text = `\`${text}\``
-            }
-          })
-        }
-        return text
-      }
-      if (n.content && Array.isArray(n.content)) {
-        return n.content.map(extractTextFromNode).join('')
-      }
-      return ''
-    }
-
-    if (node.content) {
-      node.content.forEach((n: any) => processNode(n))
-    }
-
-    return lines.join('\n')
-  }
-
-
   // Save tabs to localStorage whenever they change
   useEffect(() => {
     try {
@@ -2850,14 +2394,11 @@ export default function Layout(): JSX.Element {
       if (isCurrentDocument) {
         // Helper function to get documents in file explorer order:
         // 1. Library files (sorted by order or createdAt)
-        // 2. WorldLab files (sorted by order or createdAt)
-        // 3. Project files (sorted by order or createdAt)
+        // 2. Project/workspace files (includes former worldlab, sorted by order or createdAt)
         const getDocumentsInFileExplorerOrder = (docs: Document[]): Document[] => {
           const libraryDocs = docs.filter(doc => doc.folder === 'library')
-          const worldLabDocs = docs.filter(doc => doc.folder === 'worldlab')
-          const projectDocs = docs.filter(doc => (!doc.folder || doc.folder === 'project'))
+          const projectDocs = docs.filter(doc => !doc.folder || doc.folder === 'project' || doc.folder === 'worldlab')
           
-          // Sort documents by order if available, otherwise by creation time
           const sortDocuments = (docsToSort: Document[]) => {
             return [...docsToSort].sort((a, b) => {
               if (a.order !== undefined && b.order !== undefined) {
@@ -2869,7 +2410,6 @@ export default function Layout(): JSX.Element {
           
           const orderedDocs: Document[] = []
           orderedDocs.push(...sortDocuments(libraryDocs))
-          orderedDocs.push(...sortDocuments(worldLabDocs))
           orderedDocs.push(...sortDocuments(projectDocs))
           
           return orderedDocs
@@ -2895,9 +2435,8 @@ export default function Layout(): JSX.Element {
           const deletedDoc = orderedDocuments[deletedIndex]
           const deletedFolder = deletedDoc?.folder || 'project'
           
-          // Get folder boundaries in the ORIGINAL ordered list to determine position
+          // Get folder boundaries (library | project, worldlab docs treated as project)
           const originalLibraryDocs = documents.filter(doc => doc.folder === 'library')
-          const originalWorldLabDocs = documents.filter(doc => doc.folder === 'worldlab')
           
           const sortDocuments = (docsToSort: Document[]) => {
             return [...docsToSort].sort((a, b) => {
@@ -2909,79 +2448,34 @@ export default function Layout(): JSX.Element {
           }
           
           const originalSortedLibraryDocs = sortDocuments(originalLibraryDocs)
-          const originalSortedWorldLabDocs = sortDocuments(originalWorldLabDocs)
-          
-          // Calculate folder start indices in the ORIGINAL ordered list
           const originalLibraryStartIndex = 0
-          const originalWorldLabStartIndex = originalLibraryStartIndex + originalSortedLibraryDocs.length
-          const originalProjectStartIndex = originalWorldLabStartIndex + originalSortedWorldLabDocs.length
+          const originalProjectStartIndex = originalLibraryStartIndex + originalSortedLibraryDocs.length
           
-          // Get folder boundaries in the UPDATED ordered list
           const updatedLibraryDocs = updatedDocuments.filter(doc => doc.folder === 'library')
-          const updatedWorldLabDocs = updatedDocuments.filter(doc => doc.folder === 'worldlab')
-          const updatedProjectDocs = updatedDocuments.filter(doc => (!doc.folder || doc.folder === 'project'))
+          const updatedProjectDocs = updatedDocuments.filter(doc => !doc.folder || doc.folder === 'project' || doc.folder === 'worldlab')
           
           const updatedSortedLibraryDocs = sortDocuments(updatedLibraryDocs)
-          const updatedSortedWorldLabDocs = sortDocuments(updatedWorldLabDocs)
           const updatedSortedProjectDocs = sortDocuments(updatedProjectDocs)
           
           const updatedLibraryStartIndex = 0
-          const updatedWorldLabStartIndex = updatedLibraryStartIndex + updatedSortedLibraryDocs.length
-          const updatedProjectStartIndex = updatedWorldLabStartIndex + updatedSortedWorldLabDocs.length
+          const updatedProjectStartIndex = updatedLibraryStartIndex + updatedSortedLibraryDocs.length
           
           let targetIndex: number
           
           if (deletedFolder === 'library') {
-            // Check if this was the first file in the library folder (in original list)
             const isFirstInLibrary = deletedIndex === originalLibraryStartIndex
-            
-            if (isFirstInLibrary) {
-              // If there's another file in the library folder after deletion, go to it
-              if (updatedSortedLibraryDocs.length > 0) {
-                // Go to the first library file in the updated list
-                targetIndex = updatedLibraryStartIndex
-              } else {
-                // No more files in library, go to the file above
-                targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
-              }
+            if (isFirstInLibrary && updatedSortedLibraryDocs.length > 0) {
+              targetIndex = updatedLibraryStartIndex
             } else {
-              // Not the first file, go to the file above
-              targetIndex = deletedIndex - 1
-            }
-          } else if (deletedFolder === 'worldlab') {
-            // Check if this was the first file in the worldlab folder (in original list)
-            const isFirstInWorldLab = deletedIndex === originalWorldLabStartIndex
-            
-            if (isFirstInWorldLab) {
-              // If there's another file in the worldlab folder after deletion, go to it
-              if (updatedSortedWorldLabDocs.length > 0) {
-                // Go to the first worldlab file in the updated list
-                targetIndex = updatedWorldLabStartIndex
-              } else {
-                // No more files in worldlab, go to the file above (last library file)
-                targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
-              }
-            } else {
-              // Not the first file, go to the file above
-              targetIndex = deletedIndex - 1
+              targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
             }
           } else {
-            // Project folder
-            // Check if this was the first file in the project folder (in original list)
+            // Project or worldlab (both treated as project)
             const isFirstInProject = deletedIndex === originalProjectStartIndex
-            
-            if (isFirstInProject) {
-              // If there's another file in the project folder after deletion, go to it
-              if (updatedSortedProjectDocs.length > 0) {
-                // Go to the first project file in the updated list
-                targetIndex = updatedProjectStartIndex
-              } else {
-                // No more files in project, go to the file above (last worldlab file or library file)
-                targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
-              }
+            if (isFirstInProject && updatedSortedProjectDocs.length > 0) {
+              targetIndex = updatedProjectStartIndex
             } else {
-              // Not the first file, go to the file above
-              targetIndex = deletedIndex - 1
+              targetIndex = deletedIndex > 0 ? deletedIndex - 1 : 0
             }
           }
           
@@ -3084,48 +2578,28 @@ export default function Layout(): JSX.Element {
       setIsGitMode(false)
     }
     try {
-      // Use selected folder if available, otherwise check current document's folder or isWorldLabMode
-      // If still not determined, default to 'project'
-      let folder: 'library' | 'project' | 'worldlab' = 'project'
-      if (selectedFolder === 'library' || selectedFolder === 'worldlab') {
-        folder = selectedFolder
-      } else if (selectedFolder === 'project') {
+      // Use selected folder if available, otherwise check current document's folder
+      let folder: 'library' | 'project' = 'project'
+      if (selectedFolder === 'library') {
+        folder = 'library'
+      } else if (selectedFolder === 'project' || document?.folder === 'project' || !document?.folder) {
         folder = 'project'
-      } else if (isWorldLabMode || document?.folder === 'worldlab') {
-        folder = 'worldlab'
       } else if (document?.folder === 'library') {
         folder = 'library'
-      } else if (!selectedFolder && document?.folder === 'project') {
-        folder = 'project'
       }
       
-      // Generate name based on folder: "Chapter X" for workspace, "Doc X" for library, "New world X.lab" for worldlab
-      const namePrefix = folder === 'library' ? 'Doc' : folder === 'worldlab' ? 'New world' : 'Chapter'
+      // Generate name based on folder: "Chapter X" for workspace, "Doc X" for library
+      const namePrefix = folder === 'library' ? 'Doc' : 'Chapter'
       const folderDocs = documents.filter(doc => 
         (folder === 'library' && doc.folder === 'library') ||
-        (folder === 'worldlab' && doc.folder === 'worldlab') ||
-        (folder === 'project' && (!doc.folder || doc.folder === 'project'))
+        (folder === 'project' && (!doc.folder || doc.folder === 'project' || doc.folder === 'worldlab'))
       )
-      // For WorldLab, check titles without .lab extension to avoid duplicates
-      const existingTitles = folderDocs.map(doc => {
-        if (folder === 'worldlab' && (doc.title.toLowerCase().endsWith('.lab') || doc.title.toLowerCase().endsWith('.worldlab'))) {
-          // Handle both .lab and .worldlab extensions for backward compatibility
-          if (doc.title.toLowerCase().endsWith('.lab')) {
-            return doc.title.slice(0, -4).toLowerCase() // Remove .lab extension and normalize to lowercase for comparison
-          }
-          return doc.title.slice(0, -10).toLowerCase() // Remove .worldlab extension and normalize to lowercase for comparison
-        }
-        return doc.title.toLowerCase()
-      })
+      const existingTitles = folderDocs.map(doc => doc.title.toLowerCase())
       let number = 1
       while (existingTitles.includes(`${namePrefix.toLowerCase()} ${number}`)) {
         number++
       }
-      // For WorldLab files, add .lab extension to title
-      const baseTitle = `${namePrefix} ${number}`
-      const newTitle = folder === 'worldlab' ? `${baseTitle}.lab` : baseTitle
-      
-      console.log(`[WorldLab] Creating new document: folder=${folder}, title=${newTitle}`)
+      const newTitle = `${namePrefix} ${number}`
       const newDoc = await documentApi.create(newTitle, folder)
       track('document_created', { source: 'layout' })
       if (folder === 'project') {
@@ -3140,8 +2614,7 @@ export default function Layout(): JSX.Element {
         // Calculate order based on documents in the same folder
         const folderDocs = documents.filter(doc => 
           (folder === 'library' && doc.folder === 'library') ||
-          (folder === 'worldlab' && doc.folder === 'worldlab') ||
-          (folder === 'project' && (!doc.folder || doc.folder === 'project'))
+          (folder === 'project' && (!doc.folder || doc.folder === 'project' || doc.folder === 'worldlab'))
         )
         // Find the maximum order in the folder, or use folderDocs.length as fallback
         const maxOrder = folderDocs.length > 0
@@ -3227,8 +2700,7 @@ export default function Layout(): JSX.Element {
     const parentId =
       selectedProjectFolderId ||
       (selectedFolder === 'library' ? 'library' :
-        selectedFolder === 'worldlab' ? 'worldlab' :
-          selectedFolder === 'project' ? 'project' : null)
+        selectedFolder === 'project' ? 'project' : null)
     const siblingOrders = projectFolders
       .filter(folder => (folder.parentId ?? null) === parentId)
       .map(folder => folder.order ?? 0)
@@ -3282,8 +2754,8 @@ export default function Layout(): JSX.Element {
   }
 
   const handleReorderRootFolders = (
-    sourceId: 'worldlab' | 'library' | 'project',
-    targetId: 'worldlab' | 'library' | 'project',
+    sourceId: 'library' | 'project',
+    targetId: 'library' | 'project',
     position: 'above' | 'below'
   ) => {
     setRootFolderOrder((prev) => {
@@ -3297,7 +2769,7 @@ export default function Layout(): JSX.Element {
     })
   }
 
-  const handleRootFolderRename = (folderId: 'worldlab' | 'library' | 'project', newName: string) => {
+  const handleRootFolderRename = (folderId: 'library' | 'project', newName: string) => {
     const trimmedName = newName.trim()
     if (!trimmedName) return
     setRootFolderMeta((prev) => {
@@ -3310,7 +2782,7 @@ export default function Layout(): JSX.Element {
     })
   }
 
-  const handleRootFolderDelete = (folderId: 'worldlab' | 'library' | 'project') => {
+  const handleRootFolderDelete = (folderId: 'library' | 'project') => {
     setRootFolderMeta((prev) => {
       const next = {
         ...prev,
@@ -3331,7 +2803,7 @@ export default function Layout(): JSX.Element {
       const target = prev.find(folder => folder.id === targetId)
       if (!source || !target) {
         // Handle root <-> folder moves
-        const rootIds = new Set(['library', 'worldlab', 'project'])
+        const rootIds = new Set(['library', 'project'])
         if (!rootIds.has(sourceId) && rootIds.has(targetId)) {
           const targetParent = targetId
           const targetSiblings = prev
@@ -4421,11 +3893,6 @@ export default function Layout(): JSX.Element {
         }
       }
       
-      // Save WorldLab changes if in WorldLab mode before closing
-      if (isWorldLabMode && worldLabData) {
-        await saveWorldLabChangesImmediately(worldLabData)
-      }
-      
       // Reload current document from backend to restore to last saved state
       if (document?.id) {
         const editor = getEditor(document.id)
@@ -4473,12 +3940,7 @@ export default function Layout(): JSX.Element {
           saveTimeoutRef.current = null
         }
         
-        // Save WorldLab changes if in WorldLab mode
-        if (isWorldLabMode && worldLabData) {
-          await saveWorldLabChangesImmediately(worldLabData)
-        } else {
-          await saveDocumentImmediately(document.id)
-        }
+        await saveDocumentImmediately(document.id)
       }
     }
     
@@ -4487,7 +3949,7 @@ export default function Layout(): JSX.Element {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
     }
-  }, [document?.id, isWorldLabMode, worldLabData, saveDocumentImmediately, saveWorldLabChangesImmediately])
+  }, [document?.id, saveDocumentImmediately])
 
   // Search results use temporary highlights (Chrome-style) that are not saved to the document
 
@@ -7278,30 +6740,6 @@ export default function Layout(): JSX.Element {
           ) : isLoadingDocument && !document ? (
             // Show skeleton in editor area when loading first document
             <DocumentEditorSkeleton />
-          ) : isWorldLabMode && worldLabData ? (
-            // WorldLab mode - render Canvas with floating editor
-            <WorldLabCanvas
-              labName={worldLabData.labName}
-              projectId={document?.projectId || ''}
-              initialNodes={worldLabData.nodes}
-              initialEdges={worldLabData.edges}
-              onNodeDoubleClick={handleNodeDoubleClick}
-              onNodeClick={handleNodeSingleClick}
-              onNodesChange={(nodes) => {
-                setWorldLabData(prev => (prev ? { ...prev, nodes } : prev))
-              }}
-              onEdgesChange={(edges) => {
-                setWorldLabData(prev => (prev ? { ...prev, edges } : prev))
-              }}
-              onCloseNodeEditor={handleCloseNodeEditor}
-              onUndoRedoReady={setWorldLabUndoRedo}
-              nodeDocumentContent={nodeDocumentContent || undefined}
-              onNodeDocumentSave={handleNodeDocumentSave}
-              onBeforeExternalChange={() => {
-                // Called by Canvas when external changes (from Terminal) are detected
-                // Canvas will automatically save current state to history before applying changes
-              }}
-            />
           ) : (
             <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
               {document && !document.title.toLowerCase().endsWith('.pdf') && (
@@ -7321,7 +6759,7 @@ export default function Layout(): JSX.Element {
                     <Toolbar 
                       editor={document?.id ? getEditor(document.id) : null}
                       documentTitle={document?.title}
-                      customUndoRedo={isWorldLabMode && worldLabUndoRedo ? worldLabUndoRedo : undefined}
+                      customUndoRedo={undefined}
                     />
                   </div>
                   <div style={{
@@ -7453,35 +6891,11 @@ export default function Layout(): JSX.Element {
               minSize={15}
               onResize={handleAIPanelResize}
             >
-              {isWorldLabMode && worldLabData ? (
-                <WorldLabTerminal
-                  key={worldLabData.labName}
-                  labName={worldLabData.labName}
-                  worldLabData={worldLabData}
-                  selectedNodeId={selectedNodeId}
-                  onNodeSelect={handleTerminalNodeSelect}
-                  onNodesChange={(nodes) => {
-                    setWorldLabData(prev => (prev ? { ...prev, nodes } : prev))
-                  }}
-                  onEdgesChange={(edges) => {
-                    setWorldLabData(prev => (prev ? { ...prev, edges } : prev))
-                  }}
-                  projectId={document?.projectId}
-                  onClose={handleAIPanelClose}
-                  onBeforeOperation={() => {
-                    // Called before Terminal operations that modify nodes/edges
-                    // Canvas will automatically detect the change via useEffect and save history
-                    // before applying the external changes
-                  }}
-                  undoRedoHandlers={worldLabUndoRedo}
-                />
-              ) : (
-                <AIPanel
-                  document={document}
-                  onClose={handleAIPanelClose}
-                  getRealtimeDocumentContent={getRealtimeDocumentContent}
-                />
-              )}
+              <AIPanel
+                document={document}
+                onClose={handleAIPanelClose}
+                getRealtimeDocumentContent={getRealtimeDocumentContent}
+              />
             </Panel>
           </>
         )}
@@ -7523,7 +6937,7 @@ export default function Layout(): JSX.Element {
                 ? 'inset 0 -1px 0 rgba(255, 255, 255, 0.18)'
                 : 'inset 0 -1px 0 rgba(0, 0, 0, 0.28)'
             }}
-            title={isWorldLabMode ? "Open Terminal" : "Open AI Chat"}
+            title="Open AI Chat"
           >
             {/*
               Make both icon and text the same, a bit darker grayscale color in both themes.
@@ -7873,5 +7287,3 @@ export default function Layout(): JSX.Element {
     </>
   )
 }
-
-

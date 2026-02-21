@@ -19,6 +19,7 @@ export const modelGatewayService = {
     modelName?: string,
     attachments?: ChatAttachment[],
     style?: string,
+    sourceTypes?: string[],
     onProgress?: (event: AgentProgressEvent) => void
   ): Promise<AsyncGenerator<string>> {
     const active = await aiProviderStore.getActiveChatProfile()
@@ -41,6 +42,7 @@ export const modelGatewayService = {
         style,
         googleApiKey,
         active.baseUrl,
+        sourceTypes,
         onProgress
       )
     }
@@ -62,6 +64,7 @@ export const modelGatewayService = {
         style,
         googleApiKey,
         undefined,
+        sourceTypes,
         onProgress
       )
     }
@@ -82,6 +85,7 @@ export const modelGatewayService = {
         attachments,
         style,
         openaiApiKey,
+        sourceTypes,
         onProgress
       )
     }
@@ -105,6 +109,7 @@ export const modelGatewayService = {
           attachments,
           style,
           openaiApiKey,
+          sourceTypes,
           onProgress
         )
       }
@@ -123,6 +128,7 @@ export const modelGatewayService = {
         style,
         googleApiKey,
         undefined,
+        sourceTypes,
         onProgress
       )
     }
@@ -141,6 +147,7 @@ export const modelGatewayService = {
           style,
           googleApiKey,
           undefined,
+          sourceTypes,
           onProgress
         )
       }
@@ -158,6 +165,7 @@ export const modelGatewayService = {
         attachments,
         style,
         openaiApiKey,
+        sourceTypes,
         onProgress
       )
     }
@@ -174,6 +182,7 @@ export const modelGatewayService = {
         attachments,
         style,
         openaiApiKey,
+        sourceTypes,
         onProgress
       )
     }
@@ -190,6 +199,7 @@ export const modelGatewayService = {
         style,
         googleApiKey,
         undefined,
+        sourceTypes,
         onProgress
       )
     }

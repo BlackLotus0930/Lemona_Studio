@@ -239,7 +239,7 @@ async function getReadmeContent(projectId: string): Promise<string | null> {
   }
 }
 
-async function buildContext(documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], style?: string, cursorPosition?: number, apiKey?: string, userMessage?: string, geminiApiKey?: string, onProgress?: (event: AgentProgressEvent) => void): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: AIChatMessage['reasoningMetadata'] }> {
+async function buildContext(documentContent?: string, projectId?: string, chatHistory?: AIChatMessage[], style?: string, cursorPosition?: number, apiKey?: string, userMessage?: string, geminiApiKey?: string, sourceTypes?: string[], onProgress?: (event: AgentProgressEvent) => void): Promise<{ systemInstruction: string, chatHistory: AIChatMessage[], reasoningMetadata?: AIChatMessage['reasoningMetadata'] }> {
   const isAgentMode = userMessage?.includes('You are in AGENT MODE') ?? false
 
   let systemInstruction: string
@@ -401,6 +401,7 @@ Use rich markdown formatting to make information visually clear:
           apiKey, // Fallback to OpenAI
           10, // max steps
           undefined,
+          sourceTypes,
           { onProgress }
         )
 
@@ -511,7 +512,8 @@ Use rich markdown formatting to make information visually clear:
             projectId,
             geminiApiKey,
             apiKey,
-            6
+            6,
+            sourceTypes as any
           )
 
           // Collect metadata from fallback search
@@ -791,11 +793,12 @@ export const openaiService = {
     style?: string,
     geminiApiKey?: string,
     baseUrl?: string,
+    sourceTypes?: string[],
     onProgress?: (event: AgentProgressEvent) => void
   ): AsyncGenerator<string> {
     const client = getClient(apiKey, baseUrl)
     const model = getModelName(modelName || 'gpt-4.1-nano', attachments && attachments.length > 0)
-    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey, onProgress)
+    const { systemInstruction, chatHistory: history, reasoningMetadata } = await buildContext(documentContent, projectId, chatHistory, style, undefined, apiKey, message, geminiApiKey, sourceTypes, onProgress)
     
     // Send metadata first (if available) as a special chunk
     if (reasoningMetadata) {

@@ -1,5 +1,5 @@
 // Desktop API - Uses Electron IPC instead of HTTP
-import { Project, AIChatMessage, DocumentSnapshot, WorldLab, WorldLabNode, WorldLabEdge, WorldLabMetadata } from '@shared/types'
+import { Project, AIChatMessage, DocumentSnapshot } from '@shared/types'
 
 export interface IntegrationSource {
   id: string
@@ -129,7 +129,7 @@ export const aiApi = {
   },
   getStatus: () =>
     invokeOrFetch('ai:getStatus'),
-  streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string, attachments?: any[], style?: string, projectId?: string, googleApiKeyOverride?: string, openaiApiKeyOverride?: string): Promise<Response> => {
+  streamChat: async (message: string, documentContent?: string, documentId?: string, chatHistory?: AIChatMessage[], useWebSearch?: boolean, modelName?: string, attachments?: any[], style?: string, projectId?: string, sourceTypes?: string[], googleApiKeyOverride?: string, openaiApiKeyOverride?: string): Promise<Response> => {
     if (!isElectron) {
       throw new Error('Streaming not available in web mode')
     }
@@ -164,7 +164,7 @@ export const aiApi = {
         
         try {
           // Start stream and get streamId
-          const { streamId } = await window.electron!.invoke('ai:streamChat', googleApiKey, openaiApiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, attachments, style, projectId)
+          const { streamId } = await window.electron!.invoke('ai:streamChat', googleApiKey, openaiApiKey, message, documentContent, documentId, chatHistory, useWebSearch, modelName, attachments, style, projectId, sourceTypes)
           
           // Note: preload script strips the event, so callbacks receive args directly
           const onChunk = (receivedStreamId: string, chunk: string) => {
@@ -447,36 +447,48 @@ export const versionApi = {
     invokeOrFetch('version:restoreCommit', projectId, commitId),
 }
 
-export const worldLabApi = {
-  load: (labName: string, projectId: string): Promise<WorldLab | null> =>
-    invokeOrFetch('worldlab:load', labName, projectId),
-  loadNodes: (labName: string, projectId: string): Promise<WorldLabNode[]> =>
-    invokeOrFetch('worldlab:loadNodes', labName, projectId),
-  loadEdges: (labName: string, projectId: string): Promise<WorldLabEdge[]> =>
-    invokeOrFetch('worldlab:loadEdges', labName, projectId),
-  loadMetadata: (labName: string, projectId: string): Promise<WorldLabMetadata | null> =>
-    invokeOrFetch('worldlab:loadMetadata', labName, projectId),
-  loadNodeContent: (labName: string, nodeId: string, projectId: string): Promise<string | null> =>
-    invokeOrFetch('worldlab:loadNodeContent', labName, nodeId, projectId),
-  loadMetadataContent: (labName: string, projectId: string): Promise<string | null> =>
-    invokeOrFetch('worldlab:loadMetadataContent', labName, projectId),
-  saveNode: (labName: string, nodeId: string, content: string, projectId: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:saveNode', labName, nodeId, content, projectId),
-  saveEdges: (labName: string, edges: WorldLabEdge[], projectId: string, nodePositions?: Record<string, { x: number; y: number }>, nodeMetadata?: Record<string, { label?: string; category?: string; elementName?: string }>): Promise<boolean> =>
-    invokeOrFetch('worldlab:saveEdges', labName, edges, projectId, nodePositions, nodeMetadata),
-  saveNodePositions: (labName: string, nodes: WorldLabNode[], projectId: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:saveNodePositions', labName, nodes, projectId),
-  createNode: (labName: string, nodeId: string, projectId: string, content?: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:createNode', labName, nodeId, projectId, content),
-  deleteNode: (labName: string, nodeId: string, projectId: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:deleteNode', labName, nodeId, projectId),
-  saveMetadata: (labName: string, metadata: WorldLabMetadata, projectId: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:saveMetadata', labName, metadata, projectId),
-  labExists: (labName: string, projectId: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:labExists', labName, projectId),
-  getAllLabNames: (projectId: string): Promise<string[]> =>
-    invokeOrFetch('worldlab:getAllLabNames', projectId),
-  deleteLab: (labName: string, projectId: string): Promise<boolean> =>
-    invokeOrFetch('worldlab:deleteLab', labName, projectId),
+export interface EvidenceQueryResult {
+  chunks: Array<{
+    chunk: { id: string; fileId: string; chunkIndex: number; text: string }
+    score: number
+  }>
+  excerpt: string
+  structuredResult?: Record<string, unknown>
+  executedAt?: string
+  timeWindow?: string
+  queryFingerprint?: string
+}
+
+export interface RunEvidenceQueryParams {
+  text?: string
+  sourceTypes?: string[]
+  connector?: string
+  metric?: string
+  params?: {
+    timeRange?: string
+    startDate?: string
+    endDate?: string
+    decisionTimestamp?: string
+    eventFilter?: string
+    [key: string]: unknown
+  }
+}
+
+export const evidenceApi = {
+  runQuery: (
+    projectId: string,
+    queryText: string,
+    sourceTypes?: string[],
+    geminiApiKey?: string,
+    openaiApiKey?: string
+  ): Promise<EvidenceQueryResult> =>
+    invokeOrFetch('evidence:runQuery', projectId, queryText, sourceTypes, geminiApiKey, openaiApiKey),
+  runEvidenceQuery: (
+    projectId: string,
+    queryParams: RunEvidenceQueryParams,
+    geminiApiKey?: string,
+    openaiApiKey?: string
+  ): Promise<EvidenceQueryResult> =>
+    invokeOrFetch('evidence:runEvidenceQuery', projectId, queryParams, geminiApiKey, openaiApiKey),
 }
 
