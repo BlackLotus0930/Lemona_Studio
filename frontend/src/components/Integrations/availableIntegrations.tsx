@@ -6,20 +6,21 @@ const LOGO_SIZE = 18
 /** Black SVGs that need invert(1) in dark theme to appear bright */
 const DARK_INVERT_KINDS = new Set(['github', 'linear', 'quickbooks', 'rss'])
 
+/** Use relative paths so icons work in packaged Electron app (file:// protocol). Absolute /integrations/... fails because / resolves to filesystem root. */
 const LOGO_MAP: Record<string, string> = {
-  github: '/integrations/github-svgrepo-com.svg',
-  gitlab: '/integrations/gitlab-svgrepo-com.svg',
-  slack: '/integrations/slack-svgrepo-com.svg',
-  linear: '/integrations/linear-svgrepo-com.svg',
-  stripe: '/integrations/stripe-v2-svgrepo-com.svg',
-  hubspot: '/integrations/hubspot-svgrepo-com.svg',
-  sentry: '/integrations/sentry-svgrepo-com.svg',
-  posthog: '/integrations/posthog-light.svg',
-  'db-schema': '/integrations/database-svgrepo-com.svg',
-  notion: '/integrations/notion-svgrepo-com.svg',
-  quickbooks: '/integrations/brand-quickbooks-svgrepo-com.svg',
-  metabase: '/integrations/metabase-svgrepo-com.svg',
-  rss: '/integrations/rss-svgrepo-com.svg',
+  github: './integrations/github-svgrepo-com.svg',
+  gitlab: './integrations/gitlab-svgrepo-com.svg',
+  slack: './integrations/slack-svgrepo-com.svg',
+  linear: './integrations/linear-svgrepo-com.svg',
+  stripe: './integrations/stripe-v2-svgrepo-com.svg',
+  hubspot: './integrations/hubspot-svgrepo-com.svg',
+  sentry: './integrations/sentry-svgrepo-com.svg',
+  posthog: './integrations/posthog-light.svg',
+  'db-schema': './integrations/database-svgrepo-com.svg',
+  notion: './integrations/notion-svgrepo-com.svg',
+  quickbooks: './integrations/brand-quickbooks-svgrepo-com.svg',
+  metabase: './integrations/metabase-svgrepo-com.svg',
+  rss: './integrations/rss-svgrepo-com.svg',
 }
 
 export function getIntegrationLogoSrc(kind: string): string {

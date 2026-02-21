@@ -869,10 +869,7 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     return Math.abs(hash).toString(36)
   }
 
-  const proposalStatusKeyFromProposal = (proposal: AgentFileProposal): string => {
-    if (proposal.actionId) {
-      return `actionId:${proposal.actionId}`
-    }
+  const proposalSemanticStatusKeyFromProposal = (proposal: AgentFileProposal): string => {
     return JSON.stringify({
       type: proposal.type,
       fileName: proposal.fileName || '',
@@ -881,6 +878,15 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
       oldContent: proposal.patchOldText || '',
       newContent: proposal.patchNewText || '',
     })
+  }
+
+  const proposalStatusKeysFromProposal = (proposal: AgentFileProposal): string[] => {
+    const keys: string[] = []
+    if (proposal.actionId) {
+      keys.push(`actionId:${proposal.actionId}`)
+    }
+    keys.push(`semantic:${proposalSemanticStatusKeyFromProposal(proposal)}`)
+    return keys
   }
 
   const withStableActionIds = (actions: AgentAction[]): AgentAction[] => {
@@ -1120,7 +1126,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
     const nextStatuses: Record<string, 'accepted' | 'rejected'> = {}
     for (const proposal of relatedProposals) {
       if (proposal.status === 'accepted' || proposal.status === 'rejected') {
-        nextStatuses[proposalStatusKeyFromProposal(proposal)] = proposal.status
+        for (const statusKey of proposalStatusKeysFromProposal(proposal)) {
+          nextStatuses[statusKey] = proposal.status
+        }
       }
     }
 
@@ -2243,7 +2251,9 @@ export default function ChatInterface({ documentId, projectId, chatId, documentC
               for (const [messageId, { actions, userContent }] of byMessage) {
                 const restoredStatuses = restoredStatusesByMessage.get(messageId) || {}
                 const restored = createProposalsFromActions(actions, messageId, projectScopedDocs, userContent).map(proposal => {
-                  const restoredStatus = restoredStatuses[proposalStatusKeyFromProposal(proposal)]
+                  const restoredStatus = proposalStatusKeysFromProposal(proposal)
+                    .map(key => restoredStatuses[key])
+                    .find(status => status === 'accepted' || status === 'rejected')
                   if (restoredStatus === 'accepted' || restoredStatus === 'rejected') {
                     return { ...proposal, status: restoredStatus } as AgentFileProposal
                   }
