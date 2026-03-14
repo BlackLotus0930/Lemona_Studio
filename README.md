@@ -8,12 +8,22 @@
 
 [![Website](https://img.shields.io/badge/Website-lemona.studio-2ea043?style=for-the-badge)](https://lemona.studio)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?style=for-the-badge)](https://discord.com/invite/Yp7nuEUmHJ)
-[![Downloads](https://img.shields.io/github/downloads/BlackLotus0930/Lemona_Studio/total?style=for-the-badge)](https://github.com/BlackLotus0930/Lemona_Studio/releases)
+[![Downloads](https://img.shields.io/github/downloads/BlackLotus0930/Lemona_Studio/total?style=for-the-badge)](https://img.shields.io/github/downloads/BlackLotus0930/Lemona-Releases/total)
 
 [Download](#-download) •
 [Features](#-features) •
 [Demo](#-demo) •
 [Website](https://lemona.studio)
+
+</div>
+
+---
+
+## 🎬 Demo
+
+<div align="center">
+
+<video src="https://github.com/BlackLotus0930/Lemona_Studio/raw/main/frontend/src/assets/demo-videos/lemona_demo.mp4" controls width="800"></video>
 
 </div>
 
@@ -30,16 +40,6 @@ The stories we love most feel alive—where every corner and every detail connec
 | **World Laboratory** | Transform disconnected ideas into complete, vivid pictures |
 | **One-Click Import** | Bring your work in from anywhere, take it everywhere |
 | **Version Control** | Never lose a draft, moment, or version of your work again |
-
----
-
-## 🎬 Demo
-
-<div align="center">
-
-<video src="frontend/src/assets/demo-videos/lemona_demo.mp4" controls width="800"></video>
-
-</div>
 
 ---
 
