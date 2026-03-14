@@ -23,7 +23,7 @@
 
 <div align="center">
 
-<video src="https://github.com/BlackLotus0930/Lemona-Studio/raw/main/frontend/src/assets/demo-videos/lemona_demo.mp4" controls width="800"></video>
+<img src="frontend/src/assets/demo-videos/lemona_demo.gif" alt="Lemona demo" width="800" />
 
 </div>
 
@@ -51,7 +51,7 @@ The stories we love most feel alive—where every corner and every detail connec
 
 ### Windows
 
-**[⬇ Download for Windows](https://github.com/BlackLotus0930/Lemona-Studio/releases/latest)**
+**[⬇ Download for Windows](https://github.com/BlackLotus0930/Lemona_Studio/releases/latest)**
 
 <sub>Click "More info" → "Run anyway" if Windows shows a security warning.</sub>
 
@@ -79,7 +79,7 @@ The stories we love most feel alive—where every corner and every detail connec
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to [open an issue](https://github.com/BlackLotus0930/Lemona-Studio/issues) or submit a pull request.
+Contributions are welcome! Please feel free to [open an issue](https://github.com/BlackLotus0930/Lemona_Studio/issues) or submit a pull request.
 
 ---
 
@@ -94,8 +94,8 @@ This project is licensed under the ISC License.
 **Made with ♥ by [Black Lotus](https://lemona.studio)**
 
 [Website](https://lemona.studio) •
-[GitHub](https://github.com/BlackLotus0930/Lemona-Studio) •
+[GitHub](https://github.com/BlackLotus0930/Lemona_Studio) •
 [Discord](https://discord.com/invite/Yp7nuEUmHJ) •
-[Report Issue](https://github.com/BlackLotus0930/Lemona-Studio/issues/new)
+[Report Issue](https://github.com/BlackLotus0930/Lemona_Studio/issues/new)
 
 </div>
