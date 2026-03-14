@@ -28,46 +28,21 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
     },
     {
       type: 'paragraph',
-      content: [{ type: 'text', text: 'Three spaces' }],
+      content: [{ type: 'text', text: "A calm, premium canvas for deep, focused work. Your data stays local. Your ideas stay yours." }],
+    },
+    {
+      type: 'paragraph',
+      content: [{ type: 'text', text: 'Three parts' }],
     },
     {
       type: 'orderedList',
       content: [
-                {
-                  type: 'listItem',
-                  content: [
-                    { 
-                      type: 'paragraph', 
-                      content: [
-                        { type: 'text', text: '🌍 World Lab' }
-                      ] 
-                    },
-                    {
-                      type: 'bulletList',
-                      content: [
-                        {
-                          type: 'listItem',
-                          content: [
-                            { 
-                              type: 'paragraph', 
-                              content: [
-                                { type: 'text', text: 'A canvas for nodes and edges.' }
-                              ] 
-                            },
-                          ],
-                        },
-                      ],
-                    },
-                  ],
-                },
         {
           type: 'listItem',
           content: [
-            { 
-              type: 'paragraph', 
-              content: [
-                { type: 'text', text: '📚 Library' }
-              ] 
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: '📚 Library' }],
             },
             {
               type: 'bulletList',
@@ -75,11 +50,11 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
                 {
                   type: 'listItem',
                   content: [
-                    { 
-                      type: 'paragraph', 
+                    {
+                      type: 'paragraph',
                       content: [
-                        { type: 'text', text: 'Store and organize your reference files (PDF, DOCX, and more).' }
-                      ] 
+                        { type: 'text', text: "Store and organize reference files (PDF, DOCX, and more). They're indexed for AI search and stay in full context." },
+                      ],
                     },
                   ],
                 },
@@ -90,11 +65,9 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
         {
           type: 'listItem',
           content: [
-            { 
-              type: 'paragraph', 
-              content: [
-                { type: 'text', text: '📝 Workspace' }
-              ] 
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: '📝 Workspace' }],
             },
             {
               type: 'bulletList',
@@ -102,11 +75,36 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
                 {
                   type: 'listItem',
                   content: [
-                    { 
-                      type: 'paragraph', 
+                    {
+                      type: 'paragraph',
                       content: [
-                        { type: 'text', text: 'Write and edit your documents. You can also upload DOCX files here to continue working on them.' }
-                      ] 
+                        { type: 'text', text: 'Write and edit your documents. Upload DOCX files here to keep working. Save with Ctrl+S to index and version your work.' },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: '🔌 Integrations' }],
+            },
+            {
+              type: 'bulletList',
+              content: [
+                {
+                  type: 'listItem',
+                  content: [
+                    {
+                      type: 'paragraph',
+                      content: [
+                        { type: 'text', text: 'Connect GitHub, Slack, Notion, Linear, and more for full business context. Configure in Settings.' },
+                      ],
                     },
                   ],
                 },
@@ -136,19 +134,25 @@ const FIRST_PROJECT_WELCOME_CONTENT = {
         {
           type: 'listItem',
           content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Select text to improve or rewrite it' }] },
+            { type: 'paragraph', content: [{ type: 'text', text: 'Select text, then Ctrl+K to improve or rewrite it' }] },
           ],
         },
         {
           type: 'listItem',
           content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Press Ctrl + Shift + E to toggle the file explorer' }] },
+            { type: 'paragraph', content: [{ type: 'text', text: 'Select text, then Ctrl+L to add it to the AI chat' }] },
           ],
         },
         {
           type: 'listItem',
           content: [
-            { type: 'paragraph', content: [{ type: 'text', text: 'Press Ctrl + S to save and index all Workspace files' }] },
+            { type: 'paragraph', content: [{ type: 'text', text: 'Press Ctrl+Shift+E to toggle the file explorer' }] },
+          ],
+        },
+        {
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Press Ctrl+S to save, index, and create a new version' }] },
           ],
         },
       ],
