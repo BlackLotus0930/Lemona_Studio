@@ -25,6 +25,9 @@ const ZOOM_LEVEL_FILE = path.join(app.getPath('userData'), 'zoom-level.json');
 const AGENT_ACTION_BLOCK_NAME = 'lemona-actions';
 const MAX_AGENT_STREAM_BUFFER_CHARS = 240000;
 const MAX_AGENT_STREAM_ACTIONS_PER_RESPONSE = 60;
+function hasUsableKey(value) {
+    return !!(value && value.trim().length > 0);
+}
 function extractActionBlocks(content) {
     if (!content || content.length === 0) {
         return [];
@@ -379,7 +382,7 @@ export function setupIPC() {
             throw error;
         }
     });
-    // Rephrase text uses GPT-5 Nano if only OpenAI key is available, otherwise Gemini 2.5 Flash Lite
+    // Rephrase text follows active chat provider, including custom OpenAI profiles.
     ipcMain.handle('ai:rephraseText', async (_, googleApiKey, openaiApiKey, text, instruction) => {
         try {
             // Explicitly instruct to only return the rephrased text with no follow-up questions or suggestions
@@ -400,12 +403,39 @@ Instruction: ${instruction}
 
 Rewritten text:`;
             let result;
-            // Use GPT-5 Nano if only OpenAI key is available, otherwise use Gemini 2.5 Flash Lite
-            if (openaiApiKey && !googleApiKey) {
+            // Prefer active provider profile so quick-edit matches app-level AI provider selection.
+            const activeProfile = await aiProviderStore.getActiveChatProfile().catch(() => null);
+            if (activeProfile?.type === 'custom-openai') {
+                const apiKey = activeProfile.apiKey || openaiApiKey;
+                if (!hasUsableKey(apiKey)) {
+                    throw new Error('Custom AI provider requires an API key. Please set it in Settings > AI Providers.');
+                }
+                const msg = await openaiService.chat(apiKey, prompt, undefined, undefined, undefined, activeProfile.chatModel || 'gpt-4.1-nano', undefined, undefined, googleApiKey, activeProfile.baseUrl);
+                result = msg.content.trim();
+            }
+            else if (activeProfile?.type === 'builtin-openai') {
+                const apiKey = activeProfile.apiKey || openaiApiKey;
+                if (!hasUsableKey(apiKey)) {
+                    throw new Error('OpenAI API key is required for the active provider. Please set it in Settings > API Keys.');
+                }
+                const msg = await openaiService.chat(apiKey, prompt, undefined, undefined, undefined, activeProfile.chatModel || 'gpt-4.1-nano');
+                result = msg.content.trim();
+            }
+            else if (activeProfile?.type === 'builtin-gemini') {
+                const apiKey = activeProfile.apiKey || googleApiKey;
+                if (!hasUsableKey(apiKey)) {
+                    throw new Error('Google API key is required for the active provider. Please set it in Settings > API Keys.');
+                }
+                const msg = await geminiService.chat(apiKey, prompt, undefined, undefined, undefined, activeProfile.chatModel || 'gemini-2.5-flash-lite');
+                result = msg.content.trim();
+            }
+            else if (openaiApiKey && !googleApiKey) {
+                // Legacy fallback when provider state is unavailable.
                 const msg = await openaiService.chat(openaiApiKey, prompt, undefined, undefined, undefined, 'gpt-4.1-nano');
                 result = msg.content.trim();
             }
             else if (googleApiKey) {
+                // Legacy fallback when provider state is unavailable.
                 const msg = await geminiService.chat(googleApiKey, prompt, undefined, undefined, undefined, 'gemini-2.5-flash-lite');
                 result = msg.content.trim();
             }
