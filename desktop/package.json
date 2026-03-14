@@ -72,7 +72,7 @@
     "publish": {
       "provider": "github",
       "owner": "BlackLotus0930",
-      "repo": "Lemona_Studio",
+      "repo": "Lemona-Studio",
       "releaseType": "release"
     },
     "directories": {

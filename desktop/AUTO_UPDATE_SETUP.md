@@ -217,7 +217,7 @@ npm run dist:linux
     "publish": {
       "provider": "github",
       "owner": "BlackLotus0930",  // 修改为你的 GitHub 用户名
-      "repo": "Lemona_Studio"    // 修改为你的仓库名
+      "repo": "Lemona-Studio"    // 修改为你的仓库名
     }
   }
 }
