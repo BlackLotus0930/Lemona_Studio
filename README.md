@@ -6,21 +6,6 @@
 
 **An integrated writing editor with AI for large worlds.**
 
-[![Website](https://img.shields.io/badge/Website-lemona.studio-2ea043?style=for-the-badge)](https://lemona.studio)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?style=for-the-badge)](https://discord.com/invite/Yp7nuEUmHJ)
-[![Downloads](https://img.shields.io/github/downloads/BlackLotus0930/Lemona_Studio/total?style=for-the-badge)](https://img.shields.io/github/downloads/BlackLotus0930/Lemona-Releases/total)
-
-[Download](#-download) •
-[Features](#-features) •
-[Demo](#-demo) •
-[Website](https://lemona.studio)
-
-</div>
-
----
-
-## 🎬 Demo
-
 <div align="center">
 
 <img src="frontend/src/assets/demo-videos/lemona_demo.gif" alt="Lemona demo" width="800" />
