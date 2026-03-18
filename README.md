@@ -2,7 +2,7 @@
 
 <img src="frontend/public/lemonalogo.png" alt="Lemona" width="120" />
 
-# Lemona
+# Lemona Studio
 
 **An integrated writing editor with AI for large worlds.**
 
@@ -16,7 +16,7 @@
 
 ## ✨ Features
 
-The stories we love most feel alive—where every corner and every detail connects. Lemona exists to help creators grow endless worlds, alive with detail.
+The stories we love most feel alive, where every corner and every detail connects.
 
 | Feature | Description |
 |---------|-------------|
@@ -70,7 +70,7 @@ Contributions are welcome! Please feel free to [open an issue](https://github.co
 
 ## 📄 License
 
-This project is licensed under the ISC License.
+This project is licensed under the MIT License.
 
 ---
 
